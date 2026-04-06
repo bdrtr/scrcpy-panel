@@ -1,0 +1,55 @@
+﻿.\target\debug\scrcpyrust.exe : [2026-04-03T22:53:56.308Z INFO  
+scrcpyrust] scrcpyrust 0.1.0 ΓÇö Rust scrcpy client
+At line:1 char:62
++ ... ST_LOG="debug"; .\target\debug\scrcpyrust.exe --no-audio 2>&1 | 
+Out-F ...
++                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([2026-04-03T22:...t scrcpy 
+    client:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[2026-04-03T22:53:56.308Z DEBUG scrcpyrust::adb::commands] adb devices
+[2026-04-03T22:53:56.325Z INFO  scrcpyrust] Using device: R5CN2171DFN
+[2026-04-03T22:53:56.325Z INFO  scrcpyrust] Server: 
+E:\projects1\scrcpyrust\target\debug\scrcpy-server
+[2026-04-03T22:53:56.325Z INFO  scrcpyrust::adb::commands] Pushing 
+E:\projects1\scrcpyrust\target\debug\scrcpy-server to 
+/data/local/tmp/scrcpy-server.jar...
+[2026-04-03T22:53:56.325Z DEBUG scrcpyrust::adb::commands] adb -s 
+R5CN2171DFN push E:\projects1\scrcpyrust\target\debug\scrcpy-server 
+/data/local/tmp/scrcpy-server.jar
+[2026-04-03T22:53:56.357Z DEBUG scrcpyrust::adb::commands] adb reverse 
+localabstract:scrcpy_1547d168 tcp:27183
+[2026-04-03T22:53:56.357Z DEBUG scrcpyrust::adb::commands] adb -s 
+R5CN2171DFN reverse localabstract:scrcpy_1547d168 tcp:27183
+[2026-04-03T22:53:56.374Z INFO  scrcpyrust::adb::tunnel] Listening on 
+port 27183 (reverse)
+[2026-04-03T22:53:56.374Z DEBUG scrcpyrust::server::connection] Bound 
+listener on 127.0.0.1:27183
+[2026-04-03T22:53:56.374Z INFO  scrcpyrust] Starting scrcpy server...
+[2026-04-03T22:53:56.375Z DEBUG scrcpyrust::adb::commands] adb -s 
+R5CN2171DFN shell CLASSPATH=/data/local/tmp/scrcpy-server.jar 
+app_process / com.genymobile.scrcpy.Server 3.3.4 scid=1547d168 
+log_level=info tunnel_forward=false video_codec=h264 
+video_bit_rate=8000000 audio=false
+[2026-04-03T22:53:56.376Z INFO  scrcpyrust] Connecting to server...
+[2026-04-03T22:53:56.376Z DEBUG scrcpyrust::server::connection] Waiting 
+for server connection 1/2...
+[server] INFO: Device: [samsung] samsung SM-G986U (Android 13)
+[2026-04-03T22:53:56.727Z DEBUG scrcpyrust::server::connection] 
+Accepted connection 1/2
+[2026-04-03T22:53:56.727Z DEBUG scrcpyrust::server::connection] Waiting 
+for server connection 2/2...
+[2026-04-03T22:53:56.728Z DEBUG scrcpyrust::server::connection] 
+Accepted connection 2/2
+[2026-04-03T22:53:56.728Z INFO  scrcpyrust::server::connection] Device: 
+SM-G986U
+[2026-04-03T22:53:56.762Z INFO  scrcpyrust::media::demuxer] Video: H264 
+1080x2400
+[2026-04-03T22:53:56.833Z INFO  scrcpyrust] Entering event loop...
+[2026-04-03T22:53:56.834Z INFO  scrcpyrust::media::decoder] Video 
+decoder: H264
+[2026-04-03T22:55:17.127Z INFO  scrcpyrust::display::screen] Frame size 
+changed: 1080x2400 ΓåÆ 2400x1080
+[2026-04-03T22:55:38.443Z INFO  scrcpyrust::display::screen] Frame size 
+changed: 2400x1080 ΓåÆ 1080x2400

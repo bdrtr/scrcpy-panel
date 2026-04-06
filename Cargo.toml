@@ -1,0 +1,22 @@
+[package]
+name = "scrcpyrust"
+version = "0.1.0"
+edition = "2021"
+description = "A Rust implementation of scrcpy client — mirror Android devices on your computer"
+license = "Apache-2.0"
+
+[dependencies]
+sdl2 = "0.37"
+ffmpeg-next = "8"
+ffmpeg-sys-next = "8"
+clap = { version = "4", features = ["derive", "env"] }
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+crossbeam-channel = "0.5"
+byteorder = "1"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = 3

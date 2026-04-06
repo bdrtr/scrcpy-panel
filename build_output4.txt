@@ -1,0 +1,246 @@
+﻿cargo :    Compiling clang-sys v1.8.1
+At line:1 char:193
++ ... :PATH; Set-Location e:\projects1\scrcpyrust; cargo build 
+2>&1 | Out-F ...
++                                                  ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling 
+clang-sys v1.    8.1:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling clap_builder v4.6.0
+   Compiling scrcpyrust v0.1.0 (E:\projects1\scrcpyrust)
+   Compiling bindgen v0.72.1
+   Compiling clap v4.6.0
+   Compiling ffmpeg-sys-next v8.1.0
+   Compiling ffmpeg-next v8.1.0
+warning: unused variable: `tunnel_port`
+ --> src\server\params.rs:4:53
+  |
+4 | pub fn build_server_args(opts: &Options, scid: u32, 
+tunnel_port: u16) -> Vec<String> {
+  |                                                     
+^^^^^^^^^^^ help: if this is intentional, prefix it with an 
+underscore: `_tunnel_port`
+  |
+  = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) 
+on by default
+
+warning: function `run_serial` is never used
+  --> src\adb\commands.rs:42:8
+   |
+42 | pub fn run_serial(serial: &str, args: &[&str]) -> 
+Result<Output> {
+   |        ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by 
+default
+
+warning: constant `MSG_GET_CLIPBOARD` is never used
+  --> src\control\control_msg.rs:13:11
+   |
+13 | pub const MSG_GET_CLIPBOARD: u8 = 8;
+   |           ^^^^^^^^^^^^^^^^^
+
+warning: constant `MSG_SET_CLIPBOARD` is never used
+  --> src\control\control_msg.rs:14:11
+   |
+14 | pub const MSG_SET_CLIPBOARD: u8 = 9;
+   |           ^^^^^^^^^^^^^^^^^
+
+warning: constant `POINTER_ID_FINGER` is never used
+  --> src\control\control_msg.rs:29:11
+   |
+29 | pub const POINTER_ID_FINGER: u64 = u64::MAX - 1;   // -2 as 
+unsigned
+   |           ^^^^^^^^^^^^^^^^^
+
+warning: variant `InjectText` is never constructed
+  --> src\control\control_msg.rs:40:5
+   |
+33 | pub enum ControlMsg {
+   |          ---------- variant in this enum
+...
+40 |     InjectText {
+   |     ^^^^^^^^^^
+   |
+   = note: `ControlMsg` has derived impls for the traits `Clone` 
+and `Debug`, but these are intentionally ignored during dead code 
+analysis
+
+warning: constant `DEVICE_MSG_CLIPBOARD` is never used
+ --> src\control\device_msg.rs:5:11
+  |
+5 | pub const DEVICE_MSG_CLIPBOARD: u8 = 0;
+  |           ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `DEVICE_MSG_ACK_CLIPBOARD` is never used
+ --> src\control\device_msg.rs:6:11
+  |
+6 | pub const DEVICE_MSG_ACK_CLIPBOARD: u8 = 1;
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `DEVICE_MSG_UHID_OUTPUT` is never used
+ --> src\control\device_msg.rs:7:11
+  |
+7 | pub const DEVICE_MSG_UHID_OUTPUT: u8 = 2;
+  |           ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `DeviceMsg` is never used
+  --> src\control\device_msg.rs:11:10
+   |
+11 | pub enum DeviceMsg {
+   |          ^^^^^^^^^
+
+warning: function `read_device_msg` is never used
+  --> src\control\device_msg.rs:17:8
+   |
+17 | pub fn read_device_msg<R: Read>(reader: &mut R) -> 
+std::io::Result<DeviceMsg> {
+   |        ^^^^^^^^^^^^^^^
+
+warning: field `thread` is never read
+  --> src\control\controller.rs:14:5
+   |
+12 | pub struct Controller {
+   |            ---------- field in this struct
+13 |     sender: Option<Sender<ControlMsg>>,
+14 |     thread: Option<thread::JoinHandle<()>>,
+   |     ^^^^^^
+
+warning: method `join` is never used
+  --> src\control\controller.rs:55:12
+   |
+17 | impl Controller {
+   | --------------- method in this implementation
+...
+55 |     pub fn join(&mut self) {
+   |            ^^^^
+
+warning: method `is_started` is never used
+  --> src\display\fps_counter.rs:31:12
+   |
+10 | impl FpsCounter {
+   | --------------- method in this implementation
+...
+31 |     pub fn is_started(&self) -> bool {
+   |            ^^^^^^^^^^
+
+warning: method `update_frame_size` is never used
+  --> src\input\manager.rs:26:12
+   |
+17 | impl InputManager {
+   | ----------------- method in this implementation
+...
+26 |     pub fn update_frame_size(&mut self, w: u32, h: u32) {
+   |            ^^^^^^^^^^^^^^^^^
+
+warning: constant `AKEYCODE_BACK` is never used
+ --> src\input\shortcuts.rs:5:11
+  |
+5 | pub const AKEYCODE_BACK: u32 = 4;
+  |           ^^^^^^^^^^^^^
+
+warning: variant `ExpandSettings` is never constructed
+  --> src\input\shortcuts.rs:25:5
+   |
+13 | pub enum ShortcutAction {
+   |          -------------- variant in this enum
+...
+25 |     ExpandSettings,
+   |     ^^^^^^^^^^^^^^
+
+warning: method `is_video` is never used
+  --> src\media\demuxer.rs:36:12
+   |
+35 | impl CodecType {
+   | -------------- method in this implementation
+36 |     pub fn is_video(&self) -> bool {
+   |            ^^^^^^^^
+
+warning: struct `AudioInfo` is never constructed
+  --> src\media\demuxer.rs:60:12
+   |
+60 | pub struct AudioInfo {
+   |            ^^^^^^^^^
+
+warning: function `read_audio_header` is never used
+   --> src\media\demuxer.rs:106:8
+    |
+106 | pub fn read_audio_header(stream: &mut TcpStream) -> 
+Result<Option<AudioInfo>> {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: method `flush` is never used
+   --> src\media\decoder.rs:145:12
+    |
+ 20 | impl VideoDecoder {
+    | ----------------- method in this implementation
+...
+145 |     pub fn flush(&mut self) -> Result<Vec<DecodedFrame>> {
+    |            ^^^^^
+
+warning: function `read_u16be` is never used
+ --> src\util\binary.rs:5:8
+  |
+5 | pub fn read_u16be<R: Read>(r: &mut R) -> io::Result<u16> {
+  |        ^^^^^^^^^^
+
+warning: function `read_u32be` is never used
+  --> src\util\binary.rs:10:8
+   |
+10 | pub fn read_u32be<R: Read>(r: &mut R) -> io::Result<u32> {
+   |        ^^^^^^^^^^
+
+warning: function `read_u64be` is never used
+  --> src\util\binary.rs:15:8
+   |
+15 | pub fn read_u64be<R: Read>(r: &mut R) -> io::Result<u64> {
+   |        ^^^^^^^^^^
+
+warning: function `write_u16be` is never used
+  --> src\util\binary.rs:20:8
+   |
+20 | pub fn write_u16be<W: Write>(w: &mut W, val: u16) -> 
+io::Result<()> {
+   |        ^^^^^^^^^^^
+
+warning: function `write_u32be` is never used
+  --> src\util\binary.rs:25:8
+   |
+25 | pub fn write_u32be<W: Write>(w: &mut W, val: u32) -> 
+io::Result<()> {
+   |        ^^^^^^^^^^^
+
+warning: function `write_u64be` is never used
+  --> src\util\binary.rs:30:8
+   |
+30 | pub fn write_u64be<W: Write>(w: &mut W, val: u64) -> 
+io::Result<()> {
+   |        ^^^^^^^^^^^
+
+warning: function `recv_all` is never used
+ --> src\util\net.rs:6:8
+  |
+6 | pub fn recv_all(stream: &mut TcpStream, buf: &mut [u8]) -> 
+io::Result<()> {
+  |        ^^^^^^^^
+
+warning: function `send_all` is never used
+  --> src\util\net.rs:19:8
+   |
+19 | pub fn send_all(stream: &mut TcpStream, buf: &[u8]) -> 
+io::Result<()> {
+   |        ^^^^^^^^
+
+warning: function `connect_with_retry` is never used
+  --> src\util\net.rs:24:8
+   |
+24 | pub fn connect_with_retry(port: u16, attempts: u32, delay: 
+Duration) -> io::Result<TcpStream> {
+   |        ^^^^^^^^^^^^^^^^^^
+
+warning: `scrcpyrust` (bin "scrcpyrust") generated 30 warnings 
+(run `cargo fix --bin "scrcpyrust" -p scrcpyrust` to apply 1 
+suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 
+9.49s

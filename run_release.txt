@@ -1,0 +1,28 @@
+﻿.\target\release\scrcpyrust.exe : [2026-04-03T23:04:04.335Z INFO  
+scrcpyrust] scrcpyrust 0.1.0 ΓÇö Rust scrcpy client
+At line:1 char:61
++ ... T_LOG="info"; .\target\release\scrcpyrust.exe --no-audio 2>&1 | 
+Out-F ...
++                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([2026-04-03T23:...t scrcpy 
+    client:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[2026-04-03T23:04:04.353Z INFO  scrcpyrust] Using device: R5CN2171DFN
+[2026-04-03T23:04:04.354Z INFO  scrcpyrust] Server: 
+E:\projects1\scrcpyrust\target\release\scrcpy-server
+[2026-04-03T23:04:04.354Z INFO  scrcpyrust::adb::commands] Pushing 
+E:\projects1\scrcpyrust\target\release\scrcpy-server to 
+/data/local/tmp/scrcpy-server.jar...
+[2026-04-03T23:04:04.397Z INFO  scrcpyrust::adb::tunnel] Listening on 
+port 27183 (reverse)
+[2026-04-03T23:04:04.397Z INFO  scrcpyrust] Starting scrcpy server...
+[2026-04-03T23:04:04.399Z INFO  scrcpyrust] Connecting to server...
+[server] INFO: Device: [samsung] samsung SM-G986U (Android 13)
+[2026-04-03T23:04:04.752Z INFO  scrcpyrust::server::connection] Device: 
+SM-G986U
+[2026-04-03T23:04:04.823Z INFO  scrcpyrust::media::demuxer] Video: H264 
+1080x2400
+[2026-04-03T23:04:04.886Z INFO  scrcpyrust] Entering event loop...
+[2026-04-03T23:04:04.887Z INFO  scrcpyrust::media::decoder] Video 
+decoder: H264

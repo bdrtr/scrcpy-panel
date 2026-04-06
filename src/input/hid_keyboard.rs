@@ -1,0 +1,182 @@
+//! HID Keyboard — generates USB HID reports from SDL key events.
+//!
+//! Ported from scrcpy's `hid/hid_keyboard.c`. Creates a virtual keyboard on
+//! the Android device via UHID, sending 8-byte HID input reports:
+//!   byte 0: modifier flags
+//!   byte 1: reserved (0)
+//!   bytes 2-7: up to 6 currently-pressed scancodes
+
+use sdl2::keyboard::{Mod, Scancode};
+use crate::control::control_msg::ControlMsg;
+use crate::control::controller::Controller;
+
+/// HID device ID for the keyboard
+pub const HID_ID_KEYBOARD: u16 = 1;
+
+/// Max simultaneously pressed keys in a HID report
+const MAX_KEYS: usize = 6;
+/// Total number of tracked key slots (scancodes 0x00..0x65)
+const NUM_KEYS: usize = 0x66;
+/// HID report size: 1 modifier + 1 reserved + 6 keys
+const REPORT_SIZE: usize = 2 + MAX_KEYS;
+
+// HID modifier bit flags
+const MOD_LEFT_CTRL: u8   = 1 << 0;
+const MOD_LEFT_SHIFT: u8  = 1 << 1;
+const MOD_LEFT_ALT: u8    = 1 << 2;
+const MOD_LEFT_GUI: u8    = 1 << 3;
+const MOD_RIGHT_CTRL: u8  = 1 << 4;
+const MOD_RIGHT_SHIFT: u8 = 1 << 5;
+const MOD_RIGHT_ALT: u8   = 1 << 6;
+const MOD_RIGHT_GUI: u8   = 1 << 7;
+
+/// USB HID Keyboard Report Descriptor (standard boot protocol keyboard)
+/// Matches scrcpy's SC_HID_KEYBOARD_REPORT_DESC exactly.
+static REPORT_DESC: &[u8] = &[
+    0x05, 0x01, // Usage Page (Generic Desktop)
+    0x09, 0x06, // Usage (Keyboard)
+    0xA1, 0x01, // Collection (Application)
+    0x05, 0x07, // Usage Page (Key Codes)
+    0x19, 0xE0, // Usage Minimum (224)
+    0x29, 0xE7, // Usage Maximum (231)
+    0x15, 0x00, // Logical Minimum (0)
+    0x25, 0x01, // Logical Maximum (1)
+    0x75, 0x01, // Report Size (1)
+    0x95, 0x08, // Report Count (8)
+    0x81, 0x02, // Input (Data, Variable, Absolute): modifier byte
+    0x75, 0x08, // Report Size (8)
+    0x95, 0x01, // Report Count (1)
+    0x81, 0x01, // Input (Constant): reserved byte
+    0x05, 0x08, // Usage Page (LEDs)
+    0x19, 0x01, // Usage Minimum (1)
+    0x29, 0x05, // Usage Maximum (5)
+    0x75, 0x01, // Report Size (1)
+    0x95, 0x05, // Report Count (5)
+    0x91, 0x02, // Output (Data, Variable, Absolute): LED report
+    0x75, 0x03, // Report Size (3)
+    0x95, 0x01, // Report Count (1)
+    0x91, 0x01, // Output (Constant): LED report padding
+    0x05, 0x07, // Usage Page (Key Codes)
+    0x19, 0x00, // Usage Minimum (0)
+    0x29, 0x65, // Usage Maximum (101)
+    0x15, 0x00, // Logical Minimum (0)
+    0x25, 0x65, // Logical Maximum (101)
+    0x75, 0x08, // Report Size (8)
+    0x95, 0x06, // Report Count (6)
+    0x81, 0x00, // Input (Data, Array): keys
+    0xC0,       // End Collection
+];
+
+/// Tracks pressed keys and generates HID reports
+pub struct HidKeyboard {
+    keys: [bool; NUM_KEYS],
+}
+
+impl HidKeyboard {
+    pub fn new() -> Self {
+        Self {
+            keys: [false; NUM_KEYS],
+        }
+    }
+
+    /// Send UHID_CREATE to register the virtual keyboard on the device
+    pub fn open(&self, controller: &Controller) {
+        controller.push_msg(ControlMsg::UhidCreate {
+            id: HID_ID_KEYBOARD,
+            vendor_id: 0,
+            product_id: 0,
+            name: None,
+            report_desc: REPORT_DESC.to_vec(),
+        });
+        log::info!("UHID keyboard created (id={})", HID_ID_KEYBOARD);
+    }
+
+    /// Send UHID_DESTROY to remove the virtual keyboard
+    pub fn close(&self, controller: &Controller) {
+        controller.push_msg(ControlMsg::UhidDestroy {
+            id: HID_ID_KEYBOARD,
+        });
+        log::info!("UHID keyboard destroyed");
+    }
+
+    /// Process an SDL key event and send the resulting HID report.
+    /// Returns true if the event was handled, false if it should be ignored.
+    pub fn process_key(
+        &mut self,
+        scancode: Scancode,
+        pressed: bool,
+        mods: Mod,
+        controller: &Controller,
+    ) -> bool {
+        let hid_scancode = sdl_scancode_to_hid(scancode);
+
+        // Modifier keys (0xE0-0xE7) are handled via the modifier byte,
+        // not the key array. But we still need to send a report.
+        let is_modifier = hid_scancode >= 0xE0 && hid_scancode <= 0xE7;
+
+        if !is_modifier {
+            if hid_scancode >= NUM_KEYS as u8 {
+                // Unsupported scancode
+                return false;
+            }
+            self.keys[hid_scancode as usize] = pressed;
+        }
+
+        // Build the 8-byte HID report
+        let mut report = [0u8; REPORT_SIZE];
+
+        // Byte 0: modifier flags from current SDL mod state
+        report[0] = sdl_mod_to_hid_mod(mods);
+
+        // Byte 1: reserved
+        report[1] = 0;
+
+        // Bytes 2-7: currently pressed keys
+        let mut count = 0;
+        for i in 0..NUM_KEYS {
+            if self.keys[i] {
+                if count >= MAX_KEYS {
+                    // Phantom state: too many keys pressed
+                    for j in 2..REPORT_SIZE {
+                        report[j] = 0x01; // Error Roll Over
+                    }
+                    count = MAX_KEYS;
+                    break;
+                }
+                report[2 + count] = i as u8;
+                count += 1;
+            }
+        }
+
+        // Send UHID_INPUT
+        controller.push_msg(ControlMsg::UhidInput {
+            id: HID_ID_KEYBOARD,
+            data: report.to_vec(),
+        });
+
+        true
+    }
+}
+
+/// Convert SDL modifier state to HID modifier byte
+fn sdl_mod_to_hid_mod(mods: Mod) -> u8 {
+    let mut hid = 0u8;
+    if mods.contains(Mod::LCTRLMOD)  { hid |= MOD_LEFT_CTRL; }
+    if mods.contains(Mod::LSHIFTMOD) { hid |= MOD_LEFT_SHIFT; }
+    if mods.contains(Mod::LALTMOD)   { hid |= MOD_LEFT_ALT; }
+    if mods.contains(Mod::LGUIMOD)   { hid |= MOD_LEFT_GUI; }
+    if mods.contains(Mod::RCTRLMOD)  { hid |= MOD_RIGHT_CTRL; }
+    if mods.contains(Mod::RSHIFTMOD) { hid |= MOD_RIGHT_SHIFT; }
+    if mods.contains(Mod::RALTMOD)   { hid |= MOD_RIGHT_ALT; }
+    if mods.contains(Mod::RGUIMOD)   { hid |= MOD_RIGHT_GUI; }
+    hid
+}
+
+/// Convert SDL scancode to USB HID scancode.
+/// SDL scancodes are based on USB HID usage tables, so the mapping is
+/// mostly identity for the standard keys.
+fn sdl_scancode_to_hid(sc: Scancode) -> u8 {
+    // SDL scancodes map 1:1 to USB HID for standard keys (A=4, B=5, etc.)
+    // The SDL_Scancode enum values match USB HID usage IDs.
+    sc as u8
+}

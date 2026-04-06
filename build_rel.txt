@@ -1,0 +1,104 @@
+﻿cargo :    Compiling scrcpyrust v0.1.0 (E:\projects1\scrcpyrust)
+At line:1 char:193
++ ... -Location e:\projects1\scrcpyrust; cargo build --release 2>&1 | 
+Out-F ...
++                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling sc...ts1\scrc 
+   pyrust):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+warning: unused import: `std::time::Duration`
+  --> src\main.rs:15:5
+   |
+15 | use std::time::Duration;
+   |     ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by 
+default
+
+error[E0502]: cannot borrow `self.canvas` as immutable because it is 
+also borrowed as mutable
+   --> src\display\screen.rs:156:34
+    |
+146 |         if let Some(texture) = self.get_texture() {
+    |                                ---- mutable borrow occurs here
+...
+156 |             let (win_w, win_h) = self.canvas.output_size()
+    |                                  ^^^^^^^^^^^ immutable borrow 
+occurs here
+...
+163 |             self.canvas.copy(texture, None, Some(dst_rect))
+    |                              ------- mutable borrow later used 
+here
+
+error[E0503]: cannot use `self.frame_width` because it was mutably 
+borrowed
+   --> src\display\screen.rs:159:31
+    |
+146 |         if let Some(texture) = self.get_texture() {
+    |                                ---- `*self` is borrowed here
+...
+159 |                 win_w, win_h, self.frame_width, self.frame_height,
+    |                               ^^^^^^^^^^^^^^^^ use of borrowed 
+`*self`
+...
+163 |             self.canvas.copy(texture, None, Some(dst_rect))
+    |                              ------- borrow later used here
+
+error[E0503]: cannot use `self.frame_height` because it was mutably 
+borrowed
+   --> src\display\screen.rs:159:49
+    |
+146 |         if let Some(texture) = self.get_texture() {
+    |                                ---- `*self` is borrowed here
+...
+159 |                 win_w, win_h, self.frame_width, self.frame_height,
+    |                                                 ^^^^^^^^^^^^^^^^^ 
+use of borrowed `*self`
+...
+163 |             self.canvas.copy(texture, None, Some(dst_rect))
+    |                              ------- borrow later used here
+
+error[E0499]: cannot borrow `self.canvas` as mutable more than once at 
+a time
+   --> src\display\screen.rs:162:13
+    |
+146 |         if let Some(texture) = self.get_texture() {
+    |                                ---- first mutable borrow occurs 
+here
+...
+162 |             self.canvas.clear();
+    |             ^^^^^^^^^^^ second mutable borrow occurs here
+163 |             self.canvas.copy(texture, None, Some(dst_rect))
+    |                              ------- first borrow later used here
+
+error[E0499]: cannot borrow `self.canvas` as mutable more than once at 
+a time
+   --> src\display\screen.rs:163:13
+    |
+146 |         if let Some(texture) = self.get_texture() {
+    |                                ---- first mutable borrow occurs 
+here
+...
+163 |             self.canvas.copy(texture, None, Some(dst_rect))
+    |             ^^^^^^^^^^^      ------- first borrow later used here
+    |             |
+    |             second mutable borrow occurs here
+
+warning: unused variable: `tunnel_port`
+ --> src\server\params.rs:4:53
+  |
+4 | pub fn build_server_args(opts: &Options, scid: u32, tunnel_port: 
+u16) -> Vec<String> {
+  |                                                     ^^^^^^^^^^^ 
+help: if this is intentional, prefix it with an underscore: 
+`_tunnel_port`
+  |
+  = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by 
+default
+
+Some errors have detailed explanations: E0499, E0502, E0503.
+For more information about an error, try `rustc --explain E0499`.
+warning: `scrcpyrust` (bin "scrcpyrust") generated 2 warnings
+error: could not compile `scrcpyrust` (bin "scrcpyrust") due to 5 
+previous errors; 2 warnings emitted

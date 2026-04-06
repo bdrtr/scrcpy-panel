@@ -1,0 +1,116 @@
+﻿.\target\release\scrcpyrust.exe : [2026-04-03T23:38:13.031Z INFO  
+scrcpyrust] scrcpyrust 0.1.0 ΓÇö Rust scrcpy client
+At line:1 char:61
++ ... LOG="info"; .\target\release\scrcpyrust.exe --no-audio 
+--print-fps 2> ...
++                 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([2026-04-03T23:...t scrcpy 
+    client:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[2026-04-03T23:38:13.048Z INFO  scrcpyrust] Using device: R5CN2171DFN
+[2026-04-03T23:38:13.048Z INFO  scrcpyrust] Server: 
+E:\projects1\scrcpyrust\target\release\scrcpy-server
+[2026-04-03T23:38:13.048Z INFO  scrcpyrust::adb::commands] Pushing 
+E:\projects1\scrcpyrust\target\release\scrcpy-server to 
+/data/local/tmp/scrcpy-server.jar...
+[2026-04-03T23:38:13.103Z INFO  scrcpyrust::adb::tunnel] Listening on 
+port 27183 (reverse)
+[2026-04-03T23:38:13.104Z INFO  scrcpyrust] Starting scrcpy server...
+[2026-04-03T23:38:13.106Z INFO  scrcpyrust] Connecting to server...
+[server] INFO: Device: [samsung] samsung SM-G986U (Android 13)
+[2026-04-03T23:38:13.458Z INFO  scrcpyrust::server::connection] Device: 
+SM-G986U
+[2026-04-03T23:38:13.518Z INFO  scrcpyrust::media::demuxer] Video: H264 
+1080x2400
+[2026-04-03T23:38:13.589Z INFO  scrcpyrust::display::fps_counter] FPS 
+counter started
+[2026-04-03T23:38:13.589Z INFO  scrcpyrust] Entering event loop...
+[2026-04-03T23:38:13.589Z INFO  scrcpyrust::media::decoder] Video 
+decoder: H264
+[2026-04-03T23:38:14.630Z INFO  scrcpyrust::display::fps_counter] 10.6 
+fps
+[2026-04-03T23:38:21.278Z INFO  scrcpyrust::display::fps_counter] 0.2 
+fps
+[2026-04-03T23:38:22.284Z INFO  scrcpyrust::display::fps_counter] 9.9 
+fps
+[2026-04-03T23:38:24.381Z INFO  scrcpyrust::display::fps_counter] 0.5 
+fps
+[2026-04-03T23:38:25.391Z INFO  scrcpyrust::display::fps_counter] 9.9 
+fps
+[2026-04-03T23:38:27.497Z INFO  scrcpyrust::display::fps_counter] 0.5 
+fps
+[2026-04-03T23:38:28.506Z INFO  scrcpyrust::display::fps_counter] 9.9 
+fps
+[2026-04-03T23:38:30.604Z INFO  scrcpyrust::display::fps_counter] 0.5 
+fps
+[2026-04-03T23:38:49.181Z INFO  scrcpyrust::display::fps_counter] 0.6 
+fps
+[2026-04-03T23:38:50.184Z INFO  scrcpyrust::display::fps_counter] 10.0 
+fps
+[2026-04-03T23:39:01.603Z INFO  scrcpyrust::display::fps_counter] 0.1 
+fps
+[2026-04-03T23:39:02.606Z INFO  scrcpyrust::display::fps_counter] 10.0 
+fps
+[2026-04-03T23:39:03.672Z INFO  scrcpyrust::display::fps_counter] 5.6 
+fps
+[2026-04-03T23:39:51.302Z INFO  scrcpyrust::display::fps_counter] 0.1 
+fps
+[2026-04-03T23:39:52.302Z INFO  scrcpyrust::display::fps_counter] 10.0 
+fps
+[2026-04-03T23:39:57.521Z INFO  scrcpyrust::display::fps_counter] 0.2 
+fps
+[2026-04-03T23:39:58.522Z INFO  scrcpyrust::display::fps_counter] 10.0 
+fps
+[2026-04-03T23:40:03.189Z INFO  scrcpyrust::display::fps_counter] 0.2 
+fps
+[2026-04-03T23:40:04.190Z INFO  scrcpyrust::display::fps_counter] 10.0 
+fps
+[2026-04-03T23:40:13.035Z INFO  scrcpyrust::display::fps_counter] 0.1 
+fps
+[2026-04-03T23:40:14.042Z INFO  scrcpyrust::display::fps_counter] 9.9 
+fps
+[2026-04-03T23:40:16.143Z INFO  scrcpyrust::display::fps_counter] 0.5 
+fps
+[2026-04-03T23:40:17.151Z INFO  scrcpyrust::display::fps_counter] 9.9 
+fps
+[2026-04-03T23:40:22.252Z INFO  scrcpyrust::display::fps_counter] 0.2 
+fps
+[2026-04-03T23:40:23.266Z INFO  scrcpyrust::display::fps_counter] 9.9 
+fps
+[2026-04-03T23:40:24.271Z INFO  scrcpyrust::display::fps_counter] 34.8 
+fps
+[2026-04-03T23:40:25.329Z INFO  scrcpyrust::display::fps_counter] 40.6 
+fps
+[2026-04-03T23:40:26.343Z INFO  scrcpyrust::display::fps_counter] 37.5 
+fps
+[2026-04-03T23:40:27.351Z INFO  scrcpyrust::display::fps_counter] 45.6 
+fps
+[2026-04-03T23:40:28.352Z INFO  scrcpyrust::display::fps_counter] 59.0 
+fps
+[2026-04-03T23:40:29.361Z INFO  scrcpyrust::display::fps_counter] 60.5 
+fps
+[2026-04-03T23:40:30.373Z INFO  scrcpyrust::display::fps_counter] 59.3 
+fps
+[2026-04-03T23:40:31.392Z INFO  scrcpyrust::display::fps_counter] 59.9 
+fps
+[2026-04-03T23:40:32.401Z INFO  scrcpyrust::display::fps_counter] 58.5 
+fps
+[2026-04-03T23:40:33.415Z INFO  scrcpyrust::display::fps_counter] 27.6 
+fps
+[2026-04-03T23:40:34.439Z INFO  scrcpyrust::display::fps_counter] 46.9 
+fps
+[2026-04-03T23:40:35.499Z INFO  scrcpyrust::display::fps_counter] 50.0 
+fps
+[2026-04-03T23:40:37.226Z INFO  scrcpyrust::display::fps_counter] 5.8 
+fps
+[2026-04-03T23:40:38.248Z INFO  scrcpyrust::display::fps_counter] 43.1 
+fps
+[2026-04-03T23:40:39.257Z INFO  scrcpyrust::display::fps_counter] 59.5 
+fps
+[2026-04-03T23:40:40.260Z INFO  scrcpyrust::display::fps_counter] 54.8 
+fps
+[2026-04-03T23:40:40.991Z INFO  scrcpyrust] Shutting down...
+[2026-04-03T23:40:40.996Z INFO  scrcpyrust] End of video stream
+[2026-04-03T23:40:41.037Z INFO  scrcpyrust] Done.

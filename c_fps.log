@@ -1,0 +1,21 @@
+scrcpy 3.3.4 <https://github.com/Genymobile/scrcpy>
+INFO: ADB device found:
+INFO:     -->   (usb)  R5CN2171DFN                     device  SM_G986U
+[server] INFO: Device: [samsung] samsung SM-G986U (Android 13)
+INFO: Renderer: direct3d
+INFO: Texture: 1080x2400
+INFO: FPS counter started
+INFO: 13 fps
+INFO: 12 fps
+INFO: 3 fps
+INFO: 6 fps
+INFO: 5 fps
+INFO: 0 fps
+INFO: 5 fps
+INFO: 6 fps
+INFO: 0 fps
+INFO: 0 fps
+INFO: 0 fps
+INFO: 0 fps
+INFO: 0 fps
+INFO: 6 fps
