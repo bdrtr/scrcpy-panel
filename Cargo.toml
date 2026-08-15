@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "A Rust scrcpy client with a Slint user interface — mirror and control Android devices"
 license = "Apache-2.0"
-repository = "https://github.com/bdrtr/scrcpy-slint"
+repository = "https://github.com/bdrtr/scrcpy-panel"
 
 [dependencies]
 sdl2 = "0.37"

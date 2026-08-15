@@ -20,8 +20,12 @@ instead of scrcpy's SDL window plus command-line flags.
 
 ## Provenance
 
-This is a fork of [naaceer-del/ScrcpyRUST](https://github.com/naaceer-del/ScrcpyRUST)
-(Apache-2.0), which is itself a Rust reimplementation of the scrcpy client. Upstream is a
+This project started as a fork of
+[naaceer-del/ScrcpyRUST](https://github.com/naaceer-del/ScrcpyRUST) (Apache-2.0), a Rust
+reimplementation of the scrcpy client. It now lives on its own — the Slint interface, the
+4.1 protocol and the control panel are new — but the client skeleton came from there. The
+fork it grew out of is kept at
+[bdrtr/scrcpy-slint](https://github.com/bdrtr/scrcpy-slint) as the provenance trail. Upstream is a
 single-commit repository that has not been touched since it was published, and it ships no
 `LICENSE` file — it declares Apache-2.0 in its README and `Cargo.toml` only. This fork adds
 the license text and a `NOTICE` recording attribution and changes. See [NOTICE](./NOTICE).
