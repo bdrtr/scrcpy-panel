@@ -46,11 +46,6 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_port: u16) -> Vec<Str
         args.push("screen_off_timeout=0".to_string());
     }
 
-    // Lock orientation server-side (-1 = unlocked, 0-3 = locked to that rotation)
-    if opts.lock_video_orientation >= 0 {
-        args.push(format!("lock_video_orientation={}", opts.lock_video_orientation));
-    }
-
     if opts.show_touches {
         args.push("show_touches=true".to_string());
     }
@@ -71,11 +66,9 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_port: u16) -> Vec<Str
         args.push(format!("display_id={}", id));
     }
 
-    if let Some(t) = opts.time_limit {
-        if t > 0 {
-            args.push(format!("time_limit={}", t));
-        }
-    }
+    // `time_limit` is not a server option — scrcpy enforces it on the client
+    // side. Sending it made the server log "Unknown server option" and the
+    // limit never applied. See the timer in main.rs.
 
     if opts.audio_bit_rate != 128000 {
         args.push(format!("audio_bit_rate={}", opts.audio_bit_rate));
@@ -163,7 +156,7 @@ pub fn build_server_command(server_args: &[String]) -> Vec<String> {
         "app_process".to_string(),
         "/".to_string(),
         "com.genymobile.scrcpy.Server".to_string(),
-        "3.3.4".to_string(), // version
+        crate::SCRCPY_SERVER_VERSION.to_string(),
     ];
     cmd.extend(server_args.iter().cloned());
     cmd

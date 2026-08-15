@@ -100,9 +100,11 @@ pub struct Options {
     #[arg(long, default_value = "false")]
     pub list_apps: bool,
 
-    /// Lock video orientation: 0=natural, 1=90°CCW, 2=180°, 3=90°CW (-1=unlocked)
-    #[arg(long, default_value = "-1")]
-    pub lock_video_orientation: i8,
+    // `--lock-video-orientation` is gone: scrcpy removed the server option and
+    // replaced it with `--capture-orientation`, which takes degrees and an
+    // optional `@` to lock. Translating the old 0..3 values would mean guessing
+    // a rotation direction, so it is better to fail loudly than to rotate the
+    // wrong way.
 
     /// Show touches on the device screen
     #[arg(short = 't', long, default_value = "false")]

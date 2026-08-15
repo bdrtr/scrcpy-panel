@@ -40,20 +40,27 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | Server handshake, device metadata | works |
 | H.264 demux | works |
 | Hardware decode | works (CUDA negotiated automatically) |
-| Slint window render | works — 30–48 fps sustained at 720p |
+| Slint window render | works — 30–61 fps sustained at 720p |
 | Opus audio decode and playback | works |
 | MP4 recording | works — valid file, 128 frames in 7.2 s |
 | `--list-encoders` | works |
+| `--time-limit` | works — enforced client side |
 | Ctrl-C / SIGTERM shutdown | works — pipeline unwinds, no crash |
+| scrcpy 4.1 server handshake | works, no unknown-option warnings |
+
+The mid-stream session header — the one that arrives when the device rotates or the
+mirrored app resizes — is covered by unit tests (`cargo test`) but has not been seen
+against a real device: the test phone's launcher is rotation locked. It shares its parsing
+with the opening session header, which every run exercises.
 
 ## Known issues
 
-- **Server version is pinned to scrcpy 3.3.4.** The version string is hardcoded in
-  `src/server/params.rs`. Running against a newer server fails the handshake with
-  `The server version (4.1) does not match the client (3.3.4)`. Updating to 4.x is on the
-  roadmap.
-- `--time-limit` is sent to the server under the wrong option name; the server logs
-  `Unknown server option: time_limit` and the limit is silently ignored.
+- **The server version is pinned exactly.** The server refuses to start unless the client
+  announces its own version, so `SCRCPY_SERVER_VERSION` in `src/main.rs` must match the
+  `scrcpy-server` you run. It is currently `4.1`, and 3.x servers are not merely rejected —
+  their framing is incompatible (see below).
+- `--lock-video-orientation` is gone. scrcpy removed the server option in favour of
+  `--capture-orientation`, which takes degrees with an optional `@` to lock.
 - The upstream README understates the code: it lists far fewer flags than `--help` actually
   accepts, and marks recording as "Phase 2" although it works.
 - **UHID and AOA input are unreachable.** Those modes need hardware scancodes and Slint
@@ -68,6 +75,13 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 
 ## Changes from upstream
 
+- **Updated the protocol from scrcpy 3.3.4 to 4.1.** scrcpy 4.0 changed the stream
+  framing: the video header no longer carries the frame size, which now arrives in a
+  12-byte *session header* that can also reappear mid-stream when the size changes, and
+  the config and key-frame flags moved down one bit to free the most significant bit for
+  it. Upstream also sent two options the server never had — `lock_video_orientation` and
+  `time_limit`; the first is dropped and the second is now enforced client side, which is
+  where scrcpy has always enforced it. VP8 and VP9 codec ids added.
 - **Replaced the SDL2 window and renderer with Slint.** `display/screen.rs` and
   `input/manager.rs` are gone; `ui/mirror.slint` draws the mirror and
   `input/slint_input.rs` turns pointer and key events into control messages.
@@ -99,12 +113,15 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 
 ```bash
 cargo build --release
-
-# fetch the matching server (3.3.4 for now)
-curl -L -o target/release/scrcpy-server \
-  https://github.com/Genymobile/scrcpy/releases/download/v3.3.4/scrcpy-server-v3.3.4
-
 ./target/release/scrcpy-slint
+```
+
+If scrcpy 4.1 is installed, its server is found automatically at
+`/usr/share/scrcpy/scrcpy-server`. Otherwise fetch it:
+
+```bash
+curl -L -o target/release/scrcpy-server \
+  https://github.com/Genymobile/scrcpy/releases/download/v4.1/scrcpy-server-v4.1
 ```
 
 ## Roadmap
@@ -113,7 +130,7 @@ curl -L -o target/release/scrcpy-server \
 2. Build the control panel from [`design/`](./design/): device list, the eight-section
    configuration form, session controls, profiles, log and shortcut tabs
 3. Drive the client from that panel instead of CLI flags
-4. Update the protocol from scrcpy 3.3.4 to 4.x
+4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, pinned to 4.1
 5. Get input parity back: UHID and AOA keyboards, mice and gamepads
 6. Drop SDL2 entirely — audio to `cpal`, clipboard to a native crate
 7. GPU frame path (Slint's `unstable-wgpu-29` texture import) to remove the per-frame copies

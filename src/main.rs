@@ -32,7 +32,9 @@ use options::Options;
 use ui::{display_aspect, frame_to_image, MirrorWindow, Orientation};
 
 const VERSION: &str = "0.1.0";
-const SCRCPY_SERVER_VERSION: &str = "3.3.4";
+/// The scrcpy server release this client speaks to. The server refuses to start
+/// if this does not match its own version exactly.
+pub const SCRCPY_SERVER_VERSION: &str = "4.1";
 
 /// Set by the signal handler; the frame timer polls it and stops the event loop.
 static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -63,8 +65,9 @@ fn install_signal_handlers() {
         extern "C" fn on_signal(_signal: libc::c_int) {
             SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
         }
-        libc::signal(libc::SIGINT, on_signal as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, on_signal as libc::sighandler_t);
+        let handler = on_signal as *const () as libc::sighandler_t;
+        libc::signal(libc::SIGINT, handler);
+        libc::signal(libc::SIGTERM, handler);
     }
 }
 
@@ -515,6 +518,21 @@ fn run(opts: Options) -> Result<()> {
             );
         }
 
+        // --time-limit stops the session from the client side; it is not a
+        // server option, though this client used to send it as one.
+        let time_limit_timer = slint::Timer::default();
+        if let Some(seconds) = opts.time_limit.filter(|&s| s > 0) {
+            log::info!("Time limit: {} s", seconds);
+            time_limit_timer.start(
+                slint::TimerMode::SingleShot,
+                Duration::from_secs(seconds as u64),
+                || {
+                    log::info!("Time limit reached");
+                    let _ = slint::quit_event_loop();
+                },
+            );
+        }
+
         log::info!("Entering Slint event loop...");
         window.run().context("Slint event loop failed")?;
 
@@ -525,6 +543,7 @@ fn run(opts: Options) -> Result<()> {
         // while it is still running tears that context down from under it, and
         // CUDA crashes on the way out.
         drop(frame_timer);
+        drop(time_limit_timer);
         drop(render_frame_rx);
         if let Some(socket) = video_socket_handle {
             let _ = socket.shutdown(std::net::Shutdown::Both);
@@ -731,8 +750,8 @@ fn run_demuxer(
     let mut reader = BufReader::with_capacity(256 * 1024, socket);
 
     loop {
-        match demuxer::read_packet_buf(&mut reader) {
-            Ok(Some(packet)) => {
+        match demuxer::read_stream_item(&mut reader) {
+            Ok(Some(demuxer::StreamItem::Packet(packet))) => {
                 // Tee to recorder (raw packets, no re-encoding)
                 if let Some(ref rec) = recorder {
                     let rec_pkt = RecPacket {
@@ -747,6 +766,18 @@ fn run_demuxer(
                     if let Some(ref rec) = recorder { rec.stop(); }
                     return;
                 }
+            }
+            Ok(Some(demuxer::StreamItem::Session(session))) => {
+                // The stream switched size — the device rotated, the mirrored
+                // app resized, or the virtual display changed. A fresh config
+                // packet follows, and the window picks the new size up from the
+                // next decoded frame.
+                log::info!(
+                    "Video stream resized to {}x{}{}",
+                    session.width,
+                    session.height,
+                    if session.client_resized { " (requested by client)" } else { "" }
+                );
             }
             Ok(None) => {
                 log::info!("End of video stream");
@@ -826,8 +857,8 @@ fn run_audio_pipeline(
     let mut reader = BufReader::with_capacity(64 * 1024, socket);
 
     loop {
-        match demuxer::read_packet_buf(&mut reader) {
-            Ok(Some(packet)) => {
+        match demuxer::read_stream_item(&mut reader) {
+            Ok(Some(demuxer::StreamItem::Packet(packet))) => {
                 // Tee raw audio packet to recorder (before decoding)
                 if let Some(ref rec) = recorder {
                     let rec_pkt = RecPacket {
@@ -851,6 +882,10 @@ fn run_audio_pipeline(
                         return;
                     }
                 }
+            }
+            Ok(Some(demuxer::StreamItem::Session(_))) => {
+                // The server only sends session headers on the video stream.
+                log::warn!("Unexpected session header on the audio stream, ignoring");
             }
             Ok(None) => {
                 log::info!("End of audio stream");
@@ -927,9 +962,16 @@ fn resolve_server_path(opts: &Options) -> Result<String> {
         return Ok("scrcpy-server".to_string());
     }
 
-    let scrcpy_build = "e:\\projects1\\scrcpy\\builddir\\app\\scrcpy-server";
-    if std::path::Path::new(scrcpy_build).exists() {
-        return Ok(scrcpy_build.to_string());
+    // An installed scrcpy ships the matching server; reuse it rather than
+    // making the user download a second copy.
+    for path in [
+        "/usr/share/scrcpy/scrcpy-server",
+        "/usr/local/share/scrcpy/scrcpy-server",
+        "/opt/homebrew/share/scrcpy/scrcpy-server",
+    ] {
+        if std::path::Path::new(path).exists() {
+            return Ok(path.to_string());
+        }
     }
 
     anyhow::bail!(
