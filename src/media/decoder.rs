@@ -2,52 +2,29 @@ use anyhow::{Context, Result, bail};
 use super::demuxer::CodecType;
 use super::demuxer::DemuxPacket;
 
-/// A decoded video frame (YUV420P raw pixel data)
-/// Buffers are reused across frames to avoid allocations.
+/// A decoded video frame: tightly packed RGB8, stride = `width * 3`.
+///
+/// The SDL renderer this client used to have uploaded YUV planes and let the
+/// GPU convert them. Slint takes RGB pixel buffers, so the conversion happens
+/// here instead, in swscale.
+///
+/// Buffers are reused across frames to avoid allocations: the renderer returns
+/// used frames to a pool and the decoder fills them again.
 #[derive(Debug)]
 pub struct DecodedFrame {
-    pub data: [Vec<u8>; 3],       // Y, U, V planes
-    pub linesize: [usize; 3],     // stride for each plane
+    pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,
 }
 
 impl DecodedFrame {
-    /// Create an empty frame (buffers will be resized on first use)
+    /// Create an empty frame (the buffer is sized on first use)
     pub fn empty() -> Self {
         Self {
-            data: [Vec::new(), Vec::new(), Vec::new()],
-            linesize: [0, 0, 0],
+            data: Vec::new(),
             width: 0,
             height: 0,
         }
-    }
-
-    /// Copy YUV data from an FFmpeg frame into our pre-allocated buffers
-    fn fill_from(&mut self, frame: &ffmpeg_next::frame::Video) {
-        let width = frame.width();
-        let height = frame.height();
-        let y_stride = frame.stride(0);
-        let u_stride = frame.stride(1);
-        let v_stride = frame.stride(2);
-
-        let y_len = y_stride * height as usize;
-        let uv_len = u_stride * (height as usize / 2);
-        let v_len = v_stride * (height as usize / 2);
-
-        // Resize only if needed (no realloc if capacity is sufficient)
-        self.data[0].resize(y_len, 0);
-        self.data[1].resize(uv_len, 0);
-        self.data[2].resize(v_len, 0);
-
-        // Copy plane data (memcpy, no allocation)
-        self.data[0].copy_from_slice(&frame.data(0)[..y_len]);
-        self.data[1].copy_from_slice(&frame.data(1)[..uv_len]);
-        self.data[2].copy_from_slice(&frame.data(2)[..v_len]);
-
-        self.linesize = [y_stride, u_stride, v_stride];
-        self.width = width;
-        self.height = height;
     }
 }
 
@@ -55,6 +32,11 @@ impl DecodedFrame {
 pub struct VideoDecoder {
     decoder: ffmpeg_next::decoder::Video,
     scaler: Option<ffmpeg_next::software::scaling::Context>,
+    /// Input format the current scaler was built for, so it can be rebuilt when
+    /// the stream changes size (device rotation) or pixel format
+    scaler_key: Option<(ffmpeg_next::format::Pixel, u32, u32)>,
+    /// Reusable RGB frame swscale writes into (padded stride)
+    rgb_frame: ffmpeg_next::frame::Video,
     config_data: Vec<u8>,
     /// Merge buffer reused across frames to avoid allocations
     merge_buf: Vec<u8>,
@@ -95,6 +77,8 @@ impl VideoDecoder {
         Ok(Self {
             decoder,
             scaler: None,
+            scaler_key: None,
+            rgb_frame: ffmpeg_next::frame::Video::empty(),
             config_data: Vec::new(),
             merge_buf: Vec::with_capacity(256 * 1024),
             av_frame: ffmpeg_next::frame::Video::empty(),
@@ -248,18 +232,12 @@ impl VideoDecoder {
     /// Process a decoded frame — handle hw transfer and format conversion
     fn process_frame(&mut self, output: &mut DecodedFrame) -> Result<()> {
         if self.hw_active && self.av_frame.format() == self.hw_pix_fmt {
-            // Hardware frame — transfer from GPU to CPU
+            // Hardware frame — transfer from GPU to CPU (usually NV12)
             self.transfer_hw_frame()?;
-            // sw_frame now contains CPU-side data (usually NV12)
-            self.convert_to_yuv420p(&self.sw_frame as *const _, output)?;
-        } else if self.av_frame.format() == ffmpeg_next::format::Pixel::YUV420P {
-            // Already YUV420P — direct copy
-            output.fill_from(&self.av_frame);
+            self.convert_to_rgb(&self.sw_frame as *const _, output)
         } else {
-            // Other software format — convert
-            self.convert_to_yuv420p(&self.av_frame as *const _, output)?;
+            self.convert_to_rgb(&self.av_frame as *const _, output)
         }
-        Ok(())
     }
 
     /// Transfer a hardware frame to software (GPU → CPU)
@@ -283,8 +261,11 @@ impl VideoDecoder {
         Ok(())
     }
 
-    /// Convert a frame to YUV420P and fill the output
-    fn convert_to_yuv420p(
+    /// Convert a frame to packed RGB8 and fill the output.
+    ///
+    /// `frame_ptr` is a raw pointer because the source frame lives in `self`
+    /// while `self.scaler` is borrowed mutably.
+    fn convert_to_rgb(
         &mut self,
         frame_ptr: *const ffmpeg_next::frame::Video,
         output: &mut DecodedFrame,
@@ -292,30 +273,51 @@ impl VideoDecoder {
         let frame = unsafe { &*frame_ptr };
         let width = frame.width();
         let height = frame.height();
-
-        if frame.format() == ffmpeg_next::format::Pixel::YUV420P {
-            output.fill_from(frame);
-            return Ok(());
+        if width == 0 || height == 0 {
+            bail!("Decoded frame has zero size");
         }
 
-        // Need format conversion (NV12 → YUV420P typically)
-        let scaler = self.scaler.get_or_insert_with(|| {
-            ffmpeg_next::software::scaling::Context::get(
-                frame.format(),
-                width,
-                height,
-                ffmpeg_next::format::Pixel::YUV420P,
-                width,
-                height,
-                ffmpeg_next::software::scaling::Flags::BILINEAR,
-            ).expect("Failed to create scaler")
-        });
+        // Rebuild the scaler when the source changes — the device rotating mid
+        // session changes the frame size, and a hw fallback changes the format.
+        let key = (frame.format(), width, height);
+        if self.scaler_key != Some(key) {
+            self.scaler = Some(
+                ffmpeg_next::software::scaling::Context::get(
+                    frame.format(),
+                    width,
+                    height,
+                    ffmpeg_next::format::Pixel::RGB24,
+                    width,
+                    height,
+                    ffmpeg_next::software::scaling::Flags::BILINEAR,
+                )
+                .context("Failed to create RGB scaler")?,
+            );
+            self.scaler_key = Some(key);
+            self.rgb_frame = ffmpeg_next::frame::Video::empty();
+            log::debug!("Scaler: {:?} {}x{} → RGB24", frame.format(), width, height);
+        }
 
-        let mut yuv_frame = ffmpeg_next::frame::Video::empty();
-        scaler.run(frame, &mut yuv_frame)
-            .context("Failed to convert frame to YUV420P")?;
+        let scaler = self.scaler.as_mut().expect("scaler was just set");
+        scaler
+            .run(frame, &mut self.rgb_frame)
+            .context("Failed to convert frame to RGB24")?;
 
-        output.fill_from(&yuv_frame);
+        // swscale pads each row to its own alignment; the UI wants rows packed
+        // back to back, so copy row by row.
+        let src_stride = self.rgb_frame.stride(0);
+        let row_bytes = width as usize * 3;
+        let src = self.rgb_frame.data(0);
+
+        output.data.resize(row_bytes * height as usize, 0);
+        for y in 0..height as usize {
+            let src_start = y * src_stride;
+            let dst_start = y * row_bytes;
+            output.data[dst_start..dst_start + row_bytes]
+                .copy_from_slice(&src[src_start..src_start + row_bytes]);
+        }
+        output.width = width;
+        output.height = height;
         Ok(())
     }
 

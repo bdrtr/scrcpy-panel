@@ -1,0 +1,127 @@
+// scrcpy-slint — mirror window.
+//
+// Rust owns everything stateful: it pushes decoded frames into `frame` and
+// receives input through the callbacks below. Pointer positions handed to Rust
+// are normalised to the displayed video rectangle (0..1 on each axis), so this
+// file never needs to know the device resolution — Rust undoes the rotation and
+// scales to device pixels.
+
+export component MirrorWindow inherits Window {
+    in property <image> frame;
+    // Aspect ratio (width / height) of the video *as displayed*, i.e. with the
+    // client rotation already applied.
+    in property <float> display-aspect: 0.5;
+    // Client-side rotation in degrees, clockwise. One of 0, 90, 180, 270.
+    in property <float> rotation: 0;
+    in property <string> status;
+    in property <bool> status-visible: false;
+    in property <string> window-title: "scrcpy-slint";
+
+    // `alt` rides along on press because that is where the decision to place a
+    // second, mirrored finger (pinch to zoom) is made. TouchArea's `moved` has
+    // no event argument, so Rust caches the modifier state from here.
+    callback pointer-down(u: float, v: float, button: int, alt: bool);
+    callback pointer-up(u: float, v: float, button: int);
+    callback pointer-moved(u: float, v: float, pressed: bool);
+    callback pointer-scroll(u: float, v: float, dx: float, dy: float);
+    callback key-down(text: string, alt: bool, control: bool, shift: bool, meta: bool, repeat: bool);
+    callback key-up(text: string, alt: bool, control: bool, shift: bool, meta: bool);
+
+    title: root.window-title;
+    background: #0d0b0a;
+    preferred-width: 420px;
+    preferred-height: 860px;
+    min-width: 160px;
+    min-height: 160px;
+    forward-focus: keys;
+
+    // The letterboxed rectangle the video occupies, in window coordinates.
+    property <float> window-aspect: root.height > 0px ? root.width / root.height : 1;
+    property <bool> quarter-turn: root.rotation == 90 || root.rotation == 270;
+    property <length> fit-w: root.window-aspect > root.display-aspect
+        ? root.height * root.display-aspect
+        : root.width;
+    property <length> fit-h: root.window-aspect > root.display-aspect
+        ? root.height
+        : root.width / root.display-aspect;
+    property <length> fit-x: (root.width - root.fit-w) / 2;
+    property <length> fit-y: (root.height - root.fit-h) / 2;
+
+    // Pointer position normalised to that rectangle.
+    property <float> pointer-u: root.fit-w > 0px ? touch.mouse-x / root.fit-w : 0;
+    property <float> pointer-v: root.fit-h > 0px ? touch.mouse-y / root.fit-h : 0;
+
+    pure function button-id(b: PointerEventButton) -> int {
+        return b == PointerEventButton.left ? 1
+            : b == PointerEventButton.right ? 2
+            : b == PointerEventButton.middle ? 3
+            : 0;
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            root.key-down(event.text, event.modifiers.alt, event.modifiers.control,
+                          event.modifiers.shift, event.modifiers.meta, event.repeat);
+            return EventResult.accept;
+        }
+        key-released(event) => {
+            root.key-up(event.text, event.modifiers.alt, event.modifiers.control,
+                        event.modifiers.shift, event.modifiers.meta);
+            return EventResult.accept;
+        }
+
+        // The image is laid out unrotated and then turned about its centre, so
+        // that a quarter turn still fills the letterboxed rectangle exactly.
+        Image {
+            x: root.quarter-turn ? root.fit-x + (root.fit-w - root.fit-h) / 2 : root.fit-x;
+            y: root.quarter-turn ? root.fit-y + (root.fit-h - root.fit-w) / 2 : root.fit-y;
+            width: root.quarter-turn ? root.fit-h : root.fit-w;
+            height: root.quarter-turn ? root.fit-w : root.fit-h;
+            source: root.frame;
+            image-fit: fill;
+            image-rendering: smooth;
+            rotation-angle: root.rotation * 1deg;
+        }
+
+        touch := TouchArea {
+            x: root.fit-x;
+            y: root.fit-y;
+            width: root.fit-w;
+            height: root.fit-h;
+
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    root.pointer-down(root.pointer-u, root.pointer-v, root.button-id(event.button),
+                                      event.modifiers.alt);
+                } else if (event.kind == PointerEventKind.up) {
+                    root.pointer-up(root.pointer-u, root.pointer-v, root.button-id(event.button));
+                }
+            }
+            moved => {
+                root.pointer-moved(root.pointer-u, root.pointer-v, self.pressed);
+            }
+            scroll-event(event) => {
+                root.pointer-scroll(root.pointer-u, root.pointer-v,
+                                    event.delta-x / 1px, event.delta-y / 1px);
+                return EventResult.accept;
+            }
+        }
+    }
+
+    if root.status-visible: Rectangle {
+        x: 12px;
+        y: 12px;
+        width: label.width + 16px;
+        height: label.height + 8px;
+        background: #000000cc;
+        border-radius: 3px;
+
+        label := Text {
+            x: 8px;
+            y: 4px;
+            text: root.status;
+            color: #f2efe9;
+            font-size: 12px;
+        }
+    }
+}

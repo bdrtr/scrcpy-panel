@@ -6,38 +6,66 @@ mod input;
 mod media;
 mod options;
 mod server;
+mod ui;
 mod util;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver, Sender};
+use slint::ComponentHandle;
+use std::cell::{Cell, RefCell};
 use std::io::BufReader;
 use std::net::TcpStream;
+use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 
 use control::controller::Controller;
 use control::control_msg::ControlMsg;
 use display::fps_counter::FpsCounter;
-use display::screen::Screen;
-use input::manager::InputManager;
+use input::slint_input::{SlintInput, WindowAction};
 use media::audio_decoder::AudioDecoder;
 use media::decoder::{DecodedFrame, VideoDecoder};
 use media::demuxer::{self, DemuxPacket};
 use media::recorder::{Recorder, RecPacket, VideoCodecInfo};
 use options::Options;
+use ui::{display_aspect, frame_to_image, MirrorWindow, Orientation};
 
 const VERSION: &str = "0.1.0";
 const SCRCPY_SERVER_VERSION: &str = "3.3.4";
 
+/// Set by the signal handler; the frame timer polls it and stops the event loop.
+static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp_millis()
-        .init();
+    // Slint drags in zbus for accessibility and portals, and it logs its D-Bus
+    // handshake at info level. Quiet it unless the user asks for it.
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info,zbus=warn,tracing=warn"),
+    )
+    .format_timestamp_millis()
+    .init();
+
+    install_signal_handlers();
 
     let opts = Options::parse();
-    log::info!("scrcpyrust {} — Rust scrcpy client", VERSION);
+    log::info!("scrcpy-slint {} — Rust scrcpy client with a Slint UI", VERSION);
     run(opts)
+}
+
+/// Leave the event loop on Ctrl-C or SIGTERM.
+///
+/// SDL used to turn these into a quit event for us; Slint does not, so without
+/// this the window ignores `kill` and only closes from the window manager.
+fn install_signal_handlers() {
+    #[cfg(unix)]
+    unsafe {
+        extern "C" fn on_signal(_signal: libc::c_int) {
+            SHUTDOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        libc::signal(libc::SIGINT, on_signal as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, on_signal as libc::sighandler_t);
+    }
 }
 
 fn run(opts: Options) -> Result<()> {
@@ -136,15 +164,16 @@ fn run(opts: Options) -> Result<()> {
             opts.video_enabled(), opts.audio_enabled(), opts.control_enabled(),
         ).context("Failed to connect to server")?;
 
-    // 8. Initialize SDL
+    // 8. Initialize SDL — no longer for rendering, which Slint does now, but
+    //    the audio player still uses it and the clipboard helpers call into
+    //    SDL's video subsystem. Both are on the list to be replaced.
     let sdl = sdl2::init().map_err(|e| anyhow::anyhow!("SDL init failed: {}", e))?;
     let sdl_video = sdl.video().map_err(|e| anyhow::anyhow!("SDL video init failed: {}", e))?;
     let sdl_audio = sdl.audio().map_err(|e| anyhow::anyhow!("SDL audio init failed: {}", e))?;
 
-    // Set render driver hint if specified (e.g. "opengl" for mipmap support on Windows)
-    if let Some(ref driver) = opts.render_driver {
-        sdl2::hint::set("SDL_RENDER_DRIVER", driver);
-        log::info!("Render driver hint: {}", driver);
+    if opts.render_driver.is_some() {
+        log::warn!("--render-driver applies to the old SDL renderer and is ignored; \
+                    set SLINT_BACKEND to pick a Slint backend instead");
     }
 
     // Disable screensaver if requested
@@ -251,7 +280,7 @@ fn run(opts: Options) -> Result<()> {
     let (packet_tx, packet_rx): (Sender<DemuxPacket>, Receiver<DemuxPacket>) = bounded(8);
 
     let title = opts.window_title.clone()
-        .unwrap_or_else(|| format!("scrcpyrust — {}", device_info.device_name));
+        .unwrap_or_else(|| format!("scrcpy-slint — {}", device_info.device_name));
 
     if let Some(video_socket) = video_socket {
         // Read video header (before wrapping in BufReader)
@@ -259,26 +288,39 @@ fn run(opts: Options) -> Result<()> {
         let video_info = demuxer::read_video_header(&mut header_socket)?
             .context("Video stream disabled")?;
 
-        // Create screen
-        let mut screen = Screen::new(
-            &sdl_video, &title,
-            video_info.width, video_info.height,
-            opts.fullscreen, opts.always_on_top, opts.borderless,
-            opts.window_x, opts.window_y,
-            opts.window_width, opts.window_height,
-        )?;
+        let orientation = Orientation::from_degrees(opts.orientation);
 
-        // Apply initial orientation from CLI
-        use crate::display::screen::Orientation;
-        screen.orientation = match opts.orientation {
-            90 => Orientation::Rot90,
-            180 => Orientation::Rot180,
-            270 => Orientation::Rot270,
-            _ => Orientation::Normal,
-        };
+        // Create the mirror window
+        let window = MirrorWindow::new().context("Failed to create the Slint window")?;
+        window.set_window_title(title.as_str().into());
+        window.set_rotation(orientation.degrees());
+        window.set_display_aspect(display_aspect(
+            video_info.width,
+            video_info.height,
+            orientation,
+        ));
+
+        {
+            let w = window.window();
+            if opts.fullscreen {
+                w.set_fullscreen(true);
+            }
+            if let (Some(x), Some(y)) = (opts.window_x, opts.window_y) {
+                w.set_position(slint::PhysicalPosition::new(x as i32, y as i32));
+            }
+            let (win_w, win_h) = match (opts.window_width, opts.window_height) {
+                (Some(ww), Some(wh)) => (ww as u32, wh as u32),
+                _ => optimal_window_size(video_info.width, video_info.height, orientation),
+            };
+            w.set_size(slint::PhysicalSize::new(win_w, win_h));
+        }
+
+        if opts.always_on_top || opts.borderless {
+            log::warn!("--always-on-top and --borderless are not wired to the Slint window yet");
+        }
 
         // Start controller + device message receiver
-        let controller = if let Some(ctrl_socket) = control_socket {
+        let controller: Option<Rc<Controller>> = if let Some(ctrl_socket) = control_socket {
             // Clone socket for reading device messages (clipboard sync)
             let reader_socket = ctrl_socket.try_clone()
                 .context("Failed to clone control socket")?;
@@ -291,7 +333,7 @@ fn run(opts: Options) -> Result<()> {
                 })
                 .context("Failed to start device msg reader thread")?;
 
-            Some(Controller::new(ctrl_socket))
+            Some(Rc::new(Controller::new(ctrl_socket)))
         } else {
             None
         };
@@ -329,9 +371,13 @@ fn run(opts: Options) -> Result<()> {
             log::info!("Recording to: {}", path);
         }
 
-        // 10a. Demuxer thread — reads packets from TCP with buffered I/O
+        // 10a. Demuxer thread — reads packets from TCP with buffered I/O.
+        //
+        // Keep a second handle on the socket: shutting it down at exit is what
+        // unblocks this thread's read, which in turn ends the decoder thread.
+        let video_socket_handle = header_socket.try_clone().ok();
         let recorder_clone = recorder.clone();
-        let _demuxer_thread = thread::Builder::new()
+        let demuxer_thread = thread::Builder::new()
             .name("scrcpy-demuxer".into())
             .spawn(move || {
                 run_demuxer(header_socket, packet_tx, recorder_clone);
@@ -364,100 +410,132 @@ fn run(opts: Options) -> Result<()> {
             frame_rx
         };
 
-        let _decoder_thread = thread::Builder::new()
+        let decoder_thread = thread::Builder::new()
             .name("scrcpy-decoder".into())
             .spawn(move || {
                 run_decoder(codec_type, vw, vh, packet_rx, frame_tx, recycle_rx);
             })
             .context("Failed to start decoder thread")?;
 
-        // 11. Main event loop (render thread)
-        let mut event_pump = sdl.event_pump()
-            .map_err(|e| anyhow::anyhow!("Failed to get SDL event pump: {}", e))?;
-        let mut fps_counter = FpsCounter::new();
+        // 11. Slint event loop.
+        //
+        // Slint owns the main thread, so instead of polling events and frames in
+        // one loop, input arrives through callbacks and a timer drains the frame
+        // channel. Draining keeps the old behaviour: only the newest frame is
+        // drawn, and the ones skipped go straight back to the pool.
+        let fps_counter = Rc::new(RefCell::new(FpsCounter::new()));
         if opts.print_fps {
-            fps_counter.start();
+            fps_counter.borrow_mut().start();
         }
-        let mut input_mgr = InputManager::new(vw, vh, &opts.keyboard, &opts.mouse, &opts.shortcut_mod, &opts.key_inject_mode);
+        if opts.keyboard != "sdk" || opts.mouse != "sdk" {
+            log::warn!(
+                "--keyboard={} --mouse={}: only SDK injection is available on the Slint \
+                 window so far, falling back to it",
+                opts.keyboard,
+                opts.mouse
+            );
+        }
 
-        // Initialize UHID devices if using UHID keyboard mode
+        let frame_dims = Rc::new(Cell::new((vw, vh)));
+        let input = Rc::new(RefCell::new(SlintInput::new(
+            vw,
+            vh,
+            &opts.shortcut_mod,
+            &opts.key_inject_mode,
+            orientation,
+        )));
+
         if let Some(ref ctrl) = controller {
-            input_mgr.init_uhid(ctrl);
-
             // Start app if requested
             if let Some(ref app) = opts.start_app {
                 ctrl.push_msg(ControlMsg::StartApp { name: app.clone() });
                 log::info!("Starting app: {}", app);
             }
+
+            wire_input_callbacks(&window, ctrl, &input, &fps_counter, &frame_dims);
+        } else {
+            log::info!("Control disabled — the window is view only");
         }
 
-        log::info!("Entering event loop...");
+        // Frame pump: newest decoded frame → window image property.
+        let frame_timer = slint::Timer::default();
+        {
+            let weak = window.as_weak();
+            let input = input.clone();
+            let fps_counter = fps_counter.clone();
+            let frame_dims = frame_dims.clone();
+            let recycle_tx = recycle_tx.clone();
+            let frame_rx = render_frame_rx.clone();
 
-        // Cache last frame for re-rendering on resize
-        let mut last_frame: Option<DecodedFrame> = None;
-
-        'running: loop {
-            // Process SDL events
-            for event in event_pump.poll_iter() {
-                // Handle resize — re-render last frame at new window size
-                if let sdl2::event::Event::Window {
-                    win_event: sdl2::event::WindowEvent::Resized(..) | sdl2::event::WindowEvent::SizeChanged(..),
-                    ..
-                } = &event {
-                    if let Some(ref frame) = last_frame {
-                        let _ = screen.render_frame(frame);
+            frame_timer.start(
+                slint::TimerMode::Repeated,
+                Duration::from_millis(4),
+                move || {
+                    if SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
+                        log::info!("Interrupted");
+                        let _ = slint::quit_event_loop();
+                        return;
                     }
-                }
 
-                if let Some(ref ctrl) = controller {
-                    if input_mgr.handle_event(&event, &mut screen, ctrl, &mut fps_counter) {
-                        break 'running;
-                    }
-                } else {
-                    if matches!(event, sdl2::event::Event::Quit { .. }) {
-                        break 'running;
-                    }
-                }
-            }
+                    let Some(window) = weak.upgrade() else { return };
 
-            // Render latest frame
-            match render_frame_rx.recv_timeout(Duration::from_millis(4)) {
-                Ok(frame) => {
-                    // Drain to latest, recycle skipped frames back to pool
-                    let mut latest = frame;
-                    while let Ok(newer) = render_frame_rx.try_recv() {
+                    let mut latest = match frame_rx.try_recv() {
+                        Ok(frame) => frame,
+                        Err(crossbeam_channel::TryRecvError::Empty) => return,
+                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                            log::info!("Video stream ended");
+                            let _ = slint::quit_event_loop();
+                            return;
+                        }
+                    };
+                    while let Ok(newer) = frame_rx.try_recv() {
                         let _ = recycle_tx.try_send(latest);
                         latest = newer;
                     }
-                    // Update input manager if frame size changed (rotation)
-                    if latest.width != screen.frame_width || latest.height != screen.frame_height {
-                        input_mgr.update_frame_size(latest.width, latest.height);
-                    }
-                    if let Err(e) = screen.render_frame(&latest) {
-                        log::error!("Render error: {}", e);
-                        break;
-                    }
-                    fps_counter.add_frame();
 
-                    // Recycle previous cached frame, cache current one
-                    if let Some(old) = last_frame.take() {
-                        let _ = recycle_tx.try_send(old);
+                    // The device rotating changes the stream size mid session.
+                    if (latest.width, latest.height) != frame_dims.get() {
+                        frame_dims.set((latest.width, latest.height));
+                        let orientation = {
+                            let mut input = input.borrow_mut();
+                            input.set_frame_size(latest.width, latest.height);
+                            input.orientation()
+                        };
+                        window.set_display_aspect(display_aspect(
+                            latest.width,
+                            latest.height,
+                            orientation,
+                        ));
                     }
-                    last_frame = Some(latest);
-                }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    log::info!("Video stream ended");
-                    break;
-                }
-            }
+
+                    window.set_frame(frame_to_image(&latest));
+                    fps_counter.borrow_mut().add_frame();
+                    let _ = recycle_tx.try_send(latest);
+                },
+            );
         }
+
+        log::info!("Entering Slint event loop...");
+        window.run().context("Slint event loop failed")?;
 
         log::info!("Shutting down...");
-        // Destroy UHID devices
-        if let Some(ref ctrl) = controller {
-            input_mgr.destroy_uhid(ctrl);
+
+        // Unwind the pipeline from both ends before returning. The decoder
+        // thread owns the FFmpeg hardware context; letting the process exit
+        // while it is still running tears that context down from under it, and
+        // CUDA crashes on the way out.
+        drop(frame_timer);
+        drop(render_frame_rx);
+        if let Some(socket) = video_socket_handle {
+            let _ = socket.shutdown(std::net::Shutdown::Both);
         }
+        if demuxer_thread.join().is_err() {
+            log::warn!("Demuxer thread panicked");
+        }
+        if decoder_thread.join().is_err() {
+            log::warn!("Decoder thread panicked");
+        }
+
         // Stop recorder and finalize file
         if let Some(ref rec) = recorder {
             rec.stop();
@@ -465,7 +543,6 @@ fn run(opts: Options) -> Result<()> {
             std::thread::sleep(Duration::from_millis(500));
         }
         drop(controller);
-        drop(render_frame_rx);
     }
 
     if !opts.no_cleanup {
@@ -483,6 +560,162 @@ fn run(opts: Options) -> Result<()> {
 
     log::info!("Done.");
     Ok(())
+}
+
+// =====================================================================
+// Window and input wiring
+// =====================================================================
+
+/// Connect the window's input callbacks to the control channel.
+///
+/// Every callback runs on the Slint event loop thread, so the shared state can
+/// be `Rc<RefCell<..>>` rather than locks.
+fn wire_input_callbacks(
+    window: &MirrorWindow,
+    controller: &Rc<Controller>,
+    input: &Rc<RefCell<SlintInput>>,
+    fps_counter: &Rc<RefCell<FpsCounter>>,
+    frame_dims: &Rc<Cell<(u32, u32)>>,
+) {
+    {
+        let input = input.clone();
+        let controller = controller.clone();
+        window.on_pointer_down(move |u, v, button, alt| {
+            input.borrow_mut().pointer_down(u, v, button, alt, &controller);
+        });
+    }
+    {
+        let input = input.clone();
+        let controller = controller.clone();
+        window.on_pointer_up(move |u, v, button| {
+            input.borrow_mut().pointer_up(u, v, button, &controller);
+        });
+    }
+    {
+        let input = input.clone();
+        let controller = controller.clone();
+        window.on_pointer_moved(move |u, v, pressed| {
+            input.borrow_mut().pointer_moved(u, v, pressed, &controller);
+        });
+    }
+    {
+        let input = input.clone();
+        let controller = controller.clone();
+        window.on_pointer_scroll(move |u, v, dx, dy| {
+            input.borrow_mut().pointer_scroll(u, v, dx, dy, &controller);
+        });
+    }
+    {
+        let input = input.clone();
+        let controller = controller.clone();
+        let fps_counter = fps_counter.clone();
+        let frame_dims = frame_dims.clone();
+        let weak = window.as_weak();
+        window.on_key_down(move |text, alt, control, shift, meta, repeat| {
+            let action = input.borrow_mut().key_down(
+                text.as_str(),
+                alt,
+                control,
+                shift,
+                meta,
+                repeat,
+                &controller,
+            );
+            if action != WindowAction::None {
+                if let Some(window) = weak.upgrade() {
+                    apply_window_action(action, &window, &input, &fps_counter, &frame_dims);
+                }
+            }
+        });
+    }
+    {
+        let input = input.clone();
+        let controller = controller.clone();
+        window.on_key_up(move |text, alt, control, shift, meta| {
+            input
+                .borrow_mut()
+                .key_up(text.as_str(), alt, control, shift, meta, &controller);
+        });
+    }
+}
+
+/// Carry out a shortcut that acts on the window rather than on the device.
+fn apply_window_action(
+    action: WindowAction,
+    window: &MirrorWindow,
+    input: &Rc<RefCell<SlintInput>>,
+    fps_counter: &Rc<RefCell<FpsCounter>>,
+    frame_dims: &Rc<Cell<(u32, u32)>>,
+) {
+    let (frame_w, frame_h) = frame_dims.get();
+
+    match action {
+        WindowAction::None => {}
+        WindowAction::ToggleFullscreen => {
+            let w = window.window();
+            w.set_fullscreen(!w.is_fullscreen());
+        }
+        WindowAction::ResizeToFit => {
+            let orientation = input.borrow().orientation();
+            let (w, h) = optimal_window_size(frame_w, frame_h, orientation);
+            window.window().set_size(slint::PhysicalSize::new(w, h));
+            log::info!("Resized window to fit: {}x{}", w, h);
+        }
+        WindowAction::PixelPerfect => {
+            let orientation = input.borrow().orientation();
+            let (w, h) = if orientation.swaps_dimensions() {
+                (frame_h, frame_w)
+            } else {
+                (frame_w, frame_h)
+            };
+            window.window().set_size(slint::PhysicalSize::new(w, h));
+            log::info!("Resized to pixel-perfect: {}x{}", w, h);
+        }
+        WindowAction::ToggleFps => fps_counter.borrow_mut().toggle(),
+        WindowAction::RotateCw | WindowAction::RotateCcw => {
+            let orientation = {
+                let mut input = input.borrow_mut();
+                let next = if action == WindowAction::RotateCw {
+                    input.orientation().rotate_cw()
+                } else {
+                    input.orientation().rotate_ccw()
+                };
+                input.set_orientation(next);
+                next
+            };
+            window.set_rotation(orientation.degrees());
+            window.set_display_aspect(display_aspect(frame_w, frame_h, orientation));
+            log::info!("Client rotation: {:?}", orientation);
+        }
+    }
+}
+
+/// Window size that shows the whole frame without exceeding a common desktop,
+/// keeping the aspect ratio. Ported from the SDL screen this replaced.
+fn optimal_window_size(frame_w: u32, frame_h: u32, orientation: Orientation) -> (u32, u32) {
+    /// Space to leave for panels and window decorations
+    const MARGIN: u32 = 96;
+
+    let (mut w, mut h) = if orientation.swaps_dimensions() {
+        (frame_h, frame_w)
+    } else {
+        (frame_w, frame_h)
+    };
+    if w == 0 || h == 0 {
+        return (1, 1);
+    }
+
+    let max_w = 1920u32.saturating_sub(MARGIN);
+    let max_h = 1080u32.saturating_sub(MARGIN);
+    if w > max_w {
+        h = h * max_w / w;
+        w = max_w;
+    }
+    if h > max_h {
+        w = w * max_h / h;
+        h = max_h;
+    }
+    (w.max(1), h.max(1))
 }
 
 // =====================================================================
@@ -640,7 +873,7 @@ fn run_device_msg_reader(socket: TcpStream) {
         match read_device_msg(&mut reader) {
             Ok(DeviceMsg::Clipboard { text }) => {
                 log::info!("Received clipboard from phone ({} chars)", text.len());
-                input::manager::set_clipboard_text(&text);
+                input::slint_input::set_clipboard_text(&text);
             }
             Ok(DeviceMsg::AckClipboard { sequence }) => {
                 log::debug!("Clipboard ACK: seq={}", sequence);

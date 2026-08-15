@@ -1,4 +1,4 @@
-pub mod manager;
+pub mod slint_input;
 pub mod shortcuts;
 pub mod keymap;
 pub mod hid_keyboard;
