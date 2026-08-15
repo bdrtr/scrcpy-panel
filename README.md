@@ -1,113 +1,135 @@
-# scrcpyrust 📱➡️🖥️
+# scrcpy-slint
 
-A **Rust** implementation of the [scrcpy](https://github.com/Genymobile/scrcpy) client — mirror and control Android devices from your computer.
+A Rust scrcpy client with a [Slint](https://slint.dev) user interface — mirror and control
+Android devices from a single control panel.
 
-## What Is This?
+> **Status: early.** The Rust client inherited from upstream works (see
+> [Verified](#verified) below). The Slint interface is not built yet — the client still
+> renders through SDL2. Replacing that is the point of this fork.
 
-This is a rewrite of scrcpy's C client in idiomatic Rust. It communicates with the **same** Java server (`scrcpy-server.jar`) that runs on the Android device, using the same wire protocol. The server is unchanged — only the client is rewritten.
+## What this is
 
-## Features (Phase 1)
+[scrcpy](https://github.com/Genymobile/scrcpy) is split in two: a **server** written in Java
+that runs on the Android device, and a **client** written in C that runs on your computer.
+The server uses Android framework APIs (`MediaCodec`, `SurfaceControl`, `AudioRecord`) and
+cannot be rewritten in Rust — so it stays exactly as it is, unmodified.
 
-- ✅ Video mirroring (H.264/H.265/AV1)
-- ✅ Mouse control (click, drag, scroll)
-- ✅ Keyboard shortcuts (Alt+F fullscreen, Alt+H home, Alt+B back, etc.)
-- ✅ Right-click → BACK, Middle-click → HOME
-- ✅ Device auto-detection
-- ✅ ADB reverse/forward tunnel
-- ✅ FPS counter (Alt+I)
+This project rewrites the **client** in Rust and puts a Slint control panel in front of it,
+instead of scrcpy's SDL window plus command-line flags.
+
+## Provenance
+
+This is a fork of [naaceer-del/ScrcpyRUST](https://github.com/naaceer-del/ScrcpyRUST)
+(Apache-2.0), which is itself a Rust reimplementation of the scrcpy client. Upstream is a
+single-commit repository that has not been touched since it was published, and it ships no
+`LICENSE` file — it declares Apache-2.0 in its README and `Cargo.toml` only. This fork adds
+the license text and a `NOTICE` recording attribution and changes. See [NOTICE](./NOTICE).
+
+Upstream's own design notes are preserved under [`docs/upstream/`](./docs/upstream/). Treat
+their claims with care: the upstream commit message says "100% feature parity", which
+6,500 lines of Rust against scrcpy's ~20,000 lines of C does not support.
+
+## Verified
+
+Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
+
+| Stage | Result |
+| --- | --- |
+| `adb push` + reverse tunnel | works |
+| Server handshake, device metadata | works |
+| H.264 demux | works |
+| Hardware decode | works (CUDA negotiated automatically) |
+| SDL2 / OpenGL render | works |
+| MP4 recording | works — valid file, 128 frames in 7.2 s |
+| `--list-encoders` | works |
+
+## Known issues
+
+- **Server version is pinned to scrcpy 3.3.4.** The version string is hardcoded in
+  `src/server/params.rs`. Running against a newer server fails the handshake with
+  `The server version (4.1) does not match the client (3.3.4)`. Updating to 4.x is on the
+  roadmap.
+- `--time-limit` is sent to the server under the wrong option name; the server logs
+  `Unknown server option: time_limit` and the limit is silently ignored.
+- The upstream README understates the code: it lists far fewer flags than `--help` actually
+  accepts, and marks recording as "Phase 2" although it works.
+
+## Changes from upstream
+
+- `ffmpeg-next` / `ffmpeg-sys-next` bumped from 8 to 9 — version 8 does not compile against
+  FFmpeg 9 (`libavcodec 63`)
+- added the missing `libc` dependency required by `src/display/v4l2_sink.rs`
+- added `LICENSE` and `NOTICE`
+- removed development artifacts committed upstream (build logs, benchmark output, a
+  recorded `.mkv`, agent workflow files)
+- renamed the crate to `scrcpy-slint`
 
 ## Requirements
 
-- **Rust** 1.70+ (with cargo)
-- **FFmpeg** development libraries (via MSYS2 on Windows)
-- **ADB** (Android Debug Bridge)
-- **USB Debugging** enabled on your Android device
+- Rust 1.70+
+- FFmpeg 9 development libraries (`libavcodec`, `libavformat`, `libavutil`, `libswscale`)
+- SDL2 (until the Slint interface replaces it)
+- `adb` on `PATH`
+- A `scrcpy-server` binary matching the pinned protocol version, next to the built binary
 
-## Quick Start
+## Build and run
 
 ```bash
-# Build
 cargo build --release
 
-# Copy scrcpy-server next to the binary
-cp /path/to/scrcpy-server target/release/
+# fetch the matching server (3.3.4 for now)
+curl -L -o target/release/scrcpy-server \
+  https://github.com/Genymobile/scrcpy/releases/download/v3.3.4/scrcpy-server-v3.3.4
 
-# Run (with phone connected via USB)
-cargo run --release
+./target/release/scrcpy-slint
 ```
 
-## Build on Windows (MSYS2)
+## Roadmap
 
-```powershell
-# Ensure MSYS2 FFmpeg is installed
-D:\msys64\usr\bin\bash.exe -lc "pacman -S mingw-w64-x86_64-ffmpeg"
+1. Replace SDL2 (`src/display/screen.rs`) with a Slint window and an embedded mirror view
+2. Drive the client from the Slint panel instead of CLI flags
+3. Update the protocol from scrcpy 3.3.4 to 4.x
+4. Fill in what upstream left out: virtual display (`--new-display`), OTG, the rest of camera
 
-# Set environment for FFmpeg discovery
-$env:FFMPEG_DIR = "D:\msys64\mingw64"
-$env:PATH = "D:\msys64\mingw64\bin;$env:PATH"
+The interface being built is in [`design/`](./design/) — a control panel with device
+management, an eight-section configuration form covering ~85 scrcpy flags, session control,
+profiles, logs and shortcuts.
 
-# Build
-cargo build --release
-```
-
-## CLI Options
-
-```
-scrcpyrust [OPTIONS]
-
-Options:
-  -s, --serial <SERIAL>        Device serial number
-  -m, --max-size <SIZE>        Limit video resolution (e.g. 1024)
-      --max-fps <FPS>          Maximum framerate
-  -b, --video-bit-rate <RATE>  Video bit rate (default: 8000000)
-      --video-codec <CODEC>    h264, h265, or av1 (default: h264)
-      --no-audio               Disable audio
-      --no-video               Disable video
-      --no-control             Disable device control
-      --fullscreen             Start in fullscreen
-      --always-on-top          Keep window on top
-      --borderless             Borderless window
-  -r, --record <FILE>          Record to file (Phase 2)
-      --window-title <TITLE>   Custom window title
-  -S, --turn-screen-off        Turn off device screen
-  -v, --version                Show version
-```
-
-## Keyboard Shortcuts
+## Keyboard shortcuts
 
 | Shortcut | Action |
 |----------|--------|
 | `Alt+F` | Toggle fullscreen |
-| `Alt+H` | Home button |
-| `Alt+B` | Back button |
+| `Alt+H` | Home |
+| `Alt+B` | Back |
 | `Alt+S` | App switcher |
-| `Alt+P` | Power button |
-| `Alt+M` | Menu button |
+| `Alt+P` | Power |
+| `Alt+M` | Menu |
 | `Alt+↑/↓` | Volume up/down |
 | `Alt+N` | Notification panel |
 | `Alt+Shift+N` | Collapse panels |
 | `Alt+R` | Rotate device |
-| `Alt+O` | Screen off |
-| `Alt+Shift+O` | Screen on |
+| `Alt+O` / `Alt+Shift+O` | Screen off / on |
 | `Alt+I` | Toggle FPS counter |
 | Right-click | Back |
 | Middle-click | Home |
 
-## Architecture
+## Layout
 
 ```
 src/
-├── main.rs          # Orchestrator — wires everything together
-├── options.rs       # CLI parsing (clap)
-├── adb/             # ADB command execution & tunneling
-├── server/          # Server push, params, socket connections
-├── media/           # Demuxer (protocol) + Decoder (FFmpeg)
-├── display/         # SDL2 window & frame rendering
-├── control/         # Control message serialization & queue
-├── input/           # SDL event → control message translation
-└── util/            # Binary helpers, networking
+├── main.rs          # orchestrator
+├── options.rs       # CLI parsing (clap) — to be replaced by the Slint panel
+├── adb/             # ADB commands, tunnelling, sync
+├── server/          # server push, parameters, socket connections
+├── media/           # demuxer, decoder, recorder, delay buffer
+├── display/         # SDL2 window and rendering — to be replaced by Slint
+├── control/         # control message serialisation
+├── input/           # input events → control messages, UHID/AOA
+├── audio/           # playback and regulation
+└── util/            # binary and network helpers
 ```
 
 ## License
 
-Apache 2.0 (same as original scrcpy)
+Apache-2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).

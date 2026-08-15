@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800&display=swap">
+<link rel="stylesheet" href="_ds/modernist-9105db1d-425f-40c1-b803-e5c0a45576fa/styles.css">
+<script src="_ds/modernist-9105db1d-425f-40c1-b803-e5c0a45576fa/_ds_bundle.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #201e1d; }
+  a { color: var(--color-accent-700); }
+  a:hover { color: var(--color-accent); }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .chk { display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; }
+  .chk input { appearance: none; width: 15px; height: 15px; flex: none; margin: 0; border: 1.5px solid var(--color-divider); background: var(--color-bg); cursor: pointer; }
+  .chk:hover input { border-color: var(--color-accent); }
+  .chk input:checked { background: var(--color-accent); border-color: var(--color-accent); box-shadow: inset 0 0 0 3px var(--color-bg); }
+  .chk input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  select.input { appearance: none; background-image: none; }
+  .grp { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+  .chkgrp { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-3) var(--space-6); }
+  .lbl { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-accent); }
+  .sh { margin: 6px 0 0; font-size: 25px; font-family: var(--font-heading); font-weight: 800; }
+  .sd { margin: 6px 0 0; font-size: 13px; max-width: 74ch; color: var(--color-neutral-700); text-wrap: pretty; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--color-neutral-400); }
+  ::-webkit-scrollbar-track { background: var(--color-neutral-200); }
+</style>
+</helmet>
+
+<div style="width: 1200px; height: 800px; display: flex; flex-direction: column; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); overflow: hidden;">
+
+  <div style="display: flex; align-items: center; gap: var(--space-3); height: 36px; padding: 0 var(--space-3); background: var(--color-neutral-900); color: var(--color-neutral-100); flex: none;">
+    <span style="display: flex; gap: 7px;">
+      <span style="width: 11px; height: 11px; background: var(--color-accent);"></span>
+      <span style="width: 11px; height: 11px; background: var(--color-neutral-600);"></span>
+      <span style="width: 11px; height: 11px; background: var(--color-neutral-700);"></span>
+    </span>
+    <span style="font-family: var(--font-heading); font-weight: 800; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; margin-left: var(--space-3);">scrcpy panel</span>
+    <span style="font-size: 11px; opacity: 0.55;">Slint · Rust · v3.1</span>
+    <span class="mono" style="margin-left: auto; font-size: 11px; opacity: 0.55;">adb 41 · sunucu hazır</span>
+  </div>
+
+  <div class="nav" style="gap: var(--space-4); padding: var(--space-3) var(--space-4); flex: none;">
+    <div class="seg">
+      <label class="seg-opt"><input type="radio" name="tab" value="devices" checked="{{ eq.tab.devices }}" onChange="{{ set.tab }}"><span>Cihazlar</span></label>
+      <label class="seg-opt"><input type="radio" name="tab" value="config" checked="{{ eq.tab.config }}" onChange="{{ set.tab }}"><span>Yapılandırma</span></label>
+      <label class="seg-opt"><input type="radio" name="tab" value="session" checked="{{ eq.tab.session }}" onChange="{{ set.tab }}"><span>Oturum</span></label>
+      <label class="seg-opt"><input type="radio" name="tab" value="profiles" checked="{{ eq.tab.profiles }}" onChange="{{ set.tab }}"><span>Profiller</span></label>
+      <label class="seg-opt"><input type="radio" name="tab" value="log" checked="{{ eq.tab.log }}" onChange="{{ set.tab }}"><span>Günlük</span></label>
+      <label class="seg-opt"><input type="radio" name="tab" value="keys" checked="{{ eq.tab.keys }}" onChange="{{ set.tab }}"><span>Kısayollar</span></label>
+      <label class="seg-opt"><input type="radio" name="tab" value="settings" checked="{{ eq.tab.settings }}" onChange="{{ set.tab }}"><span>Ayarlar</span></label>
+    </div>
+    <span style="margin-left: auto; display: flex; align-items: center; gap: var(--space-2); font-size: 12px; color: var(--color-neutral-700);">
+      <span style="width: 8px; height: 8px; background: var(--color-accent);"></span>
+      <span class="mono">{{ selLabel }}</span>
+    </span>
+  </div>
+
+  <!-- ══════ CİHAZLAR ══════ -->
+  <sc-if value="{{ tDevices }}" hint-placeholder-val="{{ false }}">
+  <div style="flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-6);">
+    <div style="display: flex; align-items: flex-end; gap: var(--space-4);">
+      <div style="flex: 1;">
+        <div class="lbl">Bağlı donanım</div>
+        <h2 class="sh">Cihazlar</h2>
+        <p class="sd">USB ve kablosuz cihazlar <code>adb devices -l</code> ile listelenir. Birden fazla cihaz seçilebilir; aynı yapılandırma hepsinde aynı anda başlatılır ve alt şeritteki komut bir döngüye dönüşür.</p>
+      </div>
+      <div class="field" style="flex: none;"><label>Önizleme durumu</label>
+        <div class="seg">
+          <label class="seg-opt"><input type="radio" name="dv" value="list" checked="{{ eq.deviceView.list }}" onChange="{{ set.deviceView }}"><span>Liste</span></label>
+          <label class="seg-opt"><input type="radio" name="dv" value="empty" checked="{{ eq.deviceView.empty }}" onChange="{{ set.deviceView }}"><span>Boş</span></label>
+          <label class="seg-opt"><input type="radio" name="dv" value="error" checked="{{ eq.deviceView.error }}" onChange="{{ set.deviceView }}"><span>Hata</span></label>
+        </div>
+      </div>
+    </div>
+    <hr class="hr">
+
+    <sc-if value="{{ dvList }}" hint-placeholder-val="{{ true }}">
+    <div>
+      <table class="table">
+        <thead><tr>
+          <th style="width: 34px;"></th><th>Cihaz</th><th>Seri no</th><th>Bağlantı</th><th>Android</th><th>Ekran</th><th>Durum</th><th style="text-align: right;">İşlem</th>
+        </tr></thead>
+        <tbody>
+          <sc-for list="{{ devices }}" as="d" hint-placeholder-count="4">
+          <tr>
+            <td><label class="chk"><input type="checkbox" value="{{ d.serial }}" checked="{{ d.selected }}" onChange="{{ set.sel }}"></label></td>
+            <td style="font-weight: 600;">{{ d.name }}</td>
+            <td class="mono" style="font-size: 12px;">{{ d.serial }}</td>
+            <td>{{ d.conn }}</td>
+            <td>{{ d.android }}</td>
+            <td class="mono" style="font-size: 12px;">{{ d.screen }}</td>
+            <td><span class="tag tag-neutral">{{ d.state }}</span></td>
+            <td style="text-align: right;"><button class="btn btn-ghost" style="font-size: 12px;" onClick="{{ startFromRow }}">Aynala</button></td>
+          </tr>
+          </sc-for>
+        </tbody>
+      </table>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-6); margin-top: var(--space-8);">
+        <div>
+          <div class="lbl">Kablosuz</div>
+          <h3 style="margin: 6px 0 var(--space-3); font-size: 16px;">TCP/IP ile bağlan</h3>
+          <div style="display: flex; gap: var(--space-2); align-items: flex-end;">
+            <div class="field" style="flex: 1;"><label>Adres:port (--tcpip)</label><input class="input mono" value="{{ o.tcpipAddr }}" onChange="{{ set.tcpipAddr }}"></div>
+            <button class="btn btn-secondary" style="height: 36px;">Bağlan</button>
+          </div>
+          <p class="sd" style="margin-top: var(--space-2); font-size: 12px;">USB'den geçiş için <code>adb tcpip 5555</code> otomatik çalıştırılır.</p>
+        </div>
+        <div>
+          <div class="lbl">Android 11+</div>
+          <h3 style="margin: 6px 0 var(--space-3); font-size: 16px;">Kablosuz eşleştirme</h3>
+          <div style="display: flex; gap: var(--space-2); align-items: flex-end;">
+            <div class="field" style="flex: 1;"><label>Eşleştirme adresi</label><input class="input mono" placeholder="192.168.1.42:37105" onChange="{{ noop }}"></div>
+            <div class="field" style="width: 110px;"><label>Kod</label><input class="input mono" placeholder="482913" onChange="{{ noop }}"></div>
+            <button class="btn btn-secondary" style="height: 36px;">Eşleştir</button>
+          </div>
+          <p class="sd" style="margin-top: var(--space-2); font-size: 12px;">Geliştirici seçenekleri → Kablosuz hata ayıklama → Cihazı kodla eşleştir.</p>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ dvEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="border: 2px solid var(--color-divider); padding: var(--space-8); display: flex; flex-direction: column; gap: var(--space-3); align-items: flex-start;">
+      <div class="lbl">Boş durum</div>
+      <h3 style="margin: 0; font-size: 22px; font-family: var(--font-heading); font-weight: 800;">Bağlı cihaz yok</h3>
+      <p class="sd" style="margin: 0;">USB kablosunu takın ve cihazda USB hata ayıklamayı onaylayın. Kablosuz bir cihaz için aşağıdan adres girin.</p>
+      <div style="display: flex; gap: var(--space-2); margin-top: var(--space-2);">
+        <button class="btn btn-primary">Yeniden tara</button>
+        <button class="btn btn-secondary">TCP/IP ile bağlan</button>
+        <button class="btn btn-ghost">Kurulum yardımı</button>
+      </div>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ dvError }}" hint-placeholder-val="{{ false }}">
+    <div>
+      <div style="display: flex; gap: 2px; margin-bottom: var(--space-4); flex-wrap: wrap;">
+        <sc-for list="{{ errors }}" as="e" hint-placeholder-count="8">
+        <label class="seg-opt" style="border: 1px solid var(--color-divider); font-size: 12px;"><input type="radio" name="ek" value="{{ e.key }}" checked="{{ e.on }}" onChange="{{ set.errKey }}"><span>{{ e.title }}</span></label>
+        </sc-for>
+      </div>
+      <div style="border: 2px solid var(--color-accent); padding: var(--space-8); display: flex; flex-direction: column; gap: var(--space-3); align-items: flex-start; background: var(--color-accent-100);">
+        <div class="lbl">{{ err.tag }}</div>
+        <h3 style="margin: 0; font-size: 22px; font-family: var(--font-heading); font-weight: 800; color: var(--color-accent-800);">{{ err.title }}</h3>
+        <p class="sd" style="margin: 0; color: var(--color-accent-900);">{{ err.detail }}</p>
+        <div class="mono" style="width: 100%; margin-top: var(--space-2); padding: var(--space-3); background: var(--color-neutral-900); color: var(--color-neutral-200); font-size: 12px; line-height: 1.7; white-space: pre-wrap;">{{ err.out }}</div>
+        <div style="display: flex; gap: var(--space-2); margin-top: var(--space-2);">
+          <button class="btn btn-primary">{{ err.a1 }}</button>
+          <button class="btn btn-secondary">{{ err.a2 }}</button>
+          <button class="btn btn-ghost">Günlüğü aç</button>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <!-- ══════ YAPILANDIRMA ══════ -->
+  <sc-if value="{{ tConfig }}" hint-placeholder-val="{{ true }}">
+  <div style="flex: 1; min-height: 0; display: grid; grid-template-columns: 216px 1fr;">
+    <div style="border-right: 2px solid var(--color-divider); display: flex; flex-direction: column; min-height: 0;">
+      <div class="lbl" style="padding: var(--space-4) var(--space-4) var(--space-3);">Bölümler</div>
+      <div style="display: flex; flex-direction: column; overflow-y: auto;">
+        <label class="seg-opt" style="justify-content: flex-start; padding: 11px var(--space-4); font-size: 14px; border-top: 1px solid var(--color-divider);"><input type="radio" name="sect" value="video" checked="{{ eq.sect.video }}" onChange="{{ set.sect }}"><span>01 · Video</span></label>
+        <label class="seg-opt" style="justify-content: flex-start; padding: 11px var(--space-4); font-size: 14px; border-top: 1px solid var(--color-divider);"><input type="radio" name="sect" value="audio" checked="{{ eq.sect.audio }}" onChange="{{ set.sect }}"><span>02 · Ses</span></label>
+        <label class="seg-opt" style="justify-content: flex-start; padding: 11px var(--space-4); font-size: 14px; border-top: 1px solid var(--color-divider);"><input type="radio" name="sect" value="record" checked="{{ eq.sect.record }}" onChange="{{ set.sect }}"><span>03 · Kayıt</span></label>
+        <label class="seg-opt" style="justify-content: flex-start; padding: 11px var(--space-4); font-size: 14px; border-top: 1px solid var(--color-divider);"><input type="radio" name="sect" value="control" checked="{{ eq.sect.control }}" onChange="{{ set.sect }}"><span>04 · Kontrol ve giriş</span></label>
+        <label class="seg-opt" style="justify-content: flex-start; padding: 11px var(--space-4); font-size: 14px; border-top: 1px solid var(--color-divider);"><input type="radio" name="sect" value="vdisplay" checked="{{ eq.sect.vdisplay }}" onChange="{{ set.sect }}"><span>05 · Sanal ekran</span></label>
+        <label class="seg-opt" style="justify-content: flex-start; padding: 11px var(--space-4); font-size: 14px; border-top: 1px solid var(--color-divider);"><input type="radio" name="sect" value="camera" checked="{{ eq.sect.camera }}" onChange="{{ set.sect }}"><span>06 · Kamera</span></label>
+        <label class="seg-opt" style="justify-content: flex-start; padding: 11px var(--space-4); font-size: 14px; border-top: 1px solid var(--color-divider);"><input type="radio" name="sect" value="window" checked="{{ eq.sect.window }}" onChange="{{ set.sect }}"><span>07 · Pencere ve ekran</span></label>
+        <label class="seg-opt" style="justify-content: flex-start; padding: 11px var(--space-4); font-size: 14px; border-top: 1px solid var(--color-divider); border-bottom: 1px solid var(--color-divider);"><input type="radio" name="sect" value="network" checked="{{ eq.sect.network }}" onChange="{{ set.sect }}"><span>08 · Ağ ve ADB</span></label>
+      </div>
+      <div style="margin-top: auto; padding: var(--space-4); border-top: 2px solid var(--color-divider);">
+        <div class="lbl">Özet</div>
+        <div class="mono" style="font-size: 12px; line-height: 1.8; color: var(--color-neutral-700); margin-top: var(--space-2);">{{ flagCount }} bayrak etkin</div>
+        <button class="btn btn-secondary btn-block" style="font-size: 12px;" onClick="{{ resetAll }}">Varsayılanlara dön</button>
+      </div>
+    </div>
+
+    <div style="overflow-y: auto; padding: var(--space-6);">
+
+      <!-- 01 VİDEO -->
+      <sc-if value="{{ sVideo }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div class="lbl">Bölüm 01</div>
+        <h2 class="sh">Video</h2>
+        <p class="sd">Kaynak, kodek ve görüntü boyutu. Kodlayıcı listesi cihazdan <code>--list-encoders</code> ile çekilir; boş bırakılırsa cihazın varsayılanı kullanılır.</p>
+        <hr class="hr">
+        <div class="grp">
+          <div class="field"><label>Kaynak · --video-source</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="vs" value="display" checked="{{ eq.videoSource.display }}" onChange="{{ set.videoSource }}"><span>Ekran</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="vs" value="camera" checked="{{ eq.videoSource.camera }}" onChange="{{ set.videoSource }}"><span>Kamera</span></label>
+            </div>
+          </div>
+          <div class="field"><label>Kodek · --video-codec</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="vc" value="h264" checked="{{ eq.videoCodec.h264 }}" onChange="{{ set.videoCodec }}"><span>h264</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="vc" value="h265" checked="{{ eq.videoCodec.h265 }}" onChange="{{ set.videoCodec }}"><span>h265</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="vc" value="av1" checked="{{ eq.videoCodec.av1 }}" onChange="{{ set.videoCodec }}"><span>av1</span></label>
+            </div>
+          </div>
+          <div class="field"><label>Kodlayıcı · --video-encoder</label><input class="input mono" placeholder="c2.android.avc.encoder" value="{{ o.videoEncoder }}" onChange="{{ set.videoEncoder }}"></div>
+          <div class="field"><label>Bit hızı · --video-bit-rate</label><input class="input mono" value="{{ o.bitRate }}" onChange="{{ set.bitRate }}"></div>
+          <div class="field"><label>Azami boyut · --max-size</label><input class="input mono" value="{{ o.maxSize }}" onChange="{{ set.maxSize }}"></div>
+          <div class="field"><label>Azami kare · --max-fps</label><input class="input mono" value="{{ o.maxFps }}" onChange="{{ set.maxFps }}"></div>
+          <div class="field"><label>Kırpma · --crop</label><input class="input mono" placeholder="1224:1440:0:0" value="{{ o.crop }}" onChange="{{ set.crop }}"></div>
+          <div class="field"><label>Ekran no · --display-id</label><input class="input mono" value="{{ o.displayId }}" onChange="{{ set.displayId }}"></div>
+          <div class="field"><label>Ara bellek · --video-buffer (ms)</label><input class="input mono" value="{{ o.videoBuffer }}" onChange="{{ set.videoBuffer }}"></div>
+        </div>
+        <div class="field" style="margin-top: var(--space-4);"><label>Görüntü yönü · --display-orientation</label>
+          <div class="seg">
+            <label class="seg-opt"><input type="radio" name="do" value="o0" checked="{{ eq.displayOrientation.o0 }}" onChange="{{ set.displayOrientation }}"><span>0°</span></label>
+            <label class="seg-opt"><input type="radio" name="do" value="o90" checked="{{ eq.displayOrientation.o90 }}" onChange="{{ set.displayOrientation }}"><span>90°</span></label>
+            <label class="seg-opt"><input type="radio" name="do" value="o180" checked="{{ eq.displayOrientation.o180 }}" onChange="{{ set.displayOrientation }}"><span>180°</span></label>
+            <label class="seg-opt"><input type="radio" name="do" value="o270" checked="{{ eq.displayOrientation.o270 }}" onChange="{{ set.displayOrientation }}"><span>270°</span></label>
+            <label class="seg-opt"><input type="radio" name="do" value="flip0" checked="{{ eq.displayOrientation.flip0 }}" onChange="{{ set.displayOrientation }}"><span>Aynala</span></label>
+          </div>
+        </div>
+        <hr class="hr">
+        <div class="chkgrp">
+          <label class="chk"><input type="checkbox" checked="{{ o.noVideo }}" onChange="{{ set.noVideo }}"><span>Videoyu kapat · --no-video <span style="color: var(--color-neutral-600);">(yalnızca ses/kontrol)</span></span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.printFps }}" onChange="{{ set.printFps }}"><span>Kare sayacını göster · --print-fps</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.noVideoPlayback }}" onChange="{{ set.noVideoPlayback }}"><span>Görüntüyü oynatma · --no-video-playback</span></label>
+        </div>
+        <div class="grp" style="margin-top: var(--space-4);">
+          <div class="field" style="grid-column: span 2;"><label>V4L2 çıkışı · --v4l2-sink <span style="color: var(--color-neutral-600);">(yalnızca Linux)</span></label><input class="input mono" placeholder="/dev/video0" value="{{ o.v4l2Sink }}" onChange="{{ set.v4l2Sink }}"></div>
+          <div class="field"><label>V4L2 ara belleği · --v4l2-buffer (ms)</label><input class="input mono" value="{{ o.v4l2Buffer }}" onChange="{{ set.v4l2Buffer }}"></div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- 02 SES -->
+      <sc-if value="{{ sAudio }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div class="lbl">Bölüm 02</div>
+        <h2 class="sh">Ses</h2>
+        <p class="sd">Ses aktarımı Android 11 ve üzerini gerektirir. Mikrofon kaynakları çağrı ve ses tanıma senaryolarında ayrı ayrı seçilebilir.</p>
+        <hr class="hr">
+        <div class="grp">
+          <div class="field"><label>Kodek · --audio-codec</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ac" value="opus" checked="{{ eq.audioCodec.opus }}" onChange="{{ set.audioCodec }}"><span>opus</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ac" value="aac" checked="{{ eq.audioCodec.aac }}" onChange="{{ set.audioCodec }}"><span>aac</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ac" value="flac" checked="{{ eq.audioCodec.flac }}" onChange="{{ set.audioCodec }}"><span>flac</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ac" value="raw" checked="{{ eq.audioCodec.raw }}" onChange="{{ set.audioCodec }}"><span>raw</span></label>
+            </div>
+          </div>
+          <div class="field"><label>Kaynak · --audio-source</label>
+            <select class="input" value="{{ o.audioSource }}" onChange="{{ set.audioSource }}">
+              <option value="output">output — cihaz çıkışı</option>
+              <option value="playback">playback — uygulama sesi</option>
+              <option value="mic">mic — mikrofon</option>
+              <option value="mic-unprocessed">mic-unprocessed</option>
+              <option value="mic-camcorder">mic-camcorder</option>
+              <option value="voice-call">voice-call</option>
+              <option value="voice-communication">voice-communication</option>
+            </select>
+          </div>
+          <div class="field"><label>Kodlayıcı · --audio-encoder</label><input class="input mono" placeholder="c2.android.opus.encoder" value="{{ o.audioEncoder }}" onChange="{{ set.audioEncoder }}"></div>
+          <div class="field"><label>Bit hızı · --audio-bit-rate</label><input class="input mono" value="{{ o.audioBitRate }}" onChange="{{ set.audioBitRate }}"></div>
+          <div class="field"><label>Ara bellek · --audio-buffer (ms)</label><input class="input mono" value="{{ o.audioBuffer }}" onChange="{{ set.audioBuffer }}"></div>
+          <div class="field"><label>Çıkış ara belleği · --audio-output-buffer</label><input class="input mono" value="{{ o.audioOutputBuffer }}" onChange="{{ set.audioOutputBuffer }}"></div>
+        </div>
+        <hr class="hr">
+        <div class="chkgrp">
+          <label class="chk"><input type="checkbox" checked="{{ o.noAudio }}" onChange="{{ set.noAudio }}"><span>Sesi kapat · --no-audio</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.audioDup }}" onChange="{{ set.audioDup }}"><span>Cihazda da çal · --audio-dup</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.requireAudio }}" onChange="{{ set.requireAudio }}"><span>Ses başarısızsa çıkış · --require-audio</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.noAudioPlayback }}" onChange="{{ set.noAudioPlayback }}"><span>Sesi oynatma · --no-audio-playback</span></label>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- 03 KAYIT -->
+      <sc-if value="{{ sRecord }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div class="lbl">Bölüm 03</div>
+        <h2 class="sh">Kayıt</h2>
+        <p class="sd">Kayıt, ayna penceresinden bağımsız çalışır. Süre sınırı dolduğunda dosya düzgün kapatılır; oturum devam eder.</p>
+        <hr class="hr">
+        <label class="chk" style="margin-bottom: var(--space-4);"><input type="checkbox" checked="{{ o.recordEnabled }}" onChange="{{ set.recordEnabled }}"><span style="font-weight: 600;">Kaydı etkinleştir · --record</span></label>
+        <div class="grp">
+          <div class="field" style="grid-column: span 2;"><label>Dosya yolu</label><input class="input mono" value="{{ o.recordPath }}" onChange="{{ set.recordPath }}"></div>
+          <div class="field"><label>Biçim · --record-format</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="rf" value="mp4" checked="{{ eq.recordFormat.mp4 }}" onChange="{{ set.recordFormat }}"><span>mp4</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="rf" value="mkv" checked="{{ eq.recordFormat.mkv }}" onChange="{{ set.recordFormat }}"><span>mkv</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="rf" value="opus" checked="{{ eq.recordFormat.opus }}" onChange="{{ set.recordFormat }}"><span>opus</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="rf" value="wav" checked="{{ eq.recordFormat.wav }}" onChange="{{ set.recordFormat }}"><span>wav</span></label>
+            </div>
+          </div>
+          <div class="field"><label>Süre sınırı · --time-limit (s)</label><input class="input mono" placeholder="300" value="{{ o.timeLimit }}" onChange="{{ set.timeLimit }}"></div>
+          <div class="field"><label>Kayıt yönü · --record-orientation</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ro" value="o0" checked="{{ eq.recordOrientation.o0 }}" onChange="{{ set.recordOrientation }}"><span>0°</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ro" value="o90" checked="{{ eq.recordOrientation.o90 }}" onChange="{{ set.recordOrientation }}"><span>90°</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ro" value="o180" checked="{{ eq.recordOrientation.o180 }}" onChange="{{ set.recordOrientation }}"><span>180°</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ro" value="o270" checked="{{ eq.recordOrientation.o270 }}" onChange="{{ set.recordOrientation }}"><span>270°</span></label>
+            </div>
+          </div>
+        </div>
+        <hr class="hr">
+        <div class="chkgrp">
+          <label class="chk"><input type="checkbox" checked="{{ o.noPlayback }}" onChange="{{ set.noPlayback }}"><span>Yalnızca kaydet, gösterme · --no-playback</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.timeStamps }}" onChange="{{ set.timeStamps }}"><span>Dosya adına zaman damgası ekle</span></label>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- 04 KONTROL -->
+      <sc-if value="{{ sControl }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div class="lbl">Bölüm 04</div>
+        <h2 class="sh">Kontrol ve giriş</h2>
+        <p class="sd">UHID modu cihazda fiziksel klavye gibi görünür ve düzeni bilgisayardan alır. AOA yalnızca USB üzerinde çalışır; OTG modunda video hiç aktarılmaz.</p>
+        <hr class="hr">
+        <div class="grp">
+          <div class="field"><label>Klavye · --keyboard</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="kb" value="sdk" checked="{{ eq.keyboard.sdk }}" onChange="{{ set.keyboard }}"><span>sdk</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="kb" value="uhid" checked="{{ eq.keyboard.uhid }}" onChange="{{ set.keyboard }}"><span>uhid</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="kb" value="aoa" checked="{{ eq.keyboard.aoa }}" onChange="{{ set.keyboard }}"><span>aoa</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="kb" value="disabled" checked="{{ eq.keyboard.disabled }}" onChange="{{ set.keyboard }}"><span>kapalı</span></label>
+            </div>
+          </div>
+          <div class="field"><label>Fare · --mouse</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ms" value="sdk" checked="{{ eq.mouse.sdk }}" onChange="{{ set.mouse }}"><span>sdk</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ms" value="uhid" checked="{{ eq.mouse.uhid }}" onChange="{{ set.mouse }}"><span>uhid</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ms" value="aoa" checked="{{ eq.mouse.aoa }}" onChange="{{ set.mouse }}"><span>aoa</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="ms" value="disabled" checked="{{ eq.mouse.disabled }}" onChange="{{ set.mouse }}"><span>kapalı</span></label>
+            </div>
+          </div>
+          <div class="field"><label>Oyun kumandası · --gamepad</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="gp" value="disabled" checked="{{ eq.gamepad.disabled }}" onChange="{{ set.gamepad }}"><span>kapalı</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="gp" value="uhid" checked="{{ eq.gamepad.uhid }}" onChange="{{ set.gamepad }}"><span>uhid</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="gp" value="aoa" checked="{{ eq.gamepad.aoa }}" onChange="{{ set.gamepad }}"><span>aoa</span></label>
+            </div>
+          </div>
+          <div class="field"><label>Kısayol tuşu · --shortcut-mod</label>
+            <select class="input" value="{{ o.shortcutMod }}" onChange="{{ set.shortcutMod }}">
+              <option value="lalt">Sol Alt</option>
+              <option value="lsuper">Sol Super</option>
+              <option value="rctrl">Sağ Ctrl</option>
+              <option value="lctrl+lalt">Sol Ctrl + Sol Alt</option>
+            </select>
+          </div>
+          <div class="field"><label>Klavye düzeni <span style="color: var(--color-neutral-600);">(UHID, uygulama ayarı)</span></label><input class="input mono" placeholder="tr" value="{{ o.keyLayout }}" onChange="{{ set.keyLayout }}"></div>
+          <div class="field"><label>Pano yönü</label>
+            <select class="input" value="{{ o.clipboardDir }}" onChange="{{ set.clipboardDir }}">
+              <option value="both">İki yönlü</option>
+              <option value="toDevice">Yalnızca cihaza</option>
+              <option value="toPc">Yalnızca bilgisayara</option>
+            </select>
+          </div>
+        </div>
+        <hr class="hr">
+        <div class="chkgrp">
+          <label class="chk"><input type="checkbox" checked="{{ o.otg }}" onChange="{{ set.otg }}"><span>OTG modu · --otg <span style="color: var(--color-neutral-600);">(video yok, yalnızca giriş)</span></span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.noControl }}" onChange="{{ set.noControl }}"><span>Salt izleme · --no-control</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.noClipboardAutosync }}" onChange="{{ set.noClipboardAutosync }}"><span>Pano eşitlemesini kapat · --no-clipboard-autosync</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.forwardAllClicks }}" onChange="{{ set.forwardAllClicks }}"><span>Tüm fare tuşlarını ilet · --forward-all-clicks</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.legacyPaste }}" onChange="{{ set.legacyPaste }}"><span>Eski yapıştırma · --legacy-paste</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.preferText }}" onChange="{{ set.preferText }}"><span>Metin olayını yeğle · --prefer-text</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.rawKeyEvents }}" onChange="{{ set.rawKeyEvents }}"><span>Ham tuş olayları · --raw-key-events</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.mouseBind }}" onChange="{{ set.mouseBind }}"><span>Fare tuşu eşlemesi · --mouse-bind=++++</span></label>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- 05 SANAL EKRAN -->
+      <sc-if value="{{ sVdisplay }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div class="lbl">Bölüm 05</div>
+        <h2 class="sh">Sanal ekran</h2>
+        <p class="sd">Android 11+ üzerinde cihazın kendi ekranına dokunmadan ayrı bir ekran oluşturur. Belirtilen uygulama doğrudan bu ekranda açılır; kapanışta içeriğin yok edilip edilmeyeceği seçilebilir.</p>
+        <hr class="hr">
+        <label class="chk" style="margin-bottom: var(--space-4);"><input type="checkbox" checked="{{ o.newDisplay }}" onChange="{{ set.newDisplay }}"><span style="font-weight: 600;">Yeni sanal ekran oluştur · --new-display</span></label>
+        <div class="grp">
+          <div class="field"><label>Çözünürlük / yoğunluk</label><input class="input mono" value="{{ o.newDisplaySize }}" onChange="{{ set.newDisplaySize }}"></div>
+          <div class="field"><label>Başlatılacak uygulama · --start-app</label><input class="input mono" placeholder="?org.videolan.vlc" value="{{ o.startApp }}" onChange="{{ set.startApp }}"></div>
+          <div class="field"><label>Uygulama listesi</label><button class="btn btn-secondary" style="width: 100%; height: 36px;">Cihazdan seç · --list-apps</button></div>
+        </div>
+        <hr class="hr">
+        <div class="chkgrp">
+          <label class="chk"><input type="checkbox" checked="{{ o.noVdDestroyContent }}" onChange="{{ set.noVdDestroyContent }}"><span>Kapanışta içeriği koru · --no-vd-destroy-content</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.noVdSystemDecorations }}" onChange="{{ set.noVdSystemDecorations }}"><span>Sistem çubuklarını gizle · --no-vd-system-decorations</span></label>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- 06 KAMERA -->
+      <sc-if value="{{ sCamera }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div class="lbl">Bölüm 06</div>
+        <h2 class="sh">Kamera</h2>
+        <p class="sd">Kamera aktarımı Android 12+ gerektirir ve video kaynağı olarak ekranın yerine geçer. Boyut yerine en-boy oranı verilirse cihaz en yakın desteklenen çözünürlüğü seçer.</p>
+        <hr class="hr">
+        <div class="grp">
+          <div class="field"><label>Yön · --camera-facing</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="cf" value="back" checked="{{ eq.cameraFacing.back }}" onChange="{{ set.cameraFacing }}"><span>arka</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="cf" value="front" checked="{{ eq.cameraFacing.front }}" onChange="{{ set.cameraFacing }}"><span>ön</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="cf" value="external" checked="{{ eq.cameraFacing.external }}" onChange="{{ set.cameraFacing }}"><span>harici</span></label>
+            </div>
+          </div>
+          <div class="field"><label>Kamera no · --camera-id</label><input class="input mono" value="{{ o.cameraId }}" onChange="{{ set.cameraId }}"></div>
+          <div class="field"><label>Boyut · --camera-size</label><input class="input mono" value="{{ o.cameraSize }}" onChange="{{ set.cameraSize }}"></div>
+          <div class="field"><label>En-boy oranı · --camera-ar</label><input class="input mono" placeholder="16:9" value="{{ o.cameraAr }}" onChange="{{ set.cameraAr }}"></div>
+          <div class="field"><label>Kare hızı · --camera-fps</label><input class="input mono" value="{{ o.cameraFps }}" onChange="{{ set.cameraFps }}"></div>
+          <div class="field"><label>Kamera listesi</label><button class="btn btn-secondary" style="width: 100%; height: 36px;">Cihazdan seç · --list-cameras</button></div>
+        </div>
+        <hr class="hr">
+        <label class="chk"><input type="checkbox" checked="{{ o.cameraHighSpeed }}" onChange="{{ set.cameraHighSpeed }}"><span>Yüksek hız kipi · --camera-high-speed</span></label>
+      </div>
+      </sc-if>
+
+      <!-- 07 PENCERE -->
+      <sc-if value="{{ sWindow }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div class="lbl">Bölüm 07</div>
+        <h2 class="sh">Pencere ve ekran</h2>
+        <p class="sd">Ayna penceresinin yerleşimi ve cihazın güç davranışı. Konum ve boyut alanları boş bırakılırsa pencere cihaz oranına göre açılır.</p>
+        <hr class="hr">
+        <div class="grp">
+          <div class="field" style="grid-column: span 2;"><label>Pencere başlığı · --window-title</label><input class="input" value="{{ o.windowTitle }}" onChange="{{ set.windowTitle }}"></div>
+          <div class="field"><label>Döndürme · --orientation</label>
+            <div class="seg" style="width: 100%;">
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="wo" value="o0" checked="{{ eq.windowOrientation.o0 }}" onChange="{{ set.windowOrientation }}"><span>0°</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="wo" value="o90" checked="{{ eq.windowOrientation.o90 }}" onChange="{{ set.windowOrientation }}"><span>90°</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="wo" value="o180" checked="{{ eq.windowOrientation.o180 }}" onChange="{{ set.windowOrientation }}"><span>180°</span></label>
+              <label class="seg-opt" style="flex: 1;"><input type="radio" name="wo" value="o270" checked="{{ eq.windowOrientation.o270 }}" onChange="{{ set.windowOrientation }}"><span>270°</span></label>
+            </div>
+          </div>
+          <div class="field"><label>X · --window-x</label><input class="input mono" value="{{ o.windowX }}" onChange="{{ set.windowX }}"></div>
+          <div class="field"><label>Y · --window-y</label><input class="input mono" value="{{ o.windowY }}" onChange="{{ set.windowY }}"></div>
+          <div class="field"><label>Genişlik · --window-width</label><input class="input mono" value="{{ o.windowWidth }}" onChange="{{ set.windowWidth }}"></div>
+          <div class="field"><label>Yükseklik · --window-height</label><input class="input mono" value="{{ o.windowHeight }}" onChange="{{ set.windowHeight }}"></div>
+        </div>
+        <hr class="hr">
+        <div class="chkgrp">
+          <label class="chk"><input type="checkbox" checked="{{ o.fullscreen }}" onChange="{{ set.fullscreen }}"><span>Tam ekran · --fullscreen</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.alwaysOnTop }}" onChange="{{ set.alwaysOnTop }}"><span>Her zaman üstte · --always-on-top</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.borderless }}" onChange="{{ set.borderless }}"><span>Kenarsız · --window-borderless</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.turnScreenOff }}" onChange="{{ set.turnScreenOff }}"><span>Cihaz ekranını kapat · --turn-screen-off</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.stayAwake }}" onChange="{{ set.stayAwake }}"><span>Cihazı uyanık tut · --stay-awake</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.showTouches }}" onChange="{{ set.showTouches }}"><span>Dokunuşları göster · --show-touches</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.disableScreensaver }}" onChange="{{ set.disableScreensaver }}"><span>Ekran koruyucuyu engelle · --disable-screensaver</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.powerOffOnClose }}" onChange="{{ set.powerOffOnClose }}"><span>Kapanışta ekranı kapat · --power-off-on-close</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.noPowerOn }}" onChange="{{ set.noPowerOn }}"><span>Başlarken açma · --no-power-on</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.noMipmaps }}" onChange="{{ set.noMipmaps }}"><span>Mipmap kapalı · --no-mipmaps</span></label>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- 08 AĞ -->
+      <sc-if value="{{ sNetwork }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div class="lbl">Bölüm 08</div>
+        <h2 class="sh">Ağ ve ADB</h2>
+        <p class="sd">Yerel port yönlendirme varsayılan yoldur. Uzak bir adb sunucusuna bağlanırken tünel konağı ve portu birlikte verilmelidir.</p>
+        <hr class="hr">
+        <div class="grp">
+          <div class="field"><label>Hedef seri no · --serial</label><input class="input mono" value="{{ o.serial }}" onChange="{{ set.serial }}"></div>
+          <div class="field"><label>Yerel port aralığı · --port</label><input class="input mono" value="{{ o.port }}" onChange="{{ set.port }}"></div>
+          <div class="field"><label>TCP/IP adresi · --tcpip</label><input class="input mono" value="{{ o.tcpipAddr }}" onChange="{{ set.tcpipAddr }}"></div>
+          <div class="field"><label>Tünel konağı · --tunnel-host</label><input class="input mono" value="{{ o.tunnelHost }}" onChange="{{ set.tunnelHost }}"></div>
+          <div class="field"><label>Tünel portu · --tunnel-port</label><input class="input mono" value="{{ o.tunnelPort }}" onChange="{{ set.tunnelPort }}"></div>
+          <div class="field"><label>Sunucu günlük düzeyi · --verbosity</label>
+            <select class="input" value="{{ o.logLevel }}" onChange="{{ set.logLevel }}">
+              <option value="debug">debug</option>
+              <option value="info">info</option>
+              <option value="warn">warn</option>
+              <option value="error">error</option>
+            </select>
+          </div>
+        </div>
+        <hr class="hr">
+        <div class="chkgrp">
+          <label class="chk"><input type="checkbox" checked="{{ o.tcpip }}" onChange="{{ set.tcpip }}"><span>Kablosuz bağlan · --tcpip</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.forceAdbForward }}" onChange="{{ set.forceAdbForward }}"><span>Yönlendirmeyi zorla · --force-adb-forward</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.selectUsb }}" onChange="{{ set.selectUsb }}"><span>Yalnızca USB · --select-usb</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.selectTcpip }}" onChange="{{ set.selectTcpip }}"><span>Yalnızca TCP/IP · --select-tcpip</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.killAdbOnClose }}" onChange="{{ set.killAdbOnClose }}"><span>Çıkışta adb'yi durdur · --kill-adb-on-close</span></label>
+          <label class="chk"><input type="checkbox" checked="{{ o.noCleanup }}" onChange="{{ set.noCleanup }}"><span>Temizlik yapma · --no-cleanup</span></label>
+        </div>
+      </div>
+      </sc-if>
+
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════ OTURUM ══════ -->
+  <sc-if value="{{ tSession }}" hint-placeholder-val="{{ false }}">
+  <div style="flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 316px;">
+    <div style="min-height: 0; display: flex; flex-direction: column; background: var(--color-neutral-200); border-right: 2px solid var(--color-divider);">
+      <div style="display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-divider); background: var(--color-bg);">
+        <span class="tag tag-accent">CANLI</span>
+        <span class="mono" style="font-size: 12px;">Galaxy S23 · R58M31XABCD</span>
+        <span class="mono" style="margin-left: auto; font-size: 12px; color: var(--color-neutral-700);">{{ liveStats }}</span>
+      </div>
+      <sc-if value="{{ mirrorEmbedded }}" hint-placeholder-val="{{ true }}">
+      <div style="flex: 1; min-height: 0; display: grid; place-items: center; padding: var(--space-6);">
+        <div style="height: 100%; aspect-ratio: 1080 / 2340; background: var(--color-neutral-900); display: flex; flex-direction: column; justify-content: space-between; padding: var(--space-3); box-shadow: var(--shadow-lg);">
+          <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--color-neutral-500);" class="mono"><span>09:41</span><span>LTE ▮</span></div>
+          <div style="text-align: center; color: var(--color-neutral-500);">
+            <div class="mono" style="font-size: 11px; letter-spacing: 0.14em;">AYNA GÖRÜNTÜSÜ</div>
+            <div class="mono" style="font-size: 11px; margin-top: 6px;">1080 × 2340</div>
+          </div>
+          <div style="height: 3px; background: var(--color-neutral-600); width: 40%; margin: 0 auto;"></div>
+        </div>
+      </div>
+      </sc-if>
+      <sc-if value="{{ mirrorExternal }}" hint-placeholder-val="{{ false }}">
+      <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: var(--space-4); padding: var(--space-8);">
+        <div class="lbl">Ayrı pencere kipi</div>
+        <h3 style="margin: 0; font-size: 20px; font-family: var(--font-heading); font-weight: 800;">Ayna scrcpy penceresinde açık</h3>
+        <p class="sd" style="margin: 0;">Görüntü panelin dışında, scrcpy'nin kendi SDL penceresinde çalışıyor. Panel kumanda, ölçüm ve kayıt görevlerini üstlenir; kısayollar o pencere odaktayken geçerlidir.</p>
+        <div style="border: 2px solid var(--color-divider); padding: var(--space-4); display: flex; align-items: center; gap: var(--space-4); background: var(--color-bg);">
+          <div style="width: 46px; height: 92px; background: var(--color-neutral-900); flex: none;"></div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span class="mono" style="font-size: 12px; font-weight: 600;">Galaxy S23 — ayna</span>
+            <span class="mono" style="font-size: 11px; color: var(--color-neutral-700);">540 × 1170 · her zaman üstte kapalı</span>
+          </div>
+          <div style="margin-left: auto; display: flex; gap: var(--space-2);">
+            <button class="btn btn-secondary" style="font-size: 12px;">Öne getir</button>
+            <button class="btn btn-secondary" style="font-size: 12px;">Panele göm</button>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+      <div style="display: flex; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-divider); background: var(--color-bg); flex-wrap: wrap;">
+        <button class="btn btn-secondary" style="font-size: 12px;">Geri</button>
+        <button class="btn btn-secondary" style="font-size: 12px;">Ana ekran</button>
+        <button class="btn btn-secondary" style="font-size: 12px;">Son uygulamalar</button>
+        <button class="btn btn-secondary" style="font-size: 12px;">Bildirimler</button>
+        <button class="btn btn-secondary" style="font-size: 12px;">Ses −</button>
+        <button class="btn btn-secondary" style="font-size: 12px;">Ses +</button>
+        <button class="btn btn-secondary" style="font-size: 12px;">Güç</button>
+        <button class="btn btn-secondary" style="font-size: 12px;">Ekranı döndür</button>
+      </div>
+    </div>
+
+    <div style="min-height: 0; overflow-y: auto; padding: var(--space-4);">
+      <div class="lbl">Oturumlar</div>
+      <div style="display: flex; flex-direction: column; gap: 1px; margin: var(--space-3) 0 var(--space-6); border-top: 1px solid var(--color-divider);">
+        <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="3">
+        <div style="display: flex; align-items: center; gap: var(--space-2); padding: 10px 0; border-bottom: 1px solid var(--color-divider); font-size: 13px;">
+          <span style="width: 7px; height: 7px; background: var(--color-accent); flex: none;"></span>
+          <span style="font-weight: 600;">{{ s.name }}</span>
+          <span class="mono" style="margin-left: auto; font-size: 11px; color: var(--color-neutral-700);">{{ s.meta }}</span>
+        </div>
+        </sc-for>
+      </div>
+
+      <div class="lbl">Ölçümler</div>
+      <table class="table" style="margin: var(--space-3) 0 var(--space-6); font-size: 13px;">
+        <tbody>
+          <sc-for list="{{ metrics }}" as="m" hint-placeholder-count="5">
+          <tr><td style="color: var(--color-neutral-700);">{{ m.k }}</td><td class="mono" style="text-align: right;">{{ m.v }}</td></tr>
+          </sc-for>
+        </tbody>
+      </table>
+
+      <div class="lbl">Aktarım</div>
+      <div style="border: 2px dashed var(--color-divider); padding: var(--space-6) var(--space-4); margin: var(--space-3) 0 var(--space-4); text-align: left;">
+        <div style="font-size: 13px; font-weight: 600;">Dosyayı buraya bırakın</div>
+        <p class="sd" style="margin-top: 4px; font-size: 12px;">APK bırakılırsa kurulur, diğer dosyalar <code>/sdcard/Download</code> altına gönderilir.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+        <button class="btn btn-secondary btn-block" style="margin-top: 0;">Ekran görüntüsü al</button>
+        <button class="btn btn-secondary btn-block" style="margin-top: 0;">Panoyu cihaza gönder</button>
+        <button class="btn btn-secondary btn-block" style="margin-top: 0;">Kaydı başlat</button>
+        <button class="btn btn-primary btn-block" style="margin-top: 0;">Oturumu durdur</button>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════ PROFİLLER ══════ -->
+  <sc-if value="{{ tProfiles }}" hint-placeholder-val="{{ false }}">
+  <div style="flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-6);">
+    <div style="display: flex; align-items: flex-end; gap: var(--space-4);">
+      <div style="flex: 1;">
+        <div class="lbl">Kayıtlı yapılandırmalar</div>
+        <h2 class="sh">Profiller</h2>
+        <p class="sd">Her profil tam bir bayrak kümesidir. Bir profili uygulamak Yapılandırma sekmesindeki tüm alanları yeniden yazar; cihaza sabitlenen profiller o cihaz bağlandığında öntanımlı olur.</p>
+      </div>
+      <button class="btn btn-primary" style="flex: none;">Geçerli ayarları kaydet</button>
+    </div>
+    <hr class="hr">
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; background: var(--color-divider);">
+      <sc-for list="{{ profiles }}" as="p" hint-placeholder-count="6">
+      <div class="card" style="gap: var(--space-3); padding: var(--space-4); background: var(--color-bg);">
+        <div class="card-kicker">{{ p.kicker }}</div>
+        <div class="card-title">{{ p.name }}</div>
+        <p class="card-body">{{ p.desc }}</p>
+        <div class="mono" style="font-size: 11px; line-height: 1.7; color: var(--color-neutral-700); word-break: break-all;">{{ p.flags }}</div>
+        <div style="display: flex; gap: var(--space-2); align-items: center; border-top: 1px solid var(--color-divider); padding-top: var(--space-3);">
+          <button class="btn btn-ghost" style="font-size: 12px;" onClick="{{ applyProfile }}">Uygula</button>
+          <button class="btn btn-ghost" style="font-size: 12px; color: var(--color-text);">Düzenle</button>
+          <button class="btn btn-ghost" style="font-size: 12px; color: var(--color-text); margin-left: auto;">Sil</button>
+        </div>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════ GÜNLÜK ══════ -->
+  <sc-if value="{{ tLog }}" hint-placeholder-val="{{ false }}">
+  <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--space-6); gap: var(--space-4);">
+    <div style="display: flex; align-items: flex-end; gap: var(--space-4);">
+      <div style="flex: 1;">
+        <div class="lbl">Süreç çıktısı</div>
+        <h2 class="sh">Günlük</h2>
+      </div>
+      <div class="seg" style="flex: none;">
+        <label class="seg-opt"><input type="radio" name="lf" value="all" checked="{{ eq.logFilter.all }}" onChange="{{ set.logFilter }}"><span>Tümü</span></label>
+        <label class="seg-opt"><input type="radio" name="lf" value="info" checked="{{ eq.logFilter.info }}" onChange="{{ set.logFilter }}"><span>Bilgi</span></label>
+        <label class="seg-opt"><input type="radio" name="lf" value="warn" checked="{{ eq.logFilter.warn }}" onChange="{{ set.logFilter }}"><span>Uyarı</span></label>
+        <label class="seg-opt"><input type="radio" name="lf" value="error" checked="{{ eq.logFilter.error }}" onChange="{{ set.logFilter }}"><span>Hata</span></label>
+      </div>
+      <button class="btn btn-secondary" style="flex: none;">Kopyala</button>
+      <button class="btn btn-secondary" style="flex: none;">Temizle</button>
+    </div>
+    <div class="mono" style="flex: 1; min-height: 0; overflow-y: auto; background: var(--color-neutral-900); color: var(--color-neutral-200); padding: var(--space-4); font-size: 12px; line-height: 1.9;">
+      <sc-for list="{{ logLines }}" as="l" hint-placeholder-count="12">
+      <div style="display: flex; gap: var(--space-3);">
+        <span style="color: var(--color-neutral-500); flex: none;">{{ l.t }}</span>
+        <span style="flex: none; width: 52px; color: var(--color-accent-400);">{{ l.lvl }}</span>
+        <span style="white-space: pre-wrap;">{{ l.msg }}</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════ KISAYOLLAR ══════ -->
+  <sc-if value="{{ tKeys }}" hint-placeholder-val="{{ false }}">
+  <div style="flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-6);">
+    <div class="lbl">Klavye</div>
+    <h2 class="sh">Kısayollar</h2>
+    <p class="sd">MOD tuşu Kontrol bölümünden değiştirilir; şu an <strong>Sol Alt</strong>. Kısayollar ayna penceresi odaktayken geçerlidir, OTG modunda devre dışıdır.</p>
+    <hr class="hr">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--space-8);">
+      <sc-for list="{{ shortcuts }}" as="k" hint-placeholder-count="20">
+      <div style="display: flex; align-items: baseline; gap: var(--space-4); padding: 9px 0; border-bottom: 1px solid var(--color-divider);">
+        <span class="mono" style="flex: none; width: 168px; font-size: 12px; font-weight: 600;">{{ k.combo }}</span>
+        <span style="font-size: 13px;">{{ k.desc }}</span>
+      </div>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════ AYARLAR ══════ -->
+  <sc-if value="{{ tSettings }}" hint-placeholder-val="{{ false }}">
+  <div style="flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-6);">
+    <div class="lbl">Uygulama</div>
+    <h2 class="sh">Ayarlar</h2>
+    <p class="sd">Bu değerler yapılandırma dosyasına yazılır ve tüm profiller için geçerlidir.</p>
+    <hr class="hr">
+    <div class="grp">
+      <div class="field" style="grid-column: span 2;"><label>scrcpy çalıştırılabiliri</label><input class="input mono" value="{{ o.scrcpyPath }}" onChange="{{ set.scrcpyPath }}"></div>
+      <div class="field"><label>Sürüm</label><input class="input mono" value="3.1" disabled="{{ yes }}"></div>
+      <div class="field" style="grid-column: span 2;"><label>adb çalıştırılabiliri</label><input class="input mono" value="{{ o.adbPath }}" onChange="{{ set.adbPath }}"></div>
+      <div class="field"><label>adb sunucu portu</label><input class="input mono" value="{{ o.adbPort }}" onChange="{{ set.adbPort }}"></div>
+    </div>
+    <hr class="hr">
+    <div class="grp">
+      <div class="field"><label>Arayüz dili</label>
+        <div class="seg" style="width: 100%;">
+          <label class="seg-opt" style="flex: 1;"><input type="radio" name="lang" value="tr" checked="{{ eq.lang.tr }}" onChange="{{ set.lang }}"><span>Türkçe</span></label>
+          <label class="seg-opt" style="flex: 1;"><input type="radio" name="lang" value="en" checked="{{ eq.lang.en }}" onChange="{{ set.lang }}"><span>English</span></label>
+        </div>
+      </div>
+      <div class="field"><label>Ayna penceresi</label>
+        <div class="seg" style="width: 100%;">
+          <label class="seg-opt" style="flex: 1;"><input type="radio" name="mm" value="embedded" checked="{{ eq.mirrorMode.embedded }}" onChange="{{ set.mirrorMode }}"><span>Panele gömülü</span></label>
+          <label class="seg-opt" style="flex: 1;"><input type="radio" name="mm" value="external" checked="{{ eq.mirrorMode.external }}" onChange="{{ set.mirrorMode }}"><span>Ayrı pencere</span></label>
+        </div>
+      </div>
+      <div class="field"><label>Kayıt klasörü</label><input class="input mono" value="{{ o.recordDir }}" onChange="{{ set.recordDir }}"></div>
+      <div class="field"><label>Ekran görüntüsü klasörü</label><input class="input mono" value="{{ o.shotDir }}" onChange="{{ set.shotDir }}"></div>
+    </div>
+    <hr class="hr">
+    <div class="chkgrp">
+      <label class="chk"><input type="checkbox" checked="{{ o.autoStart }}" onChange="{{ set.autoStart }}"><span>Cihaz bağlandığında öntanımlı profili başlat</span></label>
+      <label class="chk"><input type="checkbox" checked="{{ o.trayMinimize }}" onChange="{{ set.trayMinimize }}"><span>Kapatınca sistem tepsisine küçült</span></label>
+      <label class="chk"><input type="checkbox" checked="{{ o.checkUpdates }}" onChange="{{ set.checkUpdates }}"><span>Başlangıçta scrcpy sürümünü denetle</span></label>
+      <label class="chk"><input type="checkbox" checked="{{ o.keepLog }}" onChange="{{ set.keepLog }}"><span>Günlüğü diske yaz</span></label>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════ KOMUT PANELİ + ALT ŞERİT ══════ -->
+  <sc-if value="{{ cmdOpen }}" hint-placeholder-val="{{ false }}">
+  <div style="flex: none; border-top: 2px solid var(--color-divider); background: var(--color-neutral-900); padding: var(--space-4);">
+    <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3);">
+      <span class="lbl" style="color: var(--color-accent-400);">Oluşan komut</span>
+      <span class="mono" style="font-size: 11px; color: var(--color-neutral-500);">{{ flagCount }} bayrak</span>
+      <button class="btn btn-secondary" style="margin-left: auto; font-size: 12px; height: 30px; color: var(--color-neutral-100); border-color: var(--color-neutral-600);" onClick="{{ copyCmd }}">{{ copyLabel }}</button>
+    </div>
+    <div class="mono" style="max-height: 132px; overflow-y: auto; color: var(--color-neutral-100); font-size: 13px; line-height: 1.9; white-space: pre-wrap; word-break: break-all;">{{ cmd }}</div>
+  </div>
+  </sc-if>
+
+  <div style="flex: none; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-top: 2px solid var(--color-divider); background: var(--color-surface);">
+    <span class="mono" style="font-size: 12px; color: var(--color-neutral-700);">{{ statusLine }}</span>
+    <button class="btn btn-ghost" style="margin-left: auto;" onClick="{{ toggleCmd }}">{{ cmdToggleLabel }}</button>
+    <button class="btn btn-secondary">Profil olarak kaydet</button>
+    <button class="btn btn-primary" onClick="{{ startSession }}">{{ startLabel }}</button>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:800},&quot;startTab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;devices&quot;,&quot;config&quot;,&quot;session&quot;,&quot;profiles&quot;,&quot;log&quot;,&quot;keys&quot;,&quot;settings&quot;],&quot;default&quot;:&quot;config&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Başlangıç&quot;},&quot;deviceState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;list&quot;,&quot;empty&quot;,&quot;error&quot;],&quot;default&quot;:&quot;list&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Başlangıç&quot;}}">
+const CHOICES = {
+  tab: ['devices','config','session','profiles','log','keys','settings'],
+  sect: ['video','audio','record','control','vdisplay','camera','window','network'],
+  deviceView: ['list','empty','error'],
+  videoSource: ['display','camera'],
+  videoCodec: ['h264','h265','av1'],
+  displayOrientation: ['o0','o90','o180','o270','flip0'],
+  windowOrientation: ['o0','o90','o180','o270'],
+  recordOrientation: ['o0','o90','o180','o270'],
+  audioCodec: ['opus','aac','flac','raw'],
+  recordFormat: ['mp4','mkv','opus','wav'],
+  keyboard: ['sdk','uhid','aoa','disabled'],
+  mouse: ['sdk','uhid','aoa','disabled'],
+  gamepad: ['disabled','uhid','aoa'],
+  cameraFacing: ['back','front','external'],
+  logFilter: ['all','info','warn','error'],
+  lang: ['tr','en'],
+  mirrorMode: ['external','embedded'],
+};
+
+const DEFAULTS = {
+  videoSource: 'display', videoCodec: 'h264', videoEncoder: '', bitRate: '8M', maxSize: '1920',
+  maxFps: '60', crop: '', displayId: '0', videoBuffer: '0', displayOrientation: 'o0',
+  noVideo: false, printFps: false, noVideoPlayback: false, v4l2Sink: '', v4l2Buffer: '0',
+  noAudio: false, audioCodec: 'opus', audioSource: 'output', audioEncoder: '', audioBitRate: '128K',
+  audioBuffer: '50', audioOutputBuffer: '5', audioDup: false, requireAudio: false, noAudioPlayback: false,
+  recordEnabled: false, recordPath: '~/Videos/scrcpy/oturum-01.mp4', recordFormat: 'mp4',
+  timeLimit: '', recordOrientation: 'o0', noPlayback: false, timeStamps: true,
+  noControl: false, keyboard: 'sdk', mouse: 'sdk', gamepad: 'disabled', shortcutMod: 'lalt',
+  keyLayout: '', clipboardDir: 'both', otg: false, noClipboardAutosync: false, forwardAllClicks: false,
+  legacyPaste: false, preferText: false, rawKeyEvents: false, mouseBind: false,
+  newDisplay: false, newDisplaySize: '1920x1080/240', startApp: '', noVdDestroyContent: false, noVdSystemDecorations: false,
+  cameraFacing: 'back', cameraId: '0', cameraSize: '1920x1080', cameraAr: '', cameraFps: '30', cameraHighSpeed: false,
+  windowTitle: 'Galaxy S23 — ayna', windowOrientation: 'o0', windowX: '', windowY: '', windowWidth: '', windowHeight: '',
+  fullscreen: false, alwaysOnTop: false, borderless: false, turnScreenOff: false, stayAwake: true,
+  showTouches: false, disableScreensaver: true, powerOffOnClose: false, noPowerOn: false, noMipmaps: false,
+  serial: 'R58M31XABCD', port: '27183', tcpip: false, tcpipAddr: '192.168.1.42:5555', tunnelHost: '', tunnelPort: '',
+  forceAdbForward: false, selectUsb: false, selectTcpip: false, killAdbOnClose: false, noCleanup: false, logLevel: 'info',
+  scrcpyPath: '/usr/local/bin/scrcpy', adbPath: '/usr/local/bin/adb', adbPort: '5037', lang: 'tr',
+  recordDir: '~/Videos/scrcpy', shotDir: '~/Pictures/scrcpy',
+  autoStart: false, trayMinimize: true, checkUpdates: true, keepLog: false,
+  logFilter: 'all', mirrorMode: 'embedded',
+};
+
+const ERRORS = [
+  { key: 'adb', tag: 'Hata · adb', title: 'adb bulunamadı', detail: 'Ayarlarda belirtilen yol çalıştırılabilir değil. Platform araçlarını kurun veya yolu düzeltin.',
+    out: '$ /usr/local/bin/adb version\nsh: /usr/local/bin/adb: No such file or directory', a1: 'Yolu seç', a2: 'Platform araçlarını indir' },
+  { key: 'unauth', tag: 'Hata · yetki', title: 'Cihaz yetkilendirilmemiş', detail: 'R58M31XABCD durumu unauthorized. Cihaz ekranındaki "Bu bilgisayara izin ver" istemini onaylayın.',
+    out: '$ adb devices -l\nR58M31XABCD    unauthorized usb:1-3\nerror: device unauthorized', a1: 'Yeniden tara', a2: 'adb sunucusunu yeniden başlat' },
+  { key: 'offline', tag: 'Hata · bağlantı', title: 'Cihaz çevrimdışı', deta1: '', detail: 'Bağlantı oturum sırasında koptu. Kabloyu ve USB kipini denetleyin; kablosuz cihazda ağ erişimini doğrulayın.',
+    out: 'ERROR: Device disconnected\nWARN: Server connection closed unexpectedly', a1: 'Yeniden bağlan', a2: 'Kabloyu denetle' },
+  { key: 'version', tag: 'Hata · sürüm', title: 'scrcpy sürümü uyumsuz', detail: 'Bilgisayardaki istemci 3.1, cihazdaki sunucu 2.4. Sunucu dosyası yeniden gönderilmeli.',
+    out: 'ERROR: The server version (2.4) does not match the client (3.1)', a1: 'Sunucuyu yeniden gönder', a2: 'Sürümleri karşılaştır' },
+  { key: 'encoder', tag: 'Hata · kodlayıcı', title: 'Kodlayıcı bulunamadı', detail: 'Seçilen kodlayıcı bu cihazda yok. Listeden desteklenen bir kodlayıcı seçin veya alanı boş bırakın.',
+    out: 'ERROR: Encoder \'c2.android.av1.encoder\' not found\nINFO: Try --list-encoders', a1: 'Kodlayıcıları listele', a2: 'Varsayılana dön' },
+  { key: 'audio', tag: 'Uyarı · ses', title: 'Ses desteklenmiyor', detail: 'Ses aktarımı Android 11 ve üzerini gerektirir; cihaz Android 10. Görüntü ve kontrol etkilenmez.',
+    out: 'WARN: Audio disabled: it requires Android 11 or higher', a1: 'Sesi kapatıp başlat', a2: 'Cihaz bilgisi' },
+  { key: 'record', tag: 'Hata · kayıt', title: 'Kayıt dosyası yazılamıyor', detail: 'Hedef klasöre yazma izni yok ya da disk dolu. Kayıt klasörünü Ayarlar\'dan değiştirin.',
+    out: 'ERROR: Could not open output file: Permission denied\n~/Videos/scrcpy/oturum-01.mp4', a1: 'Klasör seç', a2: 'Ayarları aç' },
+  { key: 'port', tag: 'Hata · port', title: 'Port kullanımda', detail: '27183–27199 aralığındaki portların tümü meşgul. Başka bir scrcpy örneği çalışıyor olabilir.',
+    out: 'ERROR: Could not listen on port 27183 (Address already in use)', a1: 'Port aralığını değiştir', a2: 'Çalışan örnekleri gör' },
+];
+
+const DEVICES = [
+  { name: 'Galaxy S23', serial: 'R58M31XABCD', conn: 'USB 3.0', android: '14', screen: '1080×2340', state: 'device' },
+  { name: 'Pixel 7a', serial: '3A091FDJH0021K', conn: 'USB 2.0', android: '15', screen: '1080×2400', state: 'device' },
+  { name: 'Redmi Note 12', serial: '192.168.1.42:5555', conn: 'TCP/IP', android: '13', screen: '1080×2400', state: 'device' },
+  { name: 'Fire HD 10', serial: 'G000H4052260', conn: 'USB 2.0', android: '11', screen: '1200×1920', state: 'offline' },
+];
+
+const PROFILES = [
+  { kicker: 'Sunum', name: 'Toplantı aynası', desc: 'Yüksek çözünürlük, kontrol açık, ses bilgisayarda.', flags: '--max-size=1920 --video-bit-rate=12M --always-on-top --stay-awake' },
+  { kicker: 'Oyun', name: 'Düşük gecikme', desc: 'Küçük ara bellek, 120 fps hedefi, kumanda UHID.', flags: '--video-buffer=0 --max-fps=120 --gamepad=uhid --no-audio' },
+  { kicker: 'QA', name: 'Test kaydı', desc: 'Kayıt açık, dokunuşlar görünür, 10 dakika sınırı.', flags: '--record=%d.mp4 --show-touches --time-limit=600' },
+  { kicker: 'OTG', name: 'Yalnızca giriş', desc: 'Video yok; klavye ve fare AOA üzerinden.', flags: '--otg --keyboard=aoa --mouse=aoa' },
+  { kicker: 'Sanal ekran', name: 'Masaüstü kipi', desc: 'Cihaz ekranına dokunmadan ayrı ekran.', flags: '--new-display=1920x1080/240 --no-vd-system-decorations' },
+  { kicker: 'Kamera', name: 'Web kamerası', desc: 'Arka kamera 1080p30, kontrol kapalı.', flags: '--video-source=camera --camera-size=1920x1080 --no-control' },
+];
+
+const SESSIONS = [
+  { name: 'Galaxy S23', meta: '00:12:41 · 58 fps' },
+  { name: 'Pixel 7a', meta: '00:03:07 · 60 fps' },
+  { name: 'Redmi Note 12 · kayıt', meta: '00:41:12 · 1.2 GB' },
+];
+
+const METRICS = [
+  { k: 'Kare hızı', v: '58 fps' },
+  { k: 'Bit hızı', v: '7.9 Mb/s' },
+  { k: 'Gecikme', v: '38 ms' },
+  { k: 'Kodek', v: 'h264 · c2.qti.avc.encoder' },
+  { k: 'Ses', v: 'opus 128K · 50 ms' },
+  { k: 'Bağlantı', v: 'USB 3.0 · forward' },
+  { k: 'Atılan kare', v: '3' },
+];
+
+const LOG = [
+  { t: '09:41:02', lvl: 'INFO', msg: 'scrcpy 3.1 <https://github.com/Genymobile/scrcpy>' },
+  { t: '09:41:02', lvl: 'INFO', msg: '/usr/local/bin/adb start-server' },
+  { t: '09:41:03', lvl: 'INFO', msg: 'Cihaz bulundu: R58M31XABCD (Galaxy S23)' },
+  { t: '09:41:03', lvl: 'DEBUG', msg: 'push scrcpy-server.jar → /data/local/tmp/scrcpy-server.jar' },
+  { t: '09:41:04', lvl: 'INFO', msg: 'Sunucu başlatıldı: app_process / com.genymobile.scrcpy.Server 3.1' },
+  { t: '09:41:04', lvl: 'DEBUG', msg: 'adb forward tcp:27183 localabstract:scrcpy' },
+  { t: '09:41:04', lvl: 'INFO', msg: 'Video akışı: h264 1080x2340 @60 · 8 Mb/s' },
+  { t: '09:41:04', lvl: 'INFO', msg: 'Ses akışı: opus 48000 Hz stereo · kaynak output' },
+  { t: '09:41:05', lvl: 'WARN', msg: 'Kodlayıcı c2.android.avc.encoder yerine donanım kodlayıcı seçildi' },
+  { t: '09:41:05', lvl: 'INFO', msg: 'Pencere oluşturuldu 540x1170 · OpenGL ES 3.2' },
+  { t: '09:43:18', lvl: 'DEBUG', msg: 'Pano eşitlendi (cihaz → bilgisayar, 84 bayt)' },
+  { t: '09:47:55', lvl: 'WARN', msg: 'Ses ara belleği doldu, 2 paket atlandı' },
+  { t: '09:52:10', lvl: 'ERROR', msg: 'Pixel 7a: device unauthorized — cihazdaki istemi onaylayın' },
+  { t: '09:52:11', lvl: 'INFO', msg: 'Yeniden deneme 1/3 (2 sn sonra)' },
+];
+
+const SHORTCUTS = [
+  { combo: 'MOD + f', desc: 'Tam ekranı aç/kapat' },
+  { combo: 'MOD + ← / →', desc: 'Pencereyi döndür' },
+  { combo: 'MOD + g', desc: 'Pencereyi 1:1 boyuta getir' },
+  { combo: 'MOD + w', desc: 'Siyah kenarları kaldır' },
+  { combo: 'MOD + h', desc: 'ANA EKRAN' },
+  { combo: 'MOD + b · Backspace', desc: 'GERİ' },
+  { combo: 'MOD + s', desc: 'SON UYGULAMALAR' },
+  { combo: 'MOD + m', desc: 'MENÜ' },
+  { combo: 'MOD + ↑ / ↓', desc: 'Sesi artır / azalt' },
+  { combo: 'MOD + p', desc: 'GÜÇ' },
+  { combo: 'MOD + o', desc: 'Cihaz ekranını kapat' },
+  { combo: 'MOD + Shift + o', desc: 'Cihaz ekranını aç' },
+  { combo: 'MOD + r', desc: 'Cihazı döndür' },
+  { combo: 'MOD + n', desc: 'Bildirim panelini aç' },
+  { combo: 'MOD + Shift + n', desc: 'Bildirim panelini kapat' },
+  { combo: 'MOD + c', desc: 'Cihaz panosunu bilgisayara kopyala' },
+  { combo: 'MOD + x', desc: 'Kes ve kopyala' },
+  { combo: 'MOD + v', desc: 'Panoyu cihaza yapıştır' },
+  { combo: 'MOD + Shift + v', desc: 'Tuş vuruşu olarak yapıştır' },
+  { combo: 'MOD + i', desc: 'Kare sayacını aç/kapat' },
+  { combo: 'Çift tık (kenar)', desc: 'Siyah kenarları kaldır' },
+  { combo: 'Orta tık', desc: 'ANA EKRAN' },
+  { combo: 'Sağ tık', desc: 'GERİ / ekranı aç' },
+  { combo: 'Ctrl + tık-sürükle', desc: 'İki parmakla yakınlaştır' },
+  { combo: 'Dosya bırak', desc: 'Cihaza gönder (APK ise kur)' },
+];
+
+const TITLES = {
+  devices: 'Cihazlar', config: 'Yapılandırma', session: 'Oturum',
+  profiles: 'Profiller', log: 'Günlük', keys: 'Kısayollar', settings: 'Ayarlar',
+};
+
+class Component extends DCLogic {
+  state = {
+    tab: this.props.startTab || 'config',
+    sect: 'video',
+    deviceView: this.props.deviceState || 'list',
+    sel: 'R58M31XABCD',
+    picked: ['R58M31XABCD'],
+    errKey: 'unauth',
+    cmdOpen: false,
+    copied: false,
+    o: Object.assign({}, DEFAULTS),
+  };
+
+  setO(k, e) {
+    const t = e.target;
+    const v = t.type === 'checkbox' ? t.checked : t.value;
+    this.setState(s => ({ o: Object.assign({}, s.o, { [k]: v }), copied: false }));
+  }
+
+  build() {
+    const o = this.state.o;
+    const p = [this.state.o.scrcpyPath.split('/').pop() || 'scrcpy'];
+    const deg = v => (v === 'flip0' ? 'flip0' : v.slice(1));
+    if (o.serial) p.push('--serial=' + o.serial);
+    if (o.otg) {
+      p.push('--otg');
+    } else {
+      if (o.videoSource === 'camera') {
+        p.push('--video-source=camera', '--camera-facing=' + o.cameraFacing);
+        if (o.cameraId) p.push('--camera-id=' + o.cameraId);
+        if (o.cameraAr) p.push('--camera-ar=' + o.cameraAr);
+        else if (o.cameraSize) p.push('--camera-size=' + o.cameraSize);
+        if (o.cameraFps) p.push('--camera-fps=' + o.cameraFps);
+        if (o.cameraHighSpeed) p.push('--camera-high-speed');
+      }
+      if (o.noVideo) p.push('--no-video');
+      else {
+        p.push('--video-codec=' + o.videoCodec);
+        if (o.videoEncoder) p.push('--video-encoder=' + o.videoEncoder);
+        if (o.bitRate) p.push('--video-bit-rate=' + o.bitRate);
+        if (o.videoSource === 'display') {
+          if (o.maxSize) p.push('--max-size=' + o.maxSize);
+          if (o.crop) p.push('--crop=' + o.crop);
+          if (o.displayId && o.displayId !== '0') p.push('--display-id=' + o.displayId);
+          if (o.displayOrientation !== 'o0') p.push('--display-orientation=' + deg(o.displayOrientation));
+        }
+        if (o.maxFps) p.push('--max-fps=' + o.maxFps);
+        if (o.videoBuffer && o.videoBuffer !== '0') p.push('--video-buffer=' + o.videoBuffer);
+        if (o.noVideoPlayback) p.push('--no-video-playback');
+        if (o.printFps) p.push('--print-fps');
+        if (o.v4l2Sink) {
+          p.push('--v4l2-sink=' + o.v4l2Sink);
+          if (o.v4l2Buffer && o.v4l2Buffer !== '0') p.push('--v4l2-buffer=' + o.v4l2Buffer);
+        }
+      }
+      if (o.noAudio) p.push('--no-audio');
+      else {
+        p.push('--audio-codec=' + o.audioCodec, '--audio-source=' + o.audioSource);
+        if (o.audioEncoder) p.push('--audio-encoder=' + o.audioEncoder);
+        if (o.audioBitRate) p.push('--audio-bit-rate=' + o.audioBitRate);
+        if (o.audioBuffer) p.push('--audio-buffer=' + o.audioBuffer);
+        if (o.audioDup) p.push('--audio-dup');
+        if (o.requireAudio) p.push('--require-audio');
+        if (o.noAudioPlayback) p.push('--no-audio-playback');
+      }
+      if (o.recordEnabled) {
+        p.push('--record=' + o.recordPath, '--record-format=' + o.recordFormat);
+        if (o.timeLimit) p.push('--time-limit=' + o.timeLimit);
+        if (o.recordOrientation !== 'o0') p.push('--record-orientation=' + deg(o.recordOrientation));
+        if (o.noPlayback) p.push('--no-playback');
+      }
+      if (o.noControl) p.push('--no-control');
+      else {
+        if (o.keyboard !== 'sdk') p.push('--keyboard=' + o.keyboard);
+        if (o.mouse !== 'sdk') p.push('--mouse=' + o.mouse);
+        if (o.gamepad !== 'disabled') p.push('--gamepad=' + o.gamepad);
+        if (o.shortcutMod !== 'lalt') p.push('--shortcut-mod=' + o.shortcutMod);
+        if (o.noClipboardAutosync) p.push('--no-clipboard-autosync');
+        if (o.forwardAllClicks) p.push('--forward-all-clicks');
+        if (o.legacyPaste) p.push('--legacy-paste');
+        if (o.preferText) p.push('--prefer-text');
+        if (o.rawKeyEvents) p.push('--raw-key-events');
+        if (o.mouseBind) p.push('--mouse-bind=++++');
+      }
+      if (o.newDisplay) {
+        p.push('--new-display=' + o.newDisplaySize);
+        if (o.startApp) p.push('--start-app=' + o.startApp);
+        if (o.noVdDestroyContent) p.push('--no-vd-destroy-content');
+        if (o.noVdSystemDecorations) p.push('--no-vd-system-decorations');
+      }
+      if (o.windowTitle) p.push('--window-title="' + o.windowTitle + '"');
+      if (o.windowOrientation !== 'o0') p.push('--orientation=' + deg(o.windowOrientation));
+      if (o.windowX) p.push('--window-x=' + o.windowX);
+      if (o.windowY) p.push('--window-y=' + o.windowY);
+      if (o.windowWidth) p.push('--window-width=' + o.windowWidth);
+      if (o.windowHeight) p.push('--window-height=' + o.windowHeight);
+      if (o.fullscreen) p.push('--fullscreen');
+      if (o.alwaysOnTop) p.push('--always-on-top');
+      if (o.borderless) p.push('--window-borderless');
+      if (o.noMipmaps) p.push('--no-mipmaps');
+    }
+    if (o.turnScreenOff) p.push('--turn-screen-off');
+    if (o.stayAwake) p.push('--stay-awake');
+    if (o.showTouches) p.push('--show-touches');
+    if (o.disableScreensaver) p.push('--disable-screensaver');
+    if (o.powerOffOnClose) p.push('--power-off-on-close');
+    if (o.noPowerOn) p.push('--no-power-on');
+    if (o.tcpip) p.push('--tcpip=' + o.tcpipAddr);
+    if (o.port !== '27183') p.push('--port=' + o.port);
+    if (o.forceAdbForward) p.push('--force-adb-forward');
+    if (o.selectUsb) p.push('--select-usb');
+    if (o.selectTcpip) p.push('--select-tcpip');
+    if (o.tunnelHost) p.push('--tunnel-host=' + o.tunnelHost);
+    if (o.tunnelPort) p.push('--tunnel-port=' + o.tunnelPort);
+    if (o.killAdbOnClose) p.push('--kill-adb-on-close');
+    if (o.noCleanup) p.push('--no-cleanup');
+    if (o.logLevel !== 'info') p.push('--verbosity=' + o.logLevel);
+    return p;
+  }
+
+  renderVals() {
+    const st = this.state;
+    const o = st.o;
+    const set = {};
+    Object.keys(o).forEach(k => { set[k] = e => this.setO(k, e); });
+    set.tab = e => this.setState({ tab: e.target.value });
+    set.sect = e => this.setState({ sect: e.target.value });
+    set.deviceView = e => this.setState({ deviceView: e.target.value });
+    set.errKey = e => this.setState({ errKey: e.target.value });
+    set.sel = e => {
+      const v = e.target.value;
+      this.setState(s => {
+        const on = s.picked.indexOf(v) === -1;
+        const picked = on ? s.picked.concat([v]) : s.picked.filter(x => x !== v);
+        const sel = picked.length ? picked[0] : s.sel;
+        return { picked, sel, o: Object.assign({}, s.o, { serial: sel }) };
+      });
+    };
+
+    const eq = {};
+    Object.keys(CHOICES).forEach(k => {
+      eq[k] = {};
+      const cur = k === 'tab' ? st.tab : k === 'sect' ? st.sect : k === 'deviceView' ? st.deviceView : o[k];
+      CHOICES[k].forEach(v => { eq[k][v] = cur === v; });
+    });
+
+    const multi = st.picked.length > 1;
+    const parts = this.build();
+    let cmd = parts.join(' \\\n  ');
+    if (multi) {
+      const body = ['scrcpy'].concat(parts.slice(1).map(x => (x.indexOf('--serial=') === 0 ? '--serial="$S"' : x)));
+      cmd = 'for S in ' + st.picked.join(' ') + '; do\n  ' + body.join(' \\\n    ') + ' &\ndone';
+    }
+    const dev = DEVICES.find(d => d.serial === st.sel) || DEVICES[0];
+    const err = ERRORS.find(x => x.key === st.errKey) || ERRORS[0];
+    const logLines = st.o.logFilter === 'all'
+      ? LOG
+      : LOG.filter(l => l.lvl.toLowerCase().indexOf(st.o.logFilter) === 0);
+
+    return {
+      o, set, eq, cmd,
+      yes: true,
+      noop: () => {},
+      flagCount: parts.length - 1,
+      activeTitle: TITLES[st.tab],
+      selLabel: multi ? st.picked.length + ' cihaz seçili' : dev.name + ' · ' + dev.serial,
+      devices: DEVICES.map(d => Object.assign({}, d, { selected: st.picked.indexOf(d.serial) !== -1 })),
+      err, errors: ERRORS.map(x => Object.assign({}, x, { on: x.key === st.errKey })), multi,
+      pickedCount: st.picked.length,
+      mirrorEmbedded: o.mirrorMode === 'embedded',
+      mirrorExternal: o.mirrorMode === 'external',
+      profiles: PROFILES, sessions: SESSIONS, metrics: METRICS, shortcuts: SHORTCUTS, logLines,
+      liveStats: '58 fps · 7.9 Mb/s · 38 ms',
+      statusLine: (multi ? st.picked.length + ' cihaz hazır' : dev.name + ' hazır') + ' · ' + (parts.length - 1) + ' bayrak · ' + o.videoCodec + (o.noAudio ? '' : ' + ' + o.audioCodec),
+      startLabel: multi ? st.picked.length + ' cihazda başlat' : 'Aynalamayı başlat',
+      cmdOpen: st.cmdOpen,
+      cmdToggleLabel: st.cmdOpen ? 'Komutu gizle' : 'Komutu göster',
+      copyLabel: st.copied ? 'Kopyalandı' : 'Kopyala',
+      toggleCmd: () => this.setState(s => ({ cmdOpen: !s.cmdOpen })),
+      copyCmd: () => {
+        try { navigator.clipboard.writeText(parts.join(' ')); } catch (e) {}
+        this.setState({ copied: true });
+      },
+      startSession: () => this.setState({ tab: 'session' }),
+      startFromRow: () => this.setState({ tab: 'session' }),
+      applyProfile: () => this.setState({ tab: 'config', sect: 'video' }),
+      resetAll: () => this.setState({ o: Object.assign({}, DEFAULTS) }),
+      tDevices: st.tab === 'devices', tConfig: st.tab === 'config', tSession: st.tab === 'session',
+      tProfiles: st.tab === 'profiles', tLog: st.tab === 'log', tKeys: st.tab === 'keys', tSettings: st.tab === 'settings',
+      dvList: st.deviceView === 'list', dvEmpty: st.deviceView === 'empty', dvError: st.deviceView === 'error',
+      sVideo: st.sect === 'video', sAudio: st.sect === 'audio', sRecord: st.sect === 'record',
+      sControl: st.sect === 'control', sVdisplay: st.sect === 'vdisplay', sCamera: st.sect === 'camera',
+      sWindow: st.sect === 'window', sNetwork: st.sect === 'network',
+    };
+  }
+}
+
+</script>
+</body>
+</html>
