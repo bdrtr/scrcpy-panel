@@ -1,0 +1,93 @@
+// Configuration · Bölüm 03 — Kayıt
+//
+// Recording is independent of the mirror window: the leading `--record`
+// checkbox is the master switch, and Rust only emits the recording flags when
+// `Cfg.record-enabled` is set. The fields below it stay live either way, as the
+// mockup has them. Field order, labels and placeholders come from design/mockup.
+
+import { Theme } from "../theme.slint";
+import { Cfg } from "../state.slint";
+import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Seg, Chk } from "../components.slint";
+
+export component SectionRecord inherits VerticalLayout {
+    spacing: Theme.s4;
+
+    SectionHead {
+        kicker: "Bölüm 03";
+        title: "Kayıt";
+        desc: "Kayıt, ayna penceresinden bağımsız çalışır. Süre sınırı dolduğunda dosya düzgün kapatılır; oturum devam eder.";
+    }
+
+    Hr {}
+
+    Chk {
+        text: "Kaydı etkinleştir · --record";
+        strong: true;
+        checked <=> Cfg.record-enabled;
+        toggled => { Cfg.changed(); }
+    }
+
+    Grp {
+        Row {
+            // The path takes two of the three columns in the mockup.
+            Fld {
+                colspan: 2;
+                label: "Dosya yolu";
+                Inp {
+                    text <=> Cfg.record-path;
+                    placeholder: "~/Videos/scrcpy/oturum-01.mp4";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Biçim · --record-format";
+                Seg {
+                    labels: ["mp4", "mkv", "opus", "wav"];
+                    value <=> Cfg.record-format;
+                    changed => { Cfg.changed(); }
+                }
+            }
+        }
+        Row {
+            Fld {
+                label: "Süre sınırı · --time-limit (s)";
+                Inp {
+                    text <=> Cfg.time-limit;
+                    placeholder: "300";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Kayıt yönü · --record-orientation";
+                Seg {
+                    labels: ["0°", "90°", "180°", "270°"];
+                    values: ["0", "90", "180", "270"];
+                    value <=> Cfg.record-orientation;
+                    changed => { Cfg.changed(); }
+                }
+            }
+            Rectangle {}
+        }
+    }
+
+    Hr {}
+
+    ChkGrp {
+        Row {
+            Chk {
+                text: "Yalnızca kaydet, gösterme · --no-playback";
+                checked <=> Cfg.no-playback;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Dosya adına zaman damgası ekle";
+                checked <=> Cfg.record-timestamp;
+                toggled => { Cfg.changed(); }
+            }
+        }
+    }
+
+    Rectangle { vertical-stretch: 1; }
+}

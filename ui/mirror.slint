@@ -80,7 +80,7 @@ export component MirrorWindow inherits Window {
             source: root.frame;
             image-fit: fill;
             image-rendering: smooth;
-            rotation-angle: root.rotation * 1deg;
+            transform-rotation: root.rotation * 1deg;
         }
 
         touch := TouchArea {

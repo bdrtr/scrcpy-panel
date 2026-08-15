@@ -1,0 +1,119 @@
+// Tab · Profiller
+//
+// A saved profile is a complete flag set, not a delta: applying one rewrites
+// every field in the Yapılandırma tab. The list itself lives in Rust — the
+// panel only renders App.profiles and fires the three callbacks back.
+//
+// The mockup lays the cards out in a three-column CSS grid. Slint's GridLayout
+// takes static `Row { }` children, so it cannot be driven by a `for` over a
+// dynamic model; the cards are stacked in a VerticalLayout inside a ScrollView
+// instead. See the note at the end of this file.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { App } from "../state.slint";
+import { Kicker, SectionHead, Hr, Btn, Mono } from "../components.slint";
+
+export component TabProfiles inherits VerticalLayout {
+    padding: Theme.s6;
+    spacing: Theme.s4;
+
+    // ── Header: heading on the left, save action on the right ────────
+    HorizontalLayout {
+        spacing: Theme.s4;
+
+        SectionHead {
+            horizontal-stretch: 1;
+            kicker: "Kayıtlı yapılandırmalar";
+            title: "Profiller";
+            desc: "Her profil tam bir bayrak kümesidir. Bir profili uygulamak Yapılandırma sekmesindeki tüm alanları yeniden yazar; cihaza sabitlenen profiller o cihaz bağlandığında öntanımlı olur.";
+        }
+
+        // `align-items: flex-end` in the mockup — the button sits on the
+        // baseline of the description, not in the middle of the block.
+        VerticalLayout {
+            alignment: end;
+            horizontal-stretch: 0;
+            Btn {
+                text: "Geçerli ayarları kaydet";
+                kind: "primary";
+                clicked => { App.save-profile(); }
+            }
+        }
+    }
+
+    Hr {}
+
+    // ── The cards ────────────────────────────────────────────────────
+    ScrollView {
+        vertical-stretch: 1;
+        // Keep the long monospace flag lines from forcing a horizontal
+        // scrollbar; they wrap inside the card instead.
+        viewport-width: self.visible-width;
+
+        VerticalLayout {
+            spacing: Theme.s2;
+
+            for p[i] in App.profiles: Rectangle {
+                background: Theme.surface;
+
+                VerticalLayout {
+                    padding: Theme.s3;
+                    spacing: Theme.s2;
+
+                    Kicker { text: p.kicker.to-uppercase(); }
+
+                    Text {
+                        text: p.name;
+                        font-family: Theme.font;
+                        font-size: 17px;
+                        font-weight: Theme.heading-weight;
+                        color: Theme.text;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        text: p.desc;
+                        font-size: 13px;
+                        color: Theme.text-70;
+                        wrap: word-wrap;
+                    }
+
+                    Mono {
+                        text: p.flags;
+                        font-size: 11px;
+                        color: Theme.neutral-700;
+                        wrap: word-wrap;
+                    }
+
+                    // `border-top` on the action row in the mockup.
+                    Rectangle {
+                        height: 1px;
+                        background: Theme.divider;
+                    }
+
+                    HorizontalLayout {
+                        spacing: Theme.s2;
+
+                        Btn {
+                            text: "Uygula";
+                            kind: "ghost";
+                            clicked => { App.apply-profile(i); }
+                        }
+                        Btn {
+                            text: "Düzenle";
+                            kind: "ghost";
+                            clicked => { App.edit-profile(i); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Btn {
+                            text: "Sil";
+                            kind: "ghost";
+                            clicked => { App.delete-profile(i); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

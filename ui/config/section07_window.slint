@@ -1,0 +1,154 @@
+// Configuration · Bölüm 07 — Pencere ve ekran
+//
+// Mirror window geometry and the device power flags. The title field spans two
+// grid columns in the mockup, so the rotation Seg sits beside it; the position
+// and size boxes follow in their own rows. Every control writes into Cfg and
+// then calls Cfg.changed() so the command bar recomputes.
+
+import { Theme } from "../theme.slint";
+import { Cfg } from "../state.slint";
+import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Seg, Chk } from "../components.slint";
+
+export component SectionWindow inherits VerticalLayout {
+    spacing: Theme.s4;
+
+    SectionHead {
+        kicker: "Bölüm 07";
+        title: "Pencere ve ekran";
+        desc: "Ayna penceresinin yerleşimi ve cihazın güç davranışı. Konum ve boyut alanları boş bırakılırsa pencere cihaz oranına göre açılır.";
+    }
+
+    Hr {}
+
+    Grp {
+        Row {
+            Fld {
+                colspan: 2;
+                label: "Pencere başlığı · --window-title";
+                Inp {
+                    text <=> Cfg.window-title;
+                    placeholder: "scrcpy";
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Döndürme · --orientation";
+                Seg {
+                    labels: ["0°", "90°", "180°", "270°"];
+                    values: ["0", "90", "180", "270"];
+                    value <=> Cfg.orientation;
+                    changed => { Cfg.changed(); }
+                }
+            }
+        }
+        Row {
+            Fld {
+                label: "X · --window-x";
+                Inp {
+                    text <=> Cfg.window-x;
+                    placeholder: "0";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Y · --window-y";
+                Inp {
+                    text <=> Cfg.window-y;
+                    placeholder: "0";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Genişlik · --window-width";
+                Inp {
+                    text <=> Cfg.window-width;
+                    placeholder: "1280";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+        }
+        Row {
+            Fld {
+                label: "Yükseklik · --window-height";
+                Inp {
+                    text <=> Cfg.window-height;
+                    placeholder: "720";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Rectangle {}
+            Rectangle {}
+        }
+    }
+
+    Hr {}
+
+    ChkGrp {
+        Row {
+            Chk {
+                text: "Tam ekran · --fullscreen";
+                checked <=> Cfg.fullscreen;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Her zaman üstte · --always-on-top";
+                checked <=> Cfg.always-on-top;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Kenarsız · --window-borderless";
+                checked <=> Cfg.window-borderless;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Cihaz ekranını kapat · --turn-screen-off";
+                checked <=> Cfg.turn-screen-off;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Cihazı uyanık tut · --stay-awake";
+                checked <=> Cfg.stay-awake;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Dokunuşları göster · --show-touches";
+                checked <=> Cfg.show-touches;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Ekran koruyucuyu engelle · --disable-screensaver";
+                checked <=> Cfg.disable-screensaver;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Kapanışta ekranı kapat · --power-off-on-close";
+                checked <=> Cfg.power-off-on-close;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Başlarken açma · --no-power-on";
+                checked <=> Cfg.no-power-on;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Mipmap kapalı · --no-mipmaps";
+                checked <=> Cfg.no-mipmaps;
+                toggled => { Cfg.changed(); }
+            }
+        }
+    }
+
+    Rectangle { vertical-stretch: 1; }
+}

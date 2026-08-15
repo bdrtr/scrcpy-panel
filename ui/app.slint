@@ -1,0 +1,10 @@
+// Root of the Slint tree.
+//
+// slint-build generates one Rust module, so every window the application can
+// open is re-exported from here rather than compiled separately.
+
+import { MirrorWindow } from "mirror.slint";
+import { PanelWindow } from "panel.slint";
+import { App, Cfg, Settings, DeviceRow, LogRow, ProfileCard, ShortcutRow, MetricRow } from "state.slint";
+
+export { MirrorWindow, PanelWindow, App, Cfg, Settings, DeviceRow, LogRow, ProfileCard, ShortcutRow, MetricRow }

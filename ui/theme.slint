@@ -1,0 +1,60 @@
+// Design tokens, transcribed from design/mockup/_ds/*/styles.css.
+//
+// The mockup's palette is a light, sharp-cornered "modernist" system: every
+// radius is 0, dividers are the text colour at 40%, and the single accent is a
+// hot red-orange. Values are copied literally rather than re-derived, so the
+// panel and the mockup can be compared pixel for pixel.
+
+export global Theme {
+    // Ground
+    out property <color> bg: #f3f2f2;
+    out property <color> surface: #eae9e9;
+    out property <color> text: #201e1d;
+    out property <color> divider: #201e1d66; // text at 40%
+
+    // Accent ramp
+    out property <color> accent: #ec3013;
+    out property <color> accent-100: #fff2ef;
+    out property <color> accent-200: #ffe0d9;
+    out property <color> accent-600: #dd2b0f;
+    out property <color> accent-700: #ae1800;
+    out property <color> accent-800: #7c1405;
+
+    // Neutral ramp
+    out property <color> neutral-100: #f8f4f4;
+    out property <color> neutral-200: #eae7e7;
+    out property <color> neutral-300: #d7d3d3;
+    out property <color> neutral-400: #bab6b6;
+    out property <color> neutral-500: #9b9797;
+    out property <color> neutral-600: #7d7979;
+    out property <color> neutral-700: #605d5d;
+    out property <color> neutral-800: #444141;
+    out property <color> neutral-900: #2d2b2b;
+
+    // The CSS mixed hover and active states out of the text and accent colours;
+    // these are those mixes pre-computed as alpha.
+    out property <color> wash-4: #201e1d0a;
+    out property <color> wash-7: #201e1d12;
+    out property <color> wash-14: #201e1d24;
+    out property <color> accent-wash-10: #ec30131a;
+    out property <color> accent-wash-18: #ec30132e;
+
+    // Text at reduced strength, for labels and secondary copy
+    out property <color> text-50: #201e1d80;
+    out property <color> text-60: #201e1d99;
+    out property <color> text-70: #201e1db3;
+
+    // Type. Archivo is the mockup's face; Slint falls back to the system sans
+    // when it is not installed.
+    out property <string> font: "Archivo";
+    out property <string> mono: "monospace";
+    out property <int> heading-weight: 800;
+
+    // Space scale
+    out property <length> s1: 4px;
+    out property <length> s2: 8px;
+    out property <length> s3: 12px;
+    out property <length> s4: 16px;
+    out property <length> s6: 24px;
+    out property <length> s8: 32px;
+}

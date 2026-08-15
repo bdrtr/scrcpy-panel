@@ -4,6 +4,10 @@ use clap::Parser;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "scrcpyrust", version, about)]
 pub struct Options {
+    /// Open the control panel instead of mirroring straight away
+    #[arg(long, default_value = "false")]
+    pub panel: bool,
+
     /// Device serial number (from `adb devices`)
     #[arg(short, long)]
     pub serial: Option<String>,
@@ -73,7 +77,10 @@ pub struct Options {
     pub port_range: String,
 
     /// Turn screen off while mirroring
-    #[arg(short = 'S', long, default_value = "true")]
+    ///
+    /// Upstream defaulted this to true, so every session blanked the device
+    /// whether or not it was asked to. scrcpy's own default is off.
+    #[arg(short = 'S', long, default_value = "false")]
     pub turn_screen_off: bool,
 
     /// Use forward connection instead of reverse

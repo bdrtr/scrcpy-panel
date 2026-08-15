@@ -1,0 +1,151 @@
+// Tab · Ayarlar
+//
+// Panel preferences rather than scrcpy flags: every control here writes into
+// Settings and calls Settings.changed(), so Rust can persist the configuration
+// file. Layout, headings and copy come from design/mockup.
+//
+// The mockup opens the first group with a "scrcpy çalıştırılabiliri" path.
+// This fork *is* the client — there is no external scrcpy binary to point at —
+// so that field is dropped and the adb executable takes its place, which
+// leaves the group at exactly the three columns `.grp` draws.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Settings } from "../state.slint";
+import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Seg, Chk } from "../components.slint";
+
+export component TabSettings inherits VerticalLayout {
+    padding: Theme.s6;
+
+    ScrollView {
+        VerticalLayout {
+            spacing: Theme.s4;
+
+            SectionHead {
+                kicker: "Uygulama";
+                title: "Ayarlar";
+                desc: "Bu değerler yapılandırma dosyasına yazılır ve tüm profiller için geçerlidir.";
+            }
+
+            Hr {}
+
+            // ── adb ve sunucu ────────────────────────────────────────────
+            Grp {
+                Row {
+                    Fld {
+                        colspan: 2;
+                        label: "adb çalıştırılabiliri";
+                        Inp {
+                            text <=> Settings.adb-path;
+                            placeholder: "/usr/local/bin/adb";
+                            mono: true;
+                            edited => { Settings.changed(); }
+                        }
+                    }
+                    Fld {
+                        label: "Sürüm";
+                        // Disabled in the mockup too: this only reports the
+                        // server version that was detected, it is not a setting.
+                        Inp {
+                            text <=> Settings.server-version;
+                            placeholder: "4.1";
+                            mono: true;
+                            enabled: false;
+                        }
+                    }
+                    Fld {
+                        label: "adb sunucu portu";
+                        Inp {
+                            text <=> Settings.adb-port;
+                            placeholder: "5037";
+                            mono: true;
+                            edited => { Settings.changed(); }
+                        }
+                    }
+                }
+            }
+
+            Hr {}
+
+            // ── Arayüz ve klasörler ──────────────────────────────────────
+            Grp {
+                Row {
+                    Fld {
+                        label: "Arayüz dili";
+                        // No alignment wrapper: the mockup draws this seg at
+                        // width 100%, so it fills the field.
+                        Seg {
+                            labels: ["Türkçe", "English"];
+                            values: ["tr", "en"];
+                            value <=> Settings.language;
+                            changed => { Settings.changed(); }
+                        }
+                    }
+                    Fld {
+                        label: "Ayna penceresi";
+                        Seg {
+                            labels: ["Panele gömülü", "Ayrı pencere"];
+                            values: ["embedded", "window"];
+                            value <=> Settings.mirror-mode;
+                            changed => { Settings.changed(); }
+                        }
+                    }
+                    Fld {
+                        label: "Kayıt klasörü";
+                        Inp {
+                            text <=> Settings.record-dir;
+                            placeholder: "~/Videos/scrcpy";
+                            mono: true;
+                            edited => { Settings.changed(); }
+                        }
+                    }
+                }
+                Row {
+                    Fld {
+                        label: "Ekran görüntüsü klasörü";
+                        Inp {
+                            text <=> Settings.screenshot-dir;
+                            placeholder: "~/Pictures/scrcpy";
+                            mono: true;
+                            edited => { Settings.changed(); }
+                        }
+                    }
+                    Rectangle {}
+                    Rectangle {}
+                }
+            }
+
+            Hr {}
+
+            // ── Davranış ─────────────────────────────────────────────────
+            ChkGrp {
+                Row {
+                    Chk {
+                        text: "Cihaz bağlandığında öntanımlı profili başlat";
+                        checked <=> Settings.autostart-profile;
+                        toggled => { Settings.changed(); }
+                    }
+                    Chk {
+                        text: "Kapatınca sistem tepsisine küçült";
+                        checked <=> Settings.minimize-to-tray;
+                        toggled => { Settings.changed(); }
+                    }
+                }
+                Row {
+                    Chk {
+                        text: "Başlangıçta scrcpy sürümünü denetle";
+                        checked <=> Settings.check-version;
+                        toggled => { Settings.changed(); }
+                    }
+                    Chk {
+                        text: "Günlüğü diske yaz";
+                        checked <=> Settings.log-to-disk;
+                        toggled => { Settings.changed(); }
+                    }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+}

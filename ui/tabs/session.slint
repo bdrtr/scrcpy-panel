@@ -1,0 +1,449 @@
+// Tab · Oturum — the live session.
+//
+// Two columns: the mirror preview on the left, with the device key pad pinned
+// under it, and the session/metrics/transfer column on the right. The preview
+// column shows either the embedded placeholder or the "separate window" card,
+// depending on Settings.mirror-mode; everything else is identical in both.
+//
+// The panel never decodes video here — the dark rectangle is a stand-in that
+// Rust replaces with the real surface, so the layout can be checked without a
+// device attached.
+//
+// Everything that describes a running session — the CANLI tag, the preview,
+// the metrics and "Oturumu durdur" — is gated on App.session-running; with no
+// session the preview column carries a short note instead. The device key pad
+// stays live either way: it goes over adb and needs no scrcpy process.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { App, Cfg, Settings, MetricRow } from "../state.slint";
+import { Btn, Kicker, Mono, SectionHead, Tag } from "../components.slint";
+
+export component TabSession inherits VerticalLayout {
+    padding: Theme.s6;
+
+    HorizontalLayout {
+        spacing: Theme.s4;
+
+        // ── Ayna sütunu ──────────────────────────────────────────────
+        Rectangle {
+            horizontal-stretch: 1;
+            background: Theme.neutral-200;
+            clip: true;
+
+            VerticalLayout {
+                // Üst şerit: canlı rozeti, oturum başlığı, anlık ölçüm
+                Rectangle {
+                    height: 46px;
+                    background: Theme.bg;
+
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        background: Theme.divider;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: Theme.s4;
+                        padding-right: Theme.s4;
+                        padding-top: Theme.s3;
+                        padding-bottom: Theme.s3;
+                        spacing: Theme.s3;
+
+                        if App.session-running: VerticalLayout {
+                            alignment: center;
+                            Tag { text: "CANLI"; kind: "accent"; }
+                        }
+
+                        Mono {
+                            text: App.session-title;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        Mono {
+                            text: App.session-meta;
+                            color: Theme.neutral-700;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                // Önizleme gövdesi
+                Rectangle {
+                    vertical-stretch: 1;
+                    clip: true;
+
+                    // Oturum yokken önizlemenin yerine kısa bir not geçer.
+                    if !App.session-running: VerticalLayout {
+                        padding: Theme.s8;
+                        alignment: center;
+
+                        SectionHead {
+                            kicker: "Oturum yok";
+                            title: "Çalışan oturum yok";
+                            desc: "Alt şeritteki \"Ayarlarınla başlat\" düğmesi geçerli yapılandırmayı seçili cihazda çalıştırır. Cihaz tuşları oturum olmadan da adb üzerinden çalışır.";
+                        }
+                    }
+
+                    // Panele gömülü kip: telefon oranında bir yer tutucu.
+                    if App.session-running && Settings.mirror-mode == "embedded": Rectangle {
+                        phone := Rectangle {
+                            height: parent.height - 2 * Theme.s6;
+                            width: self.height * 0.4615; // 1080 / 2340
+                            x: (parent.width - self.width) / 2;
+                            y: Theme.s6;
+                            background: Theme.neutral-900;
+
+                            VerticalLayout {
+                                padding: Theme.s3;
+
+                                HorizontalLayout {
+                                    vertical-stretch: 0;
+                                    Text {
+                                        text: "09:41";
+                                        font-family: Theme.mono;
+                                        font-size: 10px;
+                                        color: Theme.neutral-500;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    Text {
+                                        text: "LTE ▮";
+                                        font-family: Theme.mono;
+                                        font-size: 10px;
+                                        color: Theme.neutral-500;
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    vertical-stretch: 1;
+                                    alignment: center;
+                                    spacing: 6px;
+
+                                    Text {
+                                        text: "AYNA GÖRÜNTÜSÜ";
+                                        font-family: Theme.mono;
+                                        font-size: 11px;
+                                        letter-spacing: 1.54px;
+                                        color: Theme.neutral-500;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: "1080 × 2340";
+                                        font-family: Theme.mono;
+                                        font-size: 11px;
+                                        color: Theme.neutral-500;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+
+                                // Ana ekran çubuğu — genişliğin %40'ı, ortalı.
+                                HorizontalLayout {
+                                    height: 3px;
+                                    Rectangle { horizontal-stretch: 3; }
+                                    Rectangle {
+                                        horizontal-stretch: 4;
+                                        background: Theme.neutral-600;
+                                    }
+                                    Rectangle { horizontal-stretch: 3; }
+                                }
+                            }
+                        }
+                    }
+
+                    // Ayrı pencere kipi: açıklama kartı.
+                    if App.session-running && Settings.mirror-mode == "window": VerticalLayout {
+                        padding: Theme.s8;
+                        spacing: Theme.s4;
+                        alignment: center;
+
+                        Kicker { text: "AYRI PENCERE KİPİ"; }
+
+                        Text {
+                            text: "Ayna scrcpy penceresinde açık";
+                            font-family: Theme.font;
+                            font-size: 20px;
+                            font-weight: Theme.heading-weight;
+                            color: Theme.text;
+                        }
+
+                        Text {
+                            text: "Görüntü panelin dışında, scrcpy'nin kendi SDL penceresinde çalışıyor. Panel kumanda, ölçüm ve kayıt görevlerini üstlenir; kısayollar o pencere odaktayken geçerlidir.";
+                            font-size: 13px;
+                            color: Theme.neutral-700;
+                            wrap: word-wrap;
+                        }
+
+                        Rectangle {
+                            background: Theme.bg;
+                            border-width: 2px;
+                            border-color: Theme.divider;
+                            vertical-stretch: 0;
+
+                            HorizontalLayout {
+                                padding: Theme.s4;
+                                spacing: Theme.s4;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 46px;
+                                        height: 92px;
+                                        background: Theme.neutral-900;
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+
+                                    Text {
+                                        text: App.session-title + " — ayna";
+                                        font-family: Theme.mono;
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: Theme.text;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: "540 × 1170 · her zaman üstte kapalı";
+                                        font-family: Theme.mono;
+                                        font-size: 11px;
+                                        color: Theme.neutral-700;
+                                        overflow: elide;
+                                    }
+                                }
+
+                                Rectangle { horizontal-stretch: 1; }
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        spacing: Theme.s2;
+                                        Btn {
+                                            text: "Öne getir";
+                                            clicked => { App.raise-session(); }
+                                        }
+                                        Btn {
+                                            text: "Panele göm";
+                                            clicked => {
+                                                Settings.mirror-mode = "embedded";
+                                                Settings.changed();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Cihaz tuş takımı
+                Rectangle {
+                    background: Theme.bg;
+                    vertical-stretch: 0;
+
+                    Rectangle {
+                        y: 0;
+                        height: 1px;
+                        background: Theme.divider;
+                    }
+
+                    VerticalLayout {
+                        padding-left: Theme.s4;
+                        padding-right: Theme.s4;
+                        padding-top: Theme.s3;
+                        padding-bottom: Theme.s3;
+                        spacing: Theme.s2;
+
+                        HorizontalLayout {
+                            spacing: Theme.s2;
+                            alignment: start;
+                            Btn { text: "Geri"; clicked => { App.device-key("back"); } }
+                            Btn { text: "Ana ekran"; clicked => { App.device-key("home"); } }
+                            Btn { text: "Son uygulamalar"; clicked => { App.device-key("apps"); } }
+                            Btn { text: "Bildirimler"; clicked => { App.device-key("notifications"); } }
+                        }
+                        HorizontalLayout {
+                            spacing: Theme.s2;
+                            alignment: start;
+                            Btn { text: "Ses −"; clicked => { App.device-key("volume-down"); } }
+                            Btn { text: "Ses +"; clicked => { App.device-key("volume-up"); } }
+                            Btn { text: "Güç"; clicked => { App.device-key("power"); } }
+                            Btn { text: "Ekranı döndür"; clicked => { App.device-key("rotate"); } }
+                        }
+                    }
+                }
+            }
+
+            // Sütun ayracı
+            Rectangle {
+                x: parent.width - 2px;
+                width: 2px;
+                background: Theme.divider;
+            }
+        }
+
+        // ── Kumanda sütunu ───────────────────────────────────────────
+        ScrollView {
+            width: 316px;
+            horizontal-stretch: 0;
+
+            VerticalLayout {
+                spacing: Theme.s3;
+
+                // Oturumlar
+                Kicker { text: "OTURUMLAR"; }
+
+                VerticalLayout {
+                    Rectangle { height: 1px; background: Theme.divider; }
+
+                    if App.session-running: Rectangle {
+                        height: 37px;
+
+                        HorizontalLayout {
+                            spacing: Theme.s2;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 7px;
+                                    height: 7px;
+                                    background: Theme.accent;
+                                }
+                            }
+
+                            Text {
+                                text: App.session-title;
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: Theme.text;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
+
+                            Text {
+                                text: App.session-meta;
+                                font-family: Theme.mono;
+                                font-size: 11px;
+                                color: Theme.neutral-700;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            background: Theme.divider;
+                        }
+                    }
+                }
+
+                // Ölçümler — yalnızca canlı oturumda anlamlı.
+                if App.session-running: Kicker { text: "ÖLÇÜMLER"; }
+
+                if App.session-running: VerticalLayout {
+                    for m in App.metrics: Rectangle {
+                        height: 33px;
+
+                        HorizontalLayout {
+                            padding: Theme.s2;
+                            spacing: Theme.s2;
+
+                            Text {
+                                text: m.key;
+                                font-size: 13px;
+                                color: Theme.neutral-700;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: m.value;
+                                font-family: Theme.mono;
+                                font-size: 13px;
+                                color: Theme.text;
+                                vertical-alignment: center;
+                                horizontal-alignment: right;
+                            }
+                        }
+
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            background: Theme.divider;
+                        }
+                    }
+                }
+
+                // Aktarım
+                Kicker { text: "AKTARIM"; }
+
+                Rectangle {
+                    border-width: 2px;
+                    border-color: Theme.divider;
+
+                    VerticalLayout {
+                        padding-left: Theme.s4;
+                        padding-right: Theme.s4;
+                        padding-top: Theme.s6;
+                        padding-bottom: Theme.s6;
+                        spacing: 4px;
+
+                        Text {
+                            text: "Dosyayı buraya bırakın";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: "APK bırakılırsa kurulur, diğer dosyalar /sdcard/Download altına gönderilir.";
+                            font-size: 12px;
+                            color: Theme.neutral-700;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                // Eylemler
+                VerticalLayout {
+                    spacing: Theme.s2;
+
+                    Btn {
+                        text: "Ekran görüntüsü al";
+                        block: true;
+                        clicked => { App.screenshot(); }
+                    }
+                    Btn {
+                        text: "Panoyu cihaza gönder";
+                        block: true;
+                        clicked => { App.send-clipboard(); }
+                    }
+                    // Tek düğme kaydı açar ve kapatır; etiket --record
+                    // durumunu izler.
+                    Btn {
+                        text: Cfg.record-enabled ? "Kaydı durdur" : "Kaydı başlat";
+                        block: true;
+                        clicked => { App.toggle-recording(); }
+                    }
+                    if App.session-running: Btn {
+                        text: "Oturumu durdur";
+                        kind: "primary";
+                        block: true;
+                        clicked => { App.stop-session(); }
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+}

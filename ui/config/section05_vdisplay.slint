@@ -1,0 +1,86 @@
+// Configuration · Bölüm 05 — Sanal ekran
+//
+// Everything here is gated on Cfg.new-display-enabled: without --new-display
+// the resolution, the start app and the two virtual-display flags mean nothing,
+// so the controls stay visible but disabled, exactly as the mockup shows them.
+
+import { Theme } from "../theme.slint";
+import { Cfg, App } from "../state.slint";
+import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Chk, Btn } from "../components.slint";
+
+export component SectionVdisplay inherits VerticalLayout {
+    spacing: Theme.s4;
+
+    SectionHead {
+        kicker: "Bölüm 05";
+        title: "Sanal ekran";
+        desc: "Android 11+ üzerinde cihazın kendi ekranına dokunmadan ayrı bir ekran oluşturur. Belirtilen uygulama doğrudan bu ekranda açılır; kapanışta içeriğin yok edilip edilmeyeceği seçilebilir.";
+    }
+
+    Hr {}
+
+    // The gate. Everything below it is dead until this is on.
+    Chk {
+        text: "Yeni sanal ekran oluştur · --new-display";
+        strong: true;
+        checked <=> Cfg.new-display-enabled;
+        toggled => { Cfg.changed(); }
+    }
+
+    Grp {
+        Row {
+            Fld {
+                label: "Çözünürlük / yoğunluk";
+                Inp {
+                    text <=> Cfg.new-display;
+                    placeholder: "1920x1080/420";
+                    mono: true;
+                    enabled: Cfg.new-display-enabled;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Başlatılacak uygulama · --start-app";
+                Inp {
+                    text <=> Cfg.start-app;
+                    placeholder: "?org.videolan.vlc";
+                    mono: true;
+                    enabled: Cfg.new-display-enabled;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Uygulama listesi";
+                Btn {
+                    text: "Cihazdan seç · --list-apps";
+                    kind: "secondary";
+                    height: 36px;
+                    block: true;
+                    enabled: Cfg.new-display-enabled;
+                    clicked => { App.list-apps(); }
+                }
+            }
+        }
+    }
+
+    Hr {}
+
+    ChkGrp {
+        Row {
+            Chk {
+                text: "Kapanışta içeriği koru · --no-vd-destroy-content";
+                checked <=> Cfg.no-vd-destroy-content;
+                enabled: Cfg.new-display-enabled;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Sistem çubuklarını gizle · --no-vd-system-decorations";
+                checked <=> Cfg.no-vd-system-decorations;
+                enabled: Cfg.new-display-enabled;
+                toggled => { Cfg.changed(); }
+            }
+        }
+    }
+
+    Rectangle { vertical-stretch: 1; }
+}

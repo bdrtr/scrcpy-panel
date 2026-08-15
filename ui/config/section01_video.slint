@@ -1,0 +1,175 @@
+// Configuration · Bölüm 01 — Video
+//
+// Reference section: the other seven are built the same way. Field order,
+// labels and placeholders come from design/mockup, and every control writes
+// straight into Cfg and then calls Cfg.changed() so the command bar recomputes.
+
+import { Theme } from "../theme.slint";
+import { Cfg } from "../state.slint";
+import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Seg, Chk } from "../components.slint";
+
+export component SectionVideo inherits VerticalLayout {
+    spacing: Theme.s4;
+
+    SectionHead {
+        kicker: "Bölüm 01";
+        title: "Video";
+        desc: "Kaynak, kodek ve görüntü boyutu. Kodlayıcı listesi cihazdan --list-encoders ile çekilir; boş bırakılırsa cihazın varsayılanı kullanılır.";
+    }
+
+    Hr {}
+
+    Grp {
+        Row {
+            Fld {
+                label: "Kaynak · --video-source";
+                Seg {
+                    labels: ["Ekran", "Kamera"];
+                    values: ["display", "camera"];
+                    value <=> Cfg.video-source;
+                    changed => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Kodek · --video-codec";
+                Seg {
+                    labels: ["h264", "h265", "av1"];
+                    value <=> Cfg.video-codec;
+                    changed => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Kodlayıcı · --video-encoder";
+                Inp {
+                    text <=> Cfg.video-encoder;
+                    placeholder: "c2.android.avc.encoder";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+        }
+        Row {
+            Fld {
+                label: "Bit hızı · --video-bit-rate";
+                Inp {
+                    text <=> Cfg.video-bit-rate;
+                    placeholder: "8M";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Azami boyut · --max-size";
+                Inp {
+                    text <=> Cfg.max-size;
+                    placeholder: "1920";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Azami kare · --max-fps";
+                Inp {
+                    text <=> Cfg.max-fps;
+                    placeholder: "60";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+        }
+        Row {
+            Fld {
+                label: "Kırpma · --crop";
+                Inp {
+                    text <=> Cfg.crop;
+                    placeholder: "1224:1440:0:0";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Ekran no · --display-id";
+                Inp {
+                    text <=> Cfg.display-id;
+                    placeholder: "0";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Ara bellek · --video-buffer (ms)";
+                Inp {
+                    text <=> Cfg.video-buffer;
+                    placeholder: "0";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+        }
+    }
+
+    Fld {
+        label: "Görüntü yönü · --display-orientation";
+        HorizontalLayout {
+            alignment: start;
+            Seg {
+                labels: ["0°", "90°", "180°", "270°", "Aynala"];
+                values: ["0", "90", "180", "270", "flip0"];
+                value <=> Cfg.display-orientation;
+                changed => { Cfg.changed(); }
+            }
+        }
+    }
+
+    Hr {}
+
+    ChkGrp {
+        Row {
+            Chk {
+                text: "Videoyu kapat · --no-video (yalnızca ses/kontrol)";
+                checked <=> Cfg.no-video;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Kare sayacını göster · --print-fps";
+                checked <=> Cfg.print-fps;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Görüntüyü oynatma · --no-video-playback";
+                checked <=> Cfg.no-video-playback;
+                toggled => { Cfg.changed(); }
+            }
+            Rectangle {}
+        }
+    }
+
+    Grp {
+        Row {
+            // The sink path takes two of the three columns in the mockup.
+            Fld {
+                colspan: 2;
+                label: "V4L2 çıkışı · --v4l2-sink (yalnızca Linux)";
+                Inp {
+                    text <=> Cfg.v4l2-sink;
+                    placeholder: "/dev/video0";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "V4L2 ara belleği · --v4l2-buffer (ms)";
+                Inp {
+                    text <=> Cfg.v4l2-buffer;
+                    placeholder: "0";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+        }
+    }
+
+    Rectangle { vertical-stretch: 1; }
+}

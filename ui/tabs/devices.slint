@@ -1,0 +1,415 @@
+// Tab · Cihazlar
+//
+// The mockup drives this tab with a "Önizleme durumu" segment (Liste / Boş /
+// Hata) so the three states can be inspected side by side. The real panel has
+// no such switch: the state falls out of the data. The list is rendered when
+// App.devices is non-empty, the empty card when it is empty and there is no
+// error, and the error card whenever App.device-error is set — so a partial
+// listing plus a warning shows both, which is what adb actually reports. The
+// wireless grid sits below whichever card is showing and is never gated: the
+// empty state's "TCP/IP ile bağlan" button needs its address field on screen.
+//
+// The TCP/IP address is the same value as section 08's --tcpip field, so it
+// binds Cfg.tcpip-addr and fires `changed()`. The pairing fields are panel
+// state (App), not scrcpy flags, and Rust reads them when the matching
+// callback fires.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { App, Cfg } from "../state.slint";
+import { Kicker, SectionHead, Hr, Fld, Inp, Chk, Btn, Tag, Mono } from "../components.slint";
+
+// `.table th` — 11px, uppercase, 0.08em tracking, over a 2px rule.
+component Th inherits Text {
+    font-family: Theme.font;
+    font-size: 11px;
+    letter-spacing: 0.88px;
+    color: Theme.text-60;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+// `.table td` — plain 14px body text over a 1px rule.
+component Td inherits Text {
+    font-size: 14px;
+    color: Theme.text;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+export component TabDevices inherits VerticalLayout {
+    padding: Theme.s6;
+    spacing: Theme.s4;
+
+    SectionHead {
+        kicker: "Bağlı donanım";
+        title: "Cihazlar";
+        desc: "USB ve kablosuz cihazlar adb devices -l ile listelenir. Birden fazla cihaz seçilebilir; aynı yapılandırma hepsinde aynı anda başlatılır ve alt şeritteki komut bir döngüye dönüşür.";
+    }
+
+    Hr {}
+
+    ScrollView {
+        vertical-stretch: 1;
+        // Long serials and error output must wrap rather than push a
+        // horizontal scrollbar under the table.
+        viewport-width: self.visible-width;
+
+        VerticalLayout {
+            spacing: Theme.s4;
+            alignment: start;
+
+            // ── Liste ────────────────────────────────────────────────
+            if App.devices.length > 0: VerticalLayout {
+                spacing: 0;
+
+                // Column widths are repeated in the header and in the row
+                // below; the two must stay in step or the table shears.
+                Rectangle {
+                    height: 34px;
+
+                    HorizontalLayout {
+                        padding-left: Theme.s2;
+                        padding-right: Theme.s2;
+                        spacing: Theme.s4;
+
+                        Rectangle { width: 34px; }
+                        Th {
+                            text: "CİHAZ";
+                            horizontal-stretch: 1;
+                            min-width: 150px;
+                        }
+                        Th { text: "SERİ NO"; width: 170px; }
+                        Th { text: "BAĞLANTI"; width: 90px; }
+                        Th { text: "ANDROID"; width: 80px; }
+                        Th { text: "EKRAN"; width: 100px; }
+                        Th { text: "DURUM"; width: 90px; }
+                        Th {
+                            text: "İŞLEM";
+                            width: 90px;
+                            horizontal-alignment: right;
+                        }
+                    }
+
+                    Rectangle {
+                        y: parent.height - 2px;
+                        height: 2px;
+                        background: Theme.divider;
+                    }
+                }
+
+                for d[i] in App.devices: Rectangle {
+                    height: 42px;
+                    background: row-touch.has-hover ? Theme.wash-4 : transparent;
+
+                    row-touch := TouchArea {}
+
+                    HorizontalLayout {
+                        padding-left: Theme.s2;
+                        padding-right: Theme.s2;
+                        spacing: Theme.s4;
+
+                        Rectangle {
+                            width: 34px;
+                            Chk {
+                                y: (parent.height - self.height) / 2;
+                                checked: d.selected;
+                                // Rust owns the selection; it flips the row in
+                                // App.devices and pushes the model back. The
+                                // re-read keeps the box honest if it refuses.
+                                toggled => {
+                                    App.select-device(d.serial);
+                                    self.checked = d.selected;
+                                }
+                            }
+                        }
+                        Td {
+                            text: d.name;
+                            font-weight: 600;
+                            horizontal-stretch: 1;
+                            min-width: 150px;
+                        }
+                        Mono {
+                            text: d.serial;
+                            width: 170px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Td { text: d.conn; width: 90px; }
+                        Td { text: d.android; width: 80px; }
+                        Mono {
+                            text: d.screen;
+                            width: 100px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Rectangle {
+                            width: 90px;
+                            Tag {
+                                y: (parent.height - self.height) / 2;
+                                text: d.state;
+                                kind: "neutral";
+                            }
+                        }
+                        Rectangle {
+                            width: 90px;
+                            Btn {
+                                x: parent.width - self.width;
+                                y: (parent.height - self.height) / 2;
+                                width: self.min-width;
+                                text: "Aynala";
+                                kind: "ghost";
+                                clicked => { App.mirror-device(d.serial); }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        background: Theme.divider;
+                    }
+                }
+            }
+
+            // ── Boş durum ────────────────────────────────────────────
+            if App.devices.length == 0 && App.device-error == "": Rectangle {
+                border-width: 2px;
+                border-color: Theme.divider;
+
+                VerticalLayout {
+                    padding: Theme.s8;
+                    spacing: Theme.s3;
+                    alignment: start;
+
+                    HorizontalLayout {
+                        alignment: start;
+                        Kicker { text: "Boş durum".to-uppercase(); }
+                    }
+
+                    Text {
+                        text: "Bağlı cihaz yok";
+                        font-family: Theme.font;
+                        font-size: 22px;
+                        font-weight: Theme.heading-weight;
+                        color: Theme.text;
+                    }
+
+                    Text {
+                        text: "USB kablosunu takın ve cihazda USB hata ayıklamayı onaylayın. Kablosuz bir cihaz için aşağıdan adres girin.";
+                        font-size: 13px;
+                        color: Theme.neutral-700;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        padding-top: Theme.s2;
+                        spacing: Theme.s2;
+                        alignment: start;
+
+                        Btn {
+                            text: "Yeniden tara";
+                            kind: "primary";
+                            clicked => { App.refresh-devices(); }
+                        }
+                        Btn {
+                            text: "TCP/IP ile bağlan";
+                            kind: "secondary";
+                            clicked => { App.tcpip-connect(); }
+                        }
+                        // In the mockup only; there is no help view to open
+                        // yet, so it is drawn disabled rather than inert.
+                        Btn {
+                            text: "Kurulum yardımı";
+                            kind: "ghost";
+                            enabled: false;
+                        }
+                    }
+                }
+            }
+
+            // ── Hata ─────────────────────────────────────────────────
+            if App.device-error != "": Rectangle {
+                background: Theme.accent-100;
+                border-width: 2px;
+                border-color: Theme.accent;
+
+                VerticalLayout {
+                    padding: Theme.s8;
+                    spacing: Theme.s3;
+                    alignment: start;
+
+                    HorizontalLayout {
+                        alignment: start;
+                        Kicker { text: "Hata".to-uppercase(); }
+                    }
+
+                    Text {
+                        text: "Cihaz listesi alınamadı";
+                        font-family: Theme.font;
+                        font-size: 22px;
+                        font-weight: Theme.heading-weight;
+                        color: Theme.accent-800;
+                    }
+
+                    // The mockup prints the failing command and its output in a
+                    // dark monospace block; App.device-error carries both.
+                    Rectangle {
+                        background: Theme.neutral-900;
+
+                        VerticalLayout {
+                            padding: Theme.s3;
+                            Mono {
+                                text: App.device-error;
+                                color: Theme.neutral-200;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-top: Theme.s2;
+                        spacing: Theme.s2;
+                        alignment: start;
+
+                        Btn {
+                            text: "Yeniden tara";
+                            kind: "primary";
+                            clicked => { App.refresh-devices(); }
+                        }
+                        Btn {
+                            text: "Günlüğü aç";
+                            kind: "ghost";
+                            clicked => { App.tab = "log"; }
+                        }
+                    }
+                }
+            }
+
+            // `margin-top: var(--space-8)` on the wireless grid; the outer
+            // layout already contributes s4 of spacing above it.
+            HorizontalLayout {
+                padding-top: Theme.s4;
+                spacing: Theme.s6;
+
+                // ── Kablosuz ─────────────────────────────────────────
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 0;
+                    alignment: start;
+
+                    Kicker { text: "Kablosuz".to-uppercase(); }
+
+                    // `margin: 6px 0 var(--space-3)` on the h3.
+                    Rectangle { height: 6px; }
+                    Text {
+                        text: "TCP/IP ile bağlan";
+                        font-family: Theme.font;
+                        font-size: 16px;
+                        font-weight: 700;
+                        color: Theme.text;
+                    }
+                    Rectangle { height: Theme.s3; }
+
+                    HorizontalLayout {
+                        spacing: Theme.s2;
+
+                        Fld {
+                            horizontal-stretch: 1;
+                            label: "Adres:port (--tcpip)";
+                            Inp {
+                                // Section 08 binds the same value: one
+                                // field, one --tcpip flag.
+                                text <=> Cfg.tcpip-addr;
+                                placeholder: "192.168.1.42:5555";
+                                mono: true;
+                                edited => { Cfg.changed(); }
+                            }
+                        }
+                        // `align-items: flex-end` — the button sits on the
+                        // bottom edge of the input, not of the label.
+                        VerticalLayout {
+                            alignment: end;
+                            horizontal-stretch: 0;
+                            Btn {
+                                text: "Bağlan";
+                                kind: "secondary";
+                                height: 36px;
+                                clicked => { App.tcpip-connect(); }
+                            }
+                        }
+                    }
+
+                    Rectangle { height: Theme.s2; }
+                    Text {
+                        text: "USB'den geçiş için adb tcpip 5555 otomatik çalıştırılır.";
+                        font-size: 12px;
+                        color: Theme.neutral-700;
+                        wrap: word-wrap;
+                    }
+                }
+
+                // ── Android 11+ ──────────────────────────────────────
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 0;
+                    alignment: start;
+
+                    Kicker { text: "Android 11+".to-uppercase(); }
+
+                    Rectangle { height: 6px; }
+                    Text {
+                        text: "Kablosuz eşleştirme";
+                        font-family: Theme.font;
+                        font-size: 16px;
+                        font-weight: 700;
+                        color: Theme.text;
+                    }
+                    Rectangle { height: Theme.s3; }
+
+                    HorizontalLayout {
+                        spacing: Theme.s2;
+
+                        Fld {
+                            horizontal-stretch: 1;
+                            label: "Eşleştirme adresi";
+                            Inp {
+                                text <=> App.pair-addr;
+                                placeholder: "192.168.1.42:37105";
+                                mono: true;
+                            }
+                        }
+                        Fld {
+                            width: 110px;
+                            horizontal-stretch: 0;
+                            label: "Kod";
+                            Inp {
+                                text <=> App.pair-code;
+                                placeholder: "482913";
+                                mono: true;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: end;
+                            horizontal-stretch: 0;
+                            Btn {
+                                text: "Eşleştir";
+                                kind: "secondary";
+                                height: 36px;
+                                clicked => { App.pair-device(); }
+                            }
+                        }
+                    }
+
+                    Rectangle { height: Theme.s2; }
+                    Text {
+                        text: "Geliştirici seçenekleri → Kablosuz hata ayıklama → Cihazı kodla eşleştir.";
+                        font-size: 12px;
+                        color: Theme.neutral-700;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}

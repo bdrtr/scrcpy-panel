@@ -1,0 +1,137 @@
+// Configuration · Bölüm 04 — Kontrol ve giriş
+//
+// Klavye, fare ve kumanda arayüzleri. Her denetim doğrudan Cfg'ye yazar ve
+// ardından Cfg.changed() çağırır, böylece komut çubuğu yeniden hesaplanır.
+// Yapı, alan sırası ve etiketler design/mockup'tan birebir alınmıştır.
+
+import { Theme } from "../theme.slint";
+import { Cfg } from "../state.slint";
+import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Seg, Sel, Chk } from "../components.slint";
+
+export component SectionControl inherits VerticalLayout {
+    spacing: Theme.s4;
+
+    SectionHead {
+        kicker: "Bölüm 04";
+        title: "Kontrol ve giriş";
+        desc: "UHID modu cihazda fiziksel klavye gibi görünür ve düzeni bilgisayardan alır. AOA yalnızca USB üzerinde çalışır; OTG modunda video hiç aktarılmaz.";
+    }
+
+    Hr {}
+
+    Grp {
+        Row {
+            Fld {
+                label: "Klavye · --keyboard";
+                Seg {
+                    labels: ["sdk", "uhid", "aoa", "kapalı"];
+                    values: ["sdk", "uhid", "aoa", "disabled"];
+                    value <=> Cfg.keyboard;
+                    changed => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Fare · --mouse";
+                Seg {
+                    labels: ["sdk", "uhid", "aoa", "kapalı"];
+                    values: ["sdk", "uhid", "aoa", "disabled"];
+                    value <=> Cfg.mouse;
+                    changed => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Oyun kumandası · --gamepad";
+                Seg {
+                    labels: ["kapalı", "uhid", "aoa"];
+                    values: ["disabled", "uhid", "aoa"];
+                    value <=> Cfg.gamepad;
+                    changed => { Cfg.changed(); }
+                }
+            }
+        }
+        Row {
+            Fld {
+                label: "Kısayol tuşu · --shortcut-mod";
+                Sel {
+                    labels: ["Sol Alt", "Sol Super", "Sağ Ctrl", "Sol Ctrl + Sol Alt"];
+                    values: ["lalt", "lsuper", "rctrl", "lctrl+lalt"];
+                    value <=> Cfg.shortcut-mod;
+                    changed => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Klavye düzeni (UHID, uygulama ayarı)";
+                Inp {
+                    text <=> Cfg.key-layout;
+                    placeholder: "tr";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Pano yönü";
+                Sel {
+                    labels: ["İki yönlü", "Yalnızca cihaza", "Yalnızca bilgisayara"];
+                    values: ["both", "toDevice", "toPc"];
+                    value <=> Cfg.clipboard-direction;
+                    changed => { Cfg.changed(); }
+                }
+            }
+        }
+    }
+
+    Hr {}
+
+    ChkGrp {
+        Row {
+            Chk {
+                text: "OTG modu · --otg (video yok, yalnızca giriş)";
+                checked <=> Cfg.otg;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Salt izleme · --no-control";
+                checked <=> Cfg.no-control;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Pano eşitlemesini kapat · --no-clipboard-autosync";
+                checked <=> Cfg.no-clipboard-autosync;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Tüm fare tuşlarını ilet · --forward-all-clicks";
+                checked <=> Cfg.forward-all-clicks;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Eski yapıştırma · --legacy-paste";
+                checked <=> Cfg.legacy-paste;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Metin olayını yeğle · --prefer-text";
+                checked <=> Cfg.prefer-text;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Ham tuş olayları · --raw-key-events";
+                checked <=> Cfg.raw-key-events;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Fare tuşu eşlemesi · --mouse-bind=++++";
+                checked <=> Cfg.mouse-bind-enabled;
+                toggled => { Cfg.changed(); }
+            }
+        }
+    }
+
+    Rectangle { vertical-stretch: 1; }
+}

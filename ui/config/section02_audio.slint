@@ -1,0 +1,128 @@
+// Configuration · Bölüm 02 — Ses
+//
+// Audio capture and playback. Field order, labels and placeholders come from
+// design/mockup, and every control writes straight into Cfg and then calls
+// Cfg.changed() so the command bar recomputes.
+
+import { Theme } from "../theme.slint";
+import { Cfg } from "../state.slint";
+import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Seg, Sel, Chk } from "../components.slint";
+
+export component SectionAudio inherits VerticalLayout {
+    spacing: Theme.s4;
+
+    SectionHead {
+        kicker: "Bölüm 02";
+        title: "Ses";
+        desc: "Ses aktarımı Android 11 ve üzerini gerektirir. Mikrofon kaynakları çağrı ve ses tanıma senaryolarında ayrı ayrı seçilebilir.";
+    }
+
+    Hr {}
+
+    Grp {
+        Row {
+            Fld {
+                label: "Kodek · --audio-codec";
+                Seg {
+                    labels: ["opus", "aac", "flac", "raw"];
+                    value <=> Cfg.audio-codec;
+                    changed => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Kaynak · --audio-source";
+                Sel {
+                    labels: [
+                        "output — cihaz çıkışı",
+                        "playback — uygulama sesi",
+                        "mic — mikrofon",
+                        "mic-unprocessed",
+                        "mic-camcorder",
+                        "voice-call",
+                        "voice-communication",
+                    ];
+                    values: [
+                        "output",
+                        "playback",
+                        "mic",
+                        "mic-unprocessed",
+                        "mic-camcorder",
+                        "voice-call",
+                        "voice-communication",
+                    ];
+                    value <=> Cfg.audio-source;
+                    changed => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Kodlayıcı · --audio-encoder";
+                Inp {
+                    text <=> Cfg.audio-encoder;
+                    placeholder: "c2.android.opus.encoder";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+        }
+        Row {
+            Fld {
+                label: "Bit hızı · --audio-bit-rate";
+                Inp {
+                    text <=> Cfg.audio-bit-rate;
+                    placeholder: "128K";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Ara bellek · --audio-buffer (ms)";
+                Inp {
+                    text <=> Cfg.audio-buffer;
+                    placeholder: "50";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Çıkış ara belleği · --audio-output-buffer";
+                Inp {
+                    text <=> Cfg.audio-output-buffer;
+                    placeholder: "5";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+        }
+    }
+
+    Hr {}
+
+    ChkGrp {
+        Row {
+            Chk {
+                text: "Sesi kapat · --no-audio";
+                checked <=> Cfg.no-audio;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Cihazda da çal · --audio-dup";
+                checked <=> Cfg.audio-dup;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Ses başarısızsa çıkış · --require-audio";
+                checked <=> Cfg.require-audio;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Sesi oynatma · --no-audio-playback";
+                checked <=> Cfg.no-audio-playback;
+                toggled => { Cfg.changed(); }
+            }
+        }
+    }
+
+    Rectangle { vertical-stretch: 1; }
+}

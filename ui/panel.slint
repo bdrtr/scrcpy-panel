@@ -1,0 +1,327 @@
+// The scrcpy control panel.
+//
+// Chrome only: a dark title strip, the tab bar, whichever tab is active, and
+// the command bar pinned to the bottom. Everything with content of its own
+// lives in ui/tabs/ or ui/config/.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { App, Cfg, Settings, DeviceRow, LogRow, ProfileCard, ShortcutRow, MetricRow } from "state.slint";
+import { Btn, Kicker, Mono, Seg } from "components.slint";
+
+import { SectionVideo } from "config/section01_video.slint";
+import { SectionAudio } from "config/section02_audio.slint";
+import { SectionRecord } from "config/section03_record.slint";
+import { SectionControl } from "config/section04_control.slint";
+import { SectionVdisplay } from "config/section05_vdisplay.slint";
+import { SectionCamera } from "config/section06_camera.slint";
+import { SectionWindow } from "config/section07_window.slint";
+import { SectionNetwork } from "config/section08_network.slint";
+
+import { TabDevices } from "tabs/devices.slint";
+import { TabSession } from "tabs/session.slint";
+import { TabProfiles } from "tabs/profiles.slint";
+import { TabLog } from "tabs/log.slint";
+import { TabShortcuts } from "tabs/shortcuts.slint";
+import { TabSettings } from "tabs/settings.slint";
+
+/// One row in the configuration tab's section list.
+component SectionLink inherits Rectangle {
+    in property <string> text;
+    in property <string> key;
+
+    property <bool> active: App.section == root.key;
+
+    height: 40px;
+    background: root.active
+        ? Theme.accent
+        : touch.has-hover ? Theme.wash-7 : transparent;
+
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Theme.divider;
+    }
+
+    Text {
+        x: Theme.s4;
+        y: (parent.height - self.height) / 2;
+        text: root.text;
+        font-size: 14px;
+        color: root.active ? Theme.bg : Theme.text;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { App.section = root.key; }
+    }
+}
+
+export component PanelWindow inherits Window {
+    title: "scrcpy panel";
+    background: Theme.bg;
+    preferred-width: 1200px;
+    preferred-height: 800px;
+    min-width: 900px;
+    min-height: 600px;
+    default-font-family: Theme.font;
+    default-font-size: 14px;
+
+    VerticalLayout {
+        // ── Title strip ──────────────────────────────────────────────
+        Rectangle {
+            height: 36px;
+            background: Theme.neutral-900;
+
+            HorizontalLayout {
+                padding-left: Theme.s3;
+                padding-right: Theme.s3;
+                spacing: Theme.s3;
+
+                HorizontalLayout {
+                    spacing: 7px;
+                    alignment: center;
+                    Rectangle { width: 11px; height: 11px; background: Theme.accent; }
+                    Rectangle { width: 11px; height: 11px; background: Theme.neutral-600; }
+                    Rectangle { width: 11px; height: 11px; background: Theme.neutral-700; }
+                }
+
+                Text {
+                    text: "SCRCPY PANEL";
+                    font-size: 12px;
+                    font-weight: Theme.heading-weight;
+                    letter-spacing: 1.9px;
+                    color: Theme.neutral-100;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "Slint · Rust · scrcpy " + Settings.server-version;
+                    font-size: 11px;
+                    color: Theme.neutral-500;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Text {
+                    text: App.adb-status;
+                    font-family: Theme.mono;
+                    font-size: 11px;
+                    color: Theme.neutral-500;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // ── Tab bar ──────────────────────────────────────────────────
+        Rectangle {
+            height: 58px;
+            background: Theme.bg;
+
+            Rectangle {
+                y: parent.height - 2px;
+                height: 2px;
+                background: Theme.divider;
+            }
+
+            HorizontalLayout {
+                padding: Theme.s3;
+                padding-left: Theme.s4;
+                padding-right: Theme.s4;
+                spacing: Theme.s4;
+
+                Seg {
+                    labels: ["Cihazlar", "Yapılandırma", "Oturum", "Profiller", "Günlük", "Kısayollar", "Ayarlar"];
+                    values: ["devices", "config", "session", "profiles", "log", "keys", "settings"];
+                    value <=> App.tab;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                HorizontalLayout {
+                    spacing: Theme.s2;
+                    alignment: center;
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        background: App.session-running ? Theme.accent : Theme.neutral-400;
+                    }
+                    Text {
+                        text: App.selection-label;
+                        font-family: Theme.mono;
+                        font-size: 12px;
+                        color: Theme.neutral-700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // ── Active tab ───────────────────────────────────────────────
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+
+            if App.tab == "devices": TabDevices {}
+            if App.tab == "session": TabSession {}
+            if App.tab == "profiles": TabProfiles {}
+            if App.tab == "log": TabLog {}
+            if App.tab == "keys": TabShortcuts {}
+            if App.tab == "settings": TabSettings {}
+
+            if App.tab == "config": HorizontalLayout {
+                // Section list
+                Rectangle {
+                    width: 216px;
+
+                    Rectangle {
+                        x: parent.width - 2px;
+                        width: 2px;
+                        background: Theme.divider;
+                    }
+
+                    VerticalLayout {
+                        Text {
+                            text: "BÖLÜMLER";
+                            font-size: 10px;
+                            letter-spacing: 1.2px;
+                            color: Theme.accent;
+                            horizontal-alignment: left;
+                        }
+
+                        SectionLink { text: "01 · Video"; key: "video"; }
+                        SectionLink { text: "02 · Ses"; key: "audio"; }
+                        SectionLink { text: "03 · Kayıt"; key: "record"; }
+                        SectionLink { text: "04 · Kontrol ve giriş"; key: "control"; }
+                        SectionLink { text: "05 · Sanal ekran"; key: "vdisplay"; }
+                        SectionLink { text: "06 · Kamera"; key: "camera"; }
+                        SectionLink { text: "07 · Pencere ve ekran"; key: "window"; }
+                        SectionLink { text: "08 · Ağ ve ADB"; key: "network"; }
+
+                        Rectangle { vertical-stretch: 1; }
+
+                        // Summary footer
+                        VerticalLayout {
+                            padding: Theme.s4;
+                            spacing: Theme.s2;
+                            Kicker { text: "ÖZET"; }
+                            Text {
+                                text: App.flag-count + " bayrak etkin";
+                                font-size: 12px;
+                                color: Theme.neutral-700;
+                            }
+                            Btn {
+                                text: "Varsayılanlara dön";
+                                block: true;
+                                clicked => { App.reset-defaults(); }
+                            }
+                        }
+                    }
+                }
+
+                // Section body
+                ScrollView {
+                    horizontal-stretch: 1;
+                    VerticalLayout {
+                        padding: Theme.s6;
+
+                        if App.section == "video": SectionVideo {}
+                        if App.section == "audio": SectionAudio {}
+                        if App.section == "record": SectionRecord {}
+                        if App.section == "control": SectionControl {}
+                        if App.section == "vdisplay": SectionVdisplay {}
+                        if App.section == "camera": SectionCamera {}
+                        if App.section == "window": SectionWindow {}
+                        if App.section == "network": SectionNetwork {}
+                    }
+                }
+            }
+        }
+
+        // ── Command bar ──────────────────────────────────────────────
+        if App.command-open: Rectangle {
+            height: 84px;
+            background: Theme.surface;
+
+            Rectangle { y: 0; height: 2px; background: Theme.divider; }
+
+            VerticalLayout {
+                padding: Theme.s3;
+                padding-left: Theme.s4;
+                padding-right: Theme.s4;
+                spacing: Theme.s2;
+
+                HorizontalLayout {
+                    spacing: Theme.s3;
+                    Kicker { text: "OLUŞAN KOMUT"; }
+                    Text {
+                        text: App.flag-count + " bayrak";
+                        font-size: 11px;
+                        color: Theme.text-50;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Btn {
+                        text: "Kopyala";
+                        kind: "ghost";
+                        clicked => { App.copy-command(); }
+                    }
+                }
+
+                Mono {
+                    text: App.command;
+                    wrap: word-wrap;
+                    vertical-stretch: 1;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 56px;
+            background: Theme.bg;
+
+            Rectangle { y: 0; height: 2px; background: Theme.divider; }
+
+            HorizontalLayout {
+                padding-left: Theme.s4;
+                padding-right: Theme.s4;
+                spacing: Theme.s2;
+
+                Text {
+                    text: App.status-line;
+                    font-family: Theme.mono;
+                    font-size: 12px;
+                    color: Theme.neutral-700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Btn {
+                    text: App.command-open ? "Komutu gizle" : "Komutu göster";
+                    y: (parent.height - self.height) / 2;
+                    clicked => { App.command-open = !App.command-open; }
+                }
+                Btn {
+                    text: "Profil olarak kaydet";
+                    y: (parent.height - self.height) / 2;
+                    clicked => { App.save-profile(); }
+                }
+                Btn {
+                    text: App.session-running ? "Oturumu durdur" : "Ayarlarınla başlat";
+                    kind: "primary";
+                    y: (parent.height - self.height) / 2;
+                    clicked => {
+                        if (App.session-running) {
+                            App.stop-session();
+                        } else {
+                            App.start-session();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

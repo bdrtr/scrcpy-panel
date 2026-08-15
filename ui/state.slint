@@ -1,0 +1,236 @@
+// Panel state, shared between the Slint tree and Rust.
+//
+// Everything lives in globals rather than being threaded through the component
+// tree: a section file deep in the configuration form can write
+// `Cfg.video-codec = "h265"` without any plumbing, and Rust reads the same
+// property through `panel.global::<Cfg>()`.
+//
+// Cfg holds scrcpy flags only. Anything that configures the panel itself lives
+// in Settings, and anything transient lives in App.
+
+export struct DeviceRow {
+    name: string,
+    serial: string,
+    conn: string,
+    android: string,
+    screen: string,
+    state: string,
+    selected: bool,
+}
+
+export struct LogRow {
+    time: string,
+    level: string,
+    message: string,
+}
+
+export struct ProfileCard {
+    kicker: string,
+    name: string,
+    desc: string,
+    flags: string,
+}
+
+export struct ShortcutRow {
+    combo: string,
+    desc: string,
+}
+
+export struct MetricRow {
+    key: string,
+    value: string,
+}
+
+/// scrcpy flags. One property per control in the configuration form.
+///
+/// Numeric fields are strings on purpose: the form has to distinguish "empty,
+/// use the device default" from "zero", and the command builder in Rust is
+/// where the parsing and validation belong.
+export global Cfg {
+    callback changed();
+
+    // 01 · Video
+    in-out property <string> video-source: "display";
+    in-out property <string> video-codec: "h264";
+    in-out property <string> video-encoder;
+    in-out property <string> video-bit-rate: "8M";
+    in-out property <string> max-size;
+    in-out property <string> max-fps;
+    in-out property <string> crop;
+    in-out property <string> display-id;
+    in-out property <string> video-buffer;
+    in-out property <string> display-orientation: "0";
+    in-out property <bool> no-video;
+    in-out property <bool> print-fps;
+    in-out property <bool> no-video-playback;
+    in-out property <string> v4l2-sink;
+    in-out property <string> v4l2-buffer;
+
+    // 02 · Ses
+    in-out property <string> audio-codec: "opus";
+    in-out property <string> audio-source: "output";
+    in-out property <string> audio-encoder;
+    in-out property <string> audio-bit-rate: "128K";
+    in-out property <string> audio-buffer;
+    in-out property <string> audio-output-buffer;
+    in-out property <bool> no-audio;
+    in-out property <bool> audio-dup;
+    in-out property <bool> require-audio;
+    in-out property <bool> no-audio-playback;
+
+    // 03 · Kayıt
+    in-out property <bool> record-enabled;
+    in-out property <string> record-path;
+    in-out property <string> record-format: "mp4";
+    in-out property <string> time-limit;
+    in-out property <string> record-orientation: "0";
+    in-out property <bool> no-playback;
+    in-out property <bool> record-timestamp: true;
+
+    // 04 · Kontrol ve giriş
+    in-out property <string> keyboard: "sdk";
+    in-out property <string> mouse: "sdk";
+    in-out property <string> gamepad: "disabled";
+    in-out property <string> shortcut-mod: "lalt";
+    in-out property <string> key-layout;
+    in-out property <string> clipboard-direction: "both"; // both | toDevice | toPc
+    in-out property <bool> otg;
+    in-out property <bool> no-control;
+    in-out property <bool> no-clipboard-autosync;
+    in-out property <bool> forward-all-clicks;
+    in-out property <bool> legacy-paste;
+    in-out property <bool> prefer-text;
+    in-out property <bool> raw-key-events;
+    in-out property <bool> mouse-bind-enabled;
+    in-out property <string> mouse-bind: "++++";
+
+    // 05 · Sanal ekran
+    in-out property <bool> new-display-enabled;
+    in-out property <string> new-display;
+    in-out property <string> start-app;
+    in-out property <bool> no-vd-destroy-content;
+    in-out property <bool> no-vd-system-decorations;
+
+    // 06 · Kamera
+    in-out property <string> camera-facing: "back";
+    in-out property <string> camera-id;
+    in-out property <string> camera-size;
+    in-out property <string> camera-ar;
+    in-out property <string> camera-fps;
+    in-out property <bool> camera-high-speed;
+
+    // 07 · Pencere ve ekran
+    in-out property <string> window-title;
+    in-out property <string> orientation: "0";
+    in-out property <string> window-x;
+    in-out property <string> window-y;
+    in-out property <string> window-width;
+    in-out property <string> window-height;
+    in-out property <bool> fullscreen;
+    in-out property <bool> always-on-top;
+    in-out property <bool> window-borderless;
+    in-out property <bool> turn-screen-off;
+    in-out property <bool> stay-awake;
+    in-out property <bool> show-touches;
+    in-out property <bool> disable-screensaver;
+    in-out property <bool> power-off-on-close;
+    in-out property <bool> no-power-on;
+    in-out property <bool> no-mipmaps;
+
+    // 08 · Ağ ve ADB
+    in-out property <string> serial;
+    in-out property <string> port;
+    in-out property <string> tcpip-addr;
+    in-out property <string> tunnel-host;
+    in-out property <string> tunnel-port;
+    in-out property <string> verbosity: "info";
+    in-out property <bool> tcpip-enabled;
+    in-out property <bool> force-adb-forward;
+    in-out property <bool> select-usb;
+    in-out property <bool> select-tcpip;
+    in-out property <bool> kill-adb-on-close;
+    in-out property <bool> no-cleanup;
+}
+
+/// Panel preferences — written to the config file, not passed to scrcpy.
+export global Settings {
+    callback changed();
+
+    in-out property <string> adb-path: "adb";
+    in-out property <string> adb-port: "5037";
+    in-out property <string> language: "tr";
+    in-out property <string> mirror-mode: "embedded"; // embedded | window
+    in-out property <string> record-dir;
+    in-out property <string> screenshot-dir;
+    in-out property <bool> autostart-profile;
+    in-out property <bool> minimize-to-tray;
+    in-out property <bool> check-version: true;
+    in-out property <bool> log-to-disk;
+    in-out property <string> server-version: "4.1";
+}
+
+/// Transient panel state: what is on screen, what Rust has discovered, and the
+/// callbacks the panel fires back into Rust.
+export global App {
+    // Navigation
+    in-out property <string> tab: "config";
+    in-out property <string> section: "video";
+
+    // Chrome
+    in property <string> adb-status: "adb —";
+    in property <string> selection-label: "cihaz seçilmedi";
+    in property <bool> session-running;
+
+    // Devices tab
+    in property <[DeviceRow]> devices;
+    in property <string> device-error;
+    in property <bool> devices-loading;
+    in-out property <string> pair-addr;
+    in-out property <string> pair-code;
+
+    // Command bar
+    in property <string> command: "scrcpy";
+    in property <int> flag-count;
+    in property <string> status-line;
+    in-out property <bool> command-open;
+
+    // Session tab
+    in property <[MetricRow]> metrics;
+    in property <string> session-title;
+    in property <string> session-meta;
+
+    // Log tab
+    in property <[LogRow]> log;
+    in-out property <string> log-filter: "all";
+
+    // Profiles tab
+    in property <[ProfileCard]> profiles;
+
+    // Shortcuts tab
+    in property <[ShortcutRow]> shortcuts;
+
+    // Actions handled by Rust
+    callback refresh-devices();
+    callback select-device(string);
+    callback mirror-device(string);
+    callback tcpip-connect();
+    callback pair-device();
+    callback start-session();
+    callback stop-session();
+    callback save-profile();
+    callback apply-profile(int);
+    callback edit-profile(int);
+    callback delete-profile(int);
+    callback toggle-recording();
+    callback raise-session();
+    callback reset-defaults();
+    callback copy-command();
+    callback list-encoders();
+    callback list-apps();
+    callback list-cameras();
+    callback clear-log();
+    callback copy-log();
+    callback screenshot();
+    callback send-clipboard();
+    callback device-key(string);
+}

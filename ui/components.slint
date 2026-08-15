@@ -1,0 +1,394 @@
+// The mockup's component library, ported to Slint.
+//
+// Every control here matches a CSS class in the design system, so a section can
+// be transcribed from the mockup by swapping `<label class="chk">` for `Chk`,
+// `<div class="seg">` for `Seg`, and so on. Nothing here reads Cfg — callers
+// bind their own state with `<=>`.
+//
+// API summary, for anyone writing a configuration section:
+//
+//   SectionHead { kicker: "Bölüm 01"; title: "Video"; desc: "..." }
+//   Grp { Row { Fld {...} Fld {...} Fld {...} } }      // three columns
+//   ChkGrp { Row { Chk {...} Chk {...} } }             // two columns
+//   Fld { label: "Kodek · --video-codec"; Seg { ... } }
+//   Inp { text <=> Cfg.crop; placeholder: "1224:1440:0:0"; mono: true; }
+//   Seg { labels: ["h264", "h265"]; values: ["h264", "h265"]; value <=> Cfg.video-codec; }
+//   Sel { labels: [...]; values: [...]; value <=> Cfg.audio-source; }
+//   Chk { text: "Videoyu kapat · --no-video"; checked <=> Cfg.no-video; }
+//   Btn { text: "Uygula"; kind: "primary"; clicked => { ... } }
+//
+// Every control fires `Cfg.changed()` through its own `changed`/`toggled`
+// callback? No — callers do that, so a control can be reused for panel state
+// that is not a scrcpy flag.
+
+import { Theme } from "theme.slint";
+
+/// `.hr` — a 2px divider with vertical rhythm around it.
+export component Hr inherits Rectangle {
+    height: 2px;
+    background: Theme.divider;
+}
+
+/// `.lbl` — the small uppercase accent kicker above a heading.
+export component Kicker inherits Text {
+    font-family: Theme.font;
+    font-size: 10px;
+    letter-spacing: 1.2px;
+    color: Theme.accent;
+}
+
+/// The heading block that opens every configuration section.
+export component SectionHead inherits VerticalLayout {
+    in property <string> kicker;
+    in property <string> title;
+    in property <string> desc;
+
+    spacing: 6px;
+
+    Kicker { text: root.kicker.to-uppercase(); }
+    Text {
+        text: root.title;
+        font-family: Theme.font;
+        font-size: 25px;
+        font-weight: Theme.heading-weight;
+        color: Theme.text;
+    }
+    if root.desc != "": Text {
+        text: root.desc;
+        font-size: 13px;
+        color: Theme.neutral-700;
+        wrap: word-wrap;
+    }
+}
+
+/// `.btn` — kind is "primary", "secondary" or "ghost".
+export component Btn inherits Rectangle {
+    in property <string> text;
+    in property <string> kind: "secondary";
+    in property <bool> block;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    property <bool> primary: root.kind == "primary";
+    property <bool> ghost: root.kind == "ghost";
+
+    height: 34px;
+    horizontal-stretch: root.block ? 1 : 0;
+    min-width: label.preferred-width + (root.ghost ? 8px : 30px);
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    background: root.primary
+        ? (touch.pressed ? Theme.accent-700 : touch.has-hover ? Theme.accent-600 : Theme.accent)
+        : root.ghost
+            ? (touch.pressed ? Theme.accent-wash-18 : touch.has-hover ? Theme.accent-wash-10 : transparent)
+            : (touch.pressed ? Theme.wash-14 : touch.has-hover ? Theme.wash-7 : transparent);
+    border-width: root.primary || root.ghost ? 0px : 1px;
+    border-color: Theme.divider;
+
+    label := Text {
+        x: root.block ? 12px : (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        text: root.text;
+        font-family: Theme.font;
+        font-size: 14px;
+        font-weight: Theme.heading-weight;
+        color: root.primary ? Theme.bg : root.ghost ? Theme.accent : Theme.text;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// `.input` — a single-line text box with a placeholder.
+export component Inp inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <bool> mono;
+    in property <bool> enabled: true;
+    callback edited();
+
+    height: 36px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: input.has-focus
+        ? Theme.accent
+        : touch.has-hover ? #201e1d73 : Theme.divider;
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+
+    if root.text == "" && !input.has-focus: Text {
+        x: 10px;
+        y: (parent.height - self.height) / 2;
+        text: root.placeholder;
+        font-family: root.mono ? Theme.mono : Theme.font;
+        font-size: 14px;
+        color: Theme.text-50;
+    }
+
+    input := TextInput {
+        x: 10px;
+        width: parent.width - 20px;
+        y: (parent.height - self.height) / 2;
+        text <=> root.text;
+        enabled: root.enabled;
+        single-line: true;
+        font-family: root.mono ? Theme.mono : Theme.font;
+        font-size: 14px;
+        color: Theme.text;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.bg;
+        edited => { root.edited(); }
+    }
+
+    public function focus-input() { input.focus(); }
+}
+
+/// `.field` — a 12px label above whatever control is passed as a child.
+export component Fld inherits VerticalLayout {
+    in property <string> label;
+    spacing: 5px;
+
+    if root.label != "": Text {
+        text: root.label;
+        font-size: 12px;
+        color: Theme.text-70;
+        wrap: no-wrap;
+        overflow: elide;
+    }
+    @children
+}
+
+/// `.seg` — a joined row of mutually exclusive options.
+///
+/// `values` is what gets written to `value`; when it is empty the labels are
+/// used as values too.
+export component Seg inherits Rectangle {
+    in property <[string]> labels;
+    in property <[string]> values;
+    in-out property <string> value;
+    callback changed();
+
+    height: 34px;
+    border-width: 1px;
+    border-color: Theme.divider;
+    horizontal-stretch: 0;
+
+    HorizontalLayout {
+        for label[i] in root.labels: opt := Rectangle {
+            property <string> option: root.values.length > i ? root.values[i] : label;
+            property <bool> selected: root.value == self.option;
+
+            background: opt.selected
+                ? Theme.accent
+                : opt-touch.has-hover ? Theme.wash-7 : transparent;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                Text {
+                    text: label;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    color: opt.selected ? Theme.bg : Theme.text;
+                }
+            }
+
+            if i > 0: Rectangle {
+                x: 0;
+                width: 1px;
+                background: Theme.divider;
+            }
+
+            opt-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => {
+                    root.value = opt.option;
+                    root.changed();
+                }
+            }
+        }
+    }
+}
+
+/// `.chk` — a square checkbox with a label to its right.
+export component Chk inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    /// A section's master switch is set in a heavier weight in the mockup.
+    in property <bool> strong;
+    callback toggled();
+
+    height: 22px;
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    HorizontalLayout {
+        spacing: 9px;
+        alignment: start;
+
+        box := Rectangle {
+            y: (parent.height - self.height) / 2;
+            width: 15px;
+            height: 15px;
+            background: root.checked ? Theme.accent : Theme.bg;
+            border-width: 1.5px;
+            border-color: root.checked
+                ? Theme.accent
+                : touch.has-hover ? Theme.accent : Theme.divider;
+
+            // The mockup punches the ground colour back through the middle
+            // rather than drawing a tick.
+            if root.checked: Rectangle {
+                x: 3px;
+                y: 3px;
+                width: 6px;
+                height: 6px;
+                background: Theme.bg;
+            }
+        }
+
+        Text {
+            text: root.text;
+            font-size: 13px;
+            font-weight: root.strong ? 600 : 400;
+            vertical-alignment: center;
+            color: Theme.text;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+}
+
+/// `select.input` — a dropdown drawn like a text box.
+export component Sel inherits Rectangle {
+    in property <[string]> labels;
+    in property <[string]> values;
+    in-out property <string> value;
+    callback changed();
+
+    height: 36px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: touch.has-hover ? #201e1d73 : Theme.divider;
+
+    Rectangle {
+        x: 10px;
+        width: parent.width - 34px;
+        for label[i] in root.labels: Text {
+            x: 0;
+            y: (parent.height - self.height) / 2;
+            text: label;
+            font-size: 14px;
+            color: Theme.text;
+            overflow: elide;
+            width: parent.width;
+            visible: (root.values.length > i ? root.values[i] : label) == root.value;
+        }
+    }
+
+    // Caret
+    Rectangle {
+        x: parent.width - 20px;
+        y: (parent.height - self.height) / 2;
+        width: 8px;
+        height: 2px;
+        background: Theme.text-60;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { popup.show(); }
+    }
+
+    popup := PopupWindow {
+        y: root.height;
+        width: root.width;
+
+        Rectangle {
+            background: Theme.bg;
+            border-width: 1px;
+            border-color: Theme.divider;
+
+            VerticalLayout {
+                for label[i] in root.labels: Rectangle {
+                    property <string> option: root.values.length > i ? root.values[i] : label;
+                    height: 30px;
+                    background: root.value == self.option
+                        ? Theme.accent
+                        : row-touch.has-hover ? Theme.wash-7 : transparent;
+
+                    Text {
+                        x: 10px;
+                        y: (parent.height - self.height) / 2;
+                        text: label;
+                        font-size: 13px;
+                        color: root.value == parent.option ? Theme.bg : Theme.text;
+                    }
+
+                    row-touch := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => {
+                            root.value = parent.option;
+                            root.changed();
+                            popup.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// `.tag` — kind is "accent" or "neutral".
+export component Tag inherits Rectangle {
+    in property <string> text;
+    in property <string> kind: "neutral";
+
+    property <bool> is-accent: root.kind == "accent";
+
+    background: root.is-accent ? Theme.accent-100 : Theme.neutral-100;
+    height: 20px;
+    width: label.preferred-width + 20px;
+    horizontal-stretch: 0;
+
+    label := Text {
+        x: 10px;
+        y: (parent.height - self.height) / 2;
+        text: root.text;
+        font-size: 11px;
+        color: root.is-accent ? Theme.accent-800 : Theme.neutral-800;
+    }
+}
+
+/// `.grp` — the three-column field grid. Fill it with `Row { … }`.
+export component Grp inherits GridLayout {
+    spacing: Theme.s4;
+}
+
+/// `.chkgrp` — the two-column checkbox grid. Fill it with `Row { … }`.
+export component ChkGrp inherits GridLayout {
+    spacing-vertical: Theme.s3;
+    spacing-horizontal: Theme.s6;
+}
+
+/// A monospace line of text, for commands, serials and paths.
+export component Mono inherits Text {
+    font-family: Theme.mono;
+    font-size: 12px;
+    color: Theme.text;
+}

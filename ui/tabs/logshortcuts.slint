@@ -1,0 +1,246 @@
+// Tabs · Günlük and Kısayollar
+//
+// Two read-only tabs that share a file because they share a shape: a heading
+// row, then a long list fed from App. Neither writes Cfg — the log filter is
+// panel state (App.log-filter) and the shortcut table is pure copy.
+//
+// The log level is compared as stored: App.log-filter holds "info"/"warn"/
+// "error" while LogRow.level holds "INFO"/"WARN"/"ERROR", so the filter is
+// upper-cased once per row rather than lower-casing the struct field.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { App, Cfg, LogRow, ShortcutRow } from "../state.slint";
+import { SectionHead, Hr, Btn, Seg, Mono } from "../components.slint";
+
+export component TabLog inherits VerticalLayout {
+    // The mockup tints the level column with --color-accent-400 (#ff9783),
+    // which is one stop lighter than anything Theme carries; it is the halfway
+    // point between accent-200 and the accent itself, so it is mixed here
+    // rather than hard-coded.
+    property <color> level-color: Theme.accent-200.mix(Theme.accent, 0.5);
+
+    padding: Theme.s6;
+    spacing: Theme.s4;
+
+    // ── Heading, filter and actions ──────────────────────────────────
+    HorizontalLayout {
+        spacing: Theme.s4;
+
+        SectionHead {
+            kicker: "Süreç çıktısı";
+            title: "Günlük";
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        Seg {
+            y: parent.height - self.height;
+            labels: ["Tümü", "Bilgi", "Uyarı", "Hata"];
+            values: ["all", "info", "warn", "error"];
+            value <=> App.log-filter;
+        }
+        Btn {
+            text: "Kopyala";
+            y: parent.height - self.height;
+            clicked => { App.copy-log(); }
+        }
+        Btn {
+            text: "Temizle";
+            y: parent.height - self.height;
+            clicked => { App.clear-log(); }
+        }
+    }
+
+    // ── Output ───────────────────────────────────────────────────────
+    //
+    // A dark terminal block, as in the mockup: neutral-900 ground, neutral-200
+    // monospace text, the level as plain tinted text in a fixed 52px column
+    // and the timestamp one step dimmer.
+    //
+    // Rows that the filter rejects collapse to zero height instead of being
+    // dropped, because a `for` cannot skip an item in Slint.
+    Rectangle {
+        vertical-stretch: 1;
+        background: Theme.neutral-900;
+
+        ScrollView {
+            VerticalLayout {
+                padding: Theme.s4;
+
+                for line[i] in App.log: row := VerticalLayout {
+                    property <bool> shown: App.log-filter == "all"
+                        || App.log-filter.to-uppercase() == line.level;
+
+                    // The row takes its height from the message, which wraps:
+                    // scrcpy prints server URLs, adb forward commands and
+                    // encoder warnings that run well past the width.
+                    vertical-stretch: 0;
+
+                    if row.shown: HorizontalLayout {
+                        spacing: Theme.s3;
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+
+                        Mono {
+                            text: line.time;
+                            width: 62px;
+                            color: Theme.neutral-500;
+                            vertical-alignment: top;
+                        }
+                        Mono {
+                            text: line.level;
+                            width: 52px;
+                            color: root.level-color;
+                            vertical-alignment: top;
+                        }
+                        Mono {
+                            text: line.message;
+                            horizontal-stretch: 1;
+                            color: Theme.neutral-200;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+}
+
+export component TabShortcuts inherits VerticalLayout {
+    // The mockup prints the current MOD key inside the paragraph; it is the
+    // Kontrol section's --shortcut-mod, spelled the way that select spells it.
+    property <string> mod-label: Cfg.shortcut-mod == "lsuper"
+        ? "Sol Super"
+        : Cfg.shortcut-mod == "rctrl"
+            ? "Sağ Ctrl"
+            : Cfg.shortcut-mod == "lctrl+lalt"
+                ? "Sol Ctrl + Sol Alt"
+                : "Sol Alt";
+
+    padding: Theme.s6;
+
+    ScrollView {
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            spacing: Theme.s4;
+
+            // The paragraph is split in three because the mockup sets the MOD
+            // key itself in `<strong>`; the 6px gap is `.sd`'s own margin,
+            // which is why it is not the outer layout's spacing.
+            VerticalLayout {
+                spacing: 6px;
+
+                SectionHead {
+                    kicker: "Klavye";
+                    title: "Kısayollar";
+                }
+
+                HorizontalLayout {
+                    Text {
+                        text: "MOD tuşu Kontrol bölümünden değiştirilir; şu an ";
+                        font-size: 13px;
+                        color: Theme.neutral-700;
+                        vertical-alignment: top;
+                    }
+                    Text {
+                        text: root.mod-label;
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: Theme.neutral-700;
+                        vertical-alignment: top;
+                    }
+                    Text {
+                        text: ". Kısayollar ayna penceresi odaktayken geçerlidir, OTG modunda devre dışıdır.";
+                        font-size: 13px;
+                        color: Theme.neutral-700;
+                        horizontal-stretch: 1;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            Hr {}
+
+            // ── Two columns, filled row by row like the mockup's grid ────
+            HorizontalLayout {
+                spacing: Theme.s8;
+
+                VerticalLayout {
+                    for k[i] in App.shortcuts: left := VerticalLayout {
+                        property <bool> shown: Math.mod(i, 2) == 0;
+                        vertical-stretch: 0;
+
+                        // 9px above and below, as in the mockup; the row grows
+                        // when the description wraps to a second line.
+                        if left.shown: HorizontalLayout {
+                            spacing: Theme.s4;
+                            padding-top: 9px;
+                            padding-bottom: 9px;
+
+                            Mono {
+                                text: k.combo;
+                                width: 168px;
+                                font-weight: 600;
+                                vertical-alignment: top;
+                            }
+                            Text {
+                                text: k.desc;
+                                font-size: 13px;
+                                color: Theme.text;
+                                horizontal-stretch: 1;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        if left.shown: Rectangle {
+                            height: 1px;
+                            background: Theme.divider;
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                }
+
+                VerticalLayout {
+                    for k[i] in App.shortcuts: right := VerticalLayout {
+                        property <bool> shown: Math.mod(i, 2) == 1;
+                        vertical-stretch: 0;
+
+                        if right.shown: HorizontalLayout {
+                            spacing: Theme.s4;
+                            padding-top: 9px;
+                            padding-bottom: 9px;
+
+                            Mono {
+                                text: k.combo;
+                                width: 168px;
+                                font-weight: 600;
+                                vertical-alignment: top;
+                            }
+                            Text {
+                                text: k.desc;
+                                font-size: 13px;
+                                color: Theme.text;
+                                horizontal-stretch: 1;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        if right.shown: Rectangle {
+                            height: 1px;
+                            background: Theme.divider;
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+}

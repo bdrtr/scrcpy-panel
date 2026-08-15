@@ -1,0 +1,124 @@
+// Configuration · Bölüm 08 — Ağ ve ADB
+//
+// The connection half of the flag set: which device to talk to, which local
+// ports to use, and how much the server logs. Panel-side adb settings (the adb
+// binary, its port) live in the Ayarlar tab, not here.
+
+import { Theme } from "../theme.slint";
+import { Cfg } from "../state.slint";
+import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Sel, Chk } from "../components.slint";
+
+export component SectionNetwork inherits VerticalLayout {
+    spacing: Theme.s4;
+
+    SectionHead {
+        kicker: "Bölüm 08";
+        title: "Ağ ve ADB";
+        desc: "Yerel port yönlendirme varsayılan yoldur. Uzak bir adb sunucusuna bağlanırken tünel konağı ve portu birlikte verilmelidir.";
+    }
+
+    Hr {}
+
+    Grp {
+        Row {
+            Fld {
+                label: "Hedef seri no · --serial";
+                Inp {
+                    text <=> Cfg.serial;
+                    placeholder: "R58M31XABCD";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Yerel port aralığı · --port";
+                Inp {
+                    text <=> Cfg.port;
+                    placeholder: "27183";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "TCP/IP adresi · --tcpip";
+                Inp {
+                    text <=> Cfg.tcpip-addr;
+                    placeholder: "192.168.1.42:5555";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+        }
+        Row {
+            Fld {
+                label: "Tünel konağı · --tunnel-host";
+                Inp {
+                    text <=> Cfg.tunnel-host;
+                    placeholder: "192.168.1.42";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Tünel portu · --tunnel-port";
+                Inp {
+                    text <=> Cfg.tunnel-port;
+                    placeholder: "1234";
+                    mono: true;
+                    edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Sunucu günlük düzeyi · --verbosity";
+                Sel {
+                    labels: ["debug", "info", "warn", "error"];
+                    value <=> Cfg.verbosity;
+                    changed => { Cfg.changed(); }
+                }
+            }
+        }
+    }
+
+    Hr {}
+
+    ChkGrp {
+        Row {
+            Chk {
+                text: "Kablosuz bağlan · --tcpip";
+                checked <=> Cfg.tcpip-enabled;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Yönlendirmeyi zorla · --force-adb-forward";
+                checked <=> Cfg.force-adb-forward;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Yalnızca USB · --select-usb";
+                checked <=> Cfg.select-usb;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Yalnızca TCP/IP · --select-tcpip";
+                checked <=> Cfg.select-tcpip;
+                toggled => { Cfg.changed(); }
+            }
+        }
+        Row {
+            Chk {
+                text: "Çıkışta adb'yi durdur · --kill-adb-on-close";
+                checked <=> Cfg.kill-adb-on-close;
+                toggled => { Cfg.changed(); }
+            }
+            Chk {
+                text: "Temizlik yapma · --no-cleanup";
+                checked <=> Cfg.no-cleanup;
+                toggled => { Cfg.changed(); }
+            }
+        }
+    }
+
+    Rectangle { vertical-stretch: 1; }
+}

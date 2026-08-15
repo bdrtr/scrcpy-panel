@@ -5,6 +5,7 @@ mod display;
 mod input;
 mod media;
 mod options;
+mod panel;
 mod server;
 mod ui;
 mod util;
@@ -52,6 +53,11 @@ fn main() -> Result<()> {
 
     let opts = Options::parse();
     log::info!("scrcpy-slint {} — Rust scrcpy client with a Slint UI", VERSION);
+
+    if opts.panel {
+        return panel::run();
+    }
+
     run(opts)
 }
 

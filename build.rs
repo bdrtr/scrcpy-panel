@@ -1,5 +1,7 @@
 fn main() {
-    slint_build::compile("ui/mirror.slint").expect("failed to compile ui/mirror.slint");
+    // One root file: slint-build generates a single Rust module, so every
+    // window is re-exported from ui/app.slint rather than compiled separately.
+    slint_build::compile("ui/app.slint").expect("failed to compile ui/app.slint");
 
     if cfg!(target_os = "windows") {
         // SDL2 — prebuilt MSVC libraries (still used by the audio player)
