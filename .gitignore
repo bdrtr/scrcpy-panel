@@ -1,1 +1,17 @@
 /target
+
+# scrcpy server binary — fetched at build/run time, not redistributed
+scrcpy-server
+scrcpy-server-v*
+
+# local recordings produced while testing
+/*.mp4
+/*.mkv
+/*.m4a
+/*.mka
+
+# editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store

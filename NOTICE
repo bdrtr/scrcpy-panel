@@ -1,0 +1,44 @@
+scrcpy-slint
+Copyright 2026 bdrtr
+
+This product includes software developed as part of the following projects.
+
+
+1. ScrcpyRUST
+   https://github.com/naaceer-del/ScrcpyRUST
+   Licensed under the Apache License, Version 2.0.
+
+   scrcpy-slint is a fork of ScrcpyRUST. The Rust client skeleton — the ADB
+   layer, the scrcpy wire-protocol demuxer, the FFmpeg decoder wrapper, the
+   control-message and input layers — originates from that project.
+
+   Modifications made in scrcpy-slint (see git history for the full record):
+     - Replaced the SDL2 window/renderer with a Slint user interface
+     - Bumped the FFmpeg bindings from ffmpeg-next 8 to ffmpeg-next 9
+     - Added the missing `libc` dependency required by the V4L2 sink
+     - Removed development artifacts committed to the upstream repository
+     - Added this NOTICE file and the Apache License 2.0 text, which the
+       upstream repository declares in its README and Cargo.toml but does
+       not ship as a file
+
+
+2. scrcpy
+   https://github.com/Genymobile/scrcpy
+   Copyright (C) 2018 Genymobile
+   Copyright (C) 2018-2026 Romain Vimont
+   Licensed under the Apache License, Version 2.0.
+
+   scrcpy-slint speaks the scrcpy wire protocol and runs the unmodified
+   scrcpy server (`scrcpy-server`) on the Android device. The client
+   architecture — the module layout, the protocol framing, the control
+   message format and the Android keycode mappings — derives from scrcpy.
+
+   The scrcpy server binary is not redistributed as part of this repository;
+   it is obtained from the upstream scrcpy release matching the protocol
+   version this client implements.
+
+
+A copy of the Apache License, Version 2.0 is included in the LICENSE file at
+the root of this repository, and may also be obtained at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
