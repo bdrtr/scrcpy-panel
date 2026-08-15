@@ -1,20 +1,22 @@
 [package]
-name = "scrcpyrust"
+name = "scrcpy-slint"
 version = "0.1.0"
 edition = "2021"
-description = "A Rust implementation of scrcpy client — mirror Android devices on your computer"
+description = "A Rust scrcpy client with a Slint user interface — mirror and control Android devices"
 license = "Apache-2.0"
+repository = "https://github.com/bdrtr/scrcpy-slint"
 
 [dependencies]
 sdl2 = "0.37"
-ffmpeg-next = "8"
-ffmpeg-sys-next = "8"
+ffmpeg-next = "9"
+ffmpeg-sys-next = "9"
 clap = { version = "4", features = ["derive", "env"] }
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1"
 crossbeam-channel = "0.5"
 byteorder = "1"
+libc = "0.2"
 
 [profile.release]
 lto = true
