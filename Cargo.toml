@@ -11,6 +11,8 @@ cpal = "0.18"
 arboard = { version = "3.6", features = ["wayland-data-control"] }
 # The desktop's own file chooser, over the XDG portal rather than GTK, so this
 # stays a Wayland-native dialog with no toolkit linked in.
+# The desktop's screensaver inhibition lives on the session bus.
+zbus = "5"
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 ffmpeg-next = "9"
 ffmpeg-sys-next = "9"

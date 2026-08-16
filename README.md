@@ -121,8 +121,9 @@ with the opening session header, which every run exercises.
   either.
 - `--render-driver` was an SDL renderer hint and is now ignored; pick a Slint backend with
   `SLINT_BACKEND` instead.
-- `--disable-screensaver` went with SDL. Inhibiting the screensaver now means talking to
-  the desktop portal, which is its own piece of work; the flag warns and does nothing.
+- `--disable-screensaver` went with SDL and came back over D-Bus: the session holds an
+  `org.freedesktop.ScreenSaver` inhibition, which GNOME, KDE and COSMIC all answer, for as
+  long as it runs. A desktop without that service logs a warning and mirrors anyway.
 - Each frame is copied twice on the way to the screen (swscale output → packed buffer →
   Slint pixel buffer). Fine at 1080p60, but a GPU texture path would remove both.
 

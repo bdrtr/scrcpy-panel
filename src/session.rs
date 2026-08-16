@@ -90,6 +90,24 @@ pub struct Session {
     tunnel: adb::tunnel::AdbTunnel,
     no_cleanup: bool,
     kill_adb_on_close: bool,
+    /// --disable-screensaver, held for the life of the session. It lives here
+    /// rather than next to a window so that both the standalone mirror and the
+    /// panel's embedded one get it without wiring it twice.
+    _screensaver: Option<crate::display::screensaver::ScreensaverInhibitor>,
+}
+
+/// Ask the desktop to keep the screen awake, or say why it will not.
+///
+/// A desktop without the service is a missing convenience, not a reason to
+/// refuse to mirror.
+fn inhibit_screensaver() -> Option<crate::display::screensaver::ScreensaverInhibitor> {
+    match crate::display::screensaver::ScreensaverInhibitor::inhibit("Ekran yansıtılıyor") {
+        Ok(guard) => Some(guard),
+        Err(e) => {
+            log::warn!("--disable-screensaver: {e:#}");
+            None
+        }
+    }
 }
 
 impl Session {
@@ -211,6 +229,7 @@ impl Session {
             tunnel,
             no_cleanup: opts.no_cleanup,
             kill_adb_on_close: opts.kill_adb_on_close,
+            _screensaver: opts.disable_screensaver.then(inhibit_screensaver).flatten(),
         };
 
         if let Some(socket) = video_socket {

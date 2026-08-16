@@ -95,11 +95,6 @@ fn run(opts: Options) -> Result<()> {
              set SLINT_BACKEND to pick a Slint backend instead"
         );
     }
-    if opts.disable_screensaver {
-        // SDL used to handle this; Slint has no equivalent, and the portal
-        // inhibit protocol is a separate piece of work.
-        log::warn!("--disable-screensaver is not implemented since SDL was dropped");
-    }
     if opts.keyboard != "sdk" || opts.mouse != "sdk" {
         log::warn!(
             "--keyboard={} --mouse={}: only SDK injection is available on the Slint \
