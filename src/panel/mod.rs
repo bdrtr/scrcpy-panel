@@ -77,6 +77,10 @@ struct Panel {
     /// The embedded session's control channel, kept so the panel's own buttons
     /// can reach the device without going through adb shell.
     controller: RefCell<Option<Rc<crate::control::controller::Controller>>>,
+    /// Whether that session is mirroring a camera, which takes only the torch,
+    /// the zoom and a video reset: the server treats anything else as a
+    /// protocol error and ends its control thread over it.
+    camera_session: std::cell::Cell<bool>,
     /// Refreshes the Ölçümler table once a second.
     metrics_timer: RefCell<Option<slint::Timer>>,
     started_at: std::cell::Cell<Option<std::time::Instant>>,
@@ -140,6 +144,7 @@ pub fn run(opts: &Options) -> Result<()> {
         attachment: RefCell::new(None),
         audio: RefCell::new(None),
         controller: RefCell::new(None),
+        camera_session: std::cell::Cell::new(false),
         metrics_timer: RefCell::new(None),
         started_at: std::cell::Cell::new(None),
         editing_profile: std::cell::Cell::new(None),
@@ -169,7 +174,7 @@ pub fn run(opts: &Options) -> Result<()> {
     window.global::<App>().set_adb_status(adb_status().into());
 
     refresh_profile_cards(&panel);
-    wire(&window, &panel);
+    wire(&window, &panel, opts);
     sync_tray_presence(&window, &panel);
     refresh_command(&window);
     panel.info(&tr!("Panel hazır."));
@@ -642,7 +647,10 @@ fn write_config(window: &PanelWindow, cfg: &PanelConfig) {
 // Callback wiring
 // =====================================================================
 
-fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
+/// `opts` is the command line the panel itself was started with, which the
+/// form does not cover: the panel builds its own options for a session, but
+/// --push-target belongs to the file transfer rather than to a session.
+fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
     let app = window.global::<App>();
     let cfg = window.global::<Cfg>();
     let settings = window.global::<Settings>();
@@ -1121,12 +1129,28 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
 
     {
         let weak = window.as_weak();
+        let push_target = opts.push_target.clone();
+        let panel_for_push = panel.clone();
         app.on_push_files(move || {
             let serial = weak
                 .upgrade()
                 .map(|window| window.global::<Cfg>().get_serial().to_string())
                 .unwrap_or_default();
             let weak = weak.clone();
+            let push_target = push_target.clone();
+            // A handle rather than the controller: the push runs on a thread of
+            // its own, and the queue behind the controller does not mind which
+            // thread fills it. With no session running there is nobody to tell,
+            // and the file waits for the device to notice it by itself.
+            let control = if panel_for_push.camera_session.get() {
+                None
+            } else {
+                panel_for_push
+                    .controller
+                    .borrow()
+                    .as_ref()
+                    .map(|controller| controller.handle())
+            };
             // Both the dialog and the copy block for as long as the user and
             // the cable take, which on the event loop would freeze the panel.
             std::thread::spawn(move || {
@@ -1141,9 +1165,22 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                     &weak,
                     Transfer::done(tr!("{} dosya gönderiliyor…", paths.len())),
                 );
+                let mut pushed = false;
                 for path in paths {
-                    let transfer = transfer_file(&serial, &path);
+                    let transfer = transfer_file(&serial, &path, &push_target);
+                    pushed |= transfer.ok && transfer.scanworthy;
                     report(&weak, transfer);
+                }
+                // One scan for the batch: scrcpy hands the device the target
+                // directory rather than the file, so asking twice would be
+                // asking for the same thing.
+                if pushed {
+                    if let Some(control) = control {
+                        control.push_msg(ControlMsg::ScanFile {
+                            path: push_target.clone(),
+                        });
+                        log::info!("Asked the device to index {push_target}");
+                    }
                 }
             });
         });
@@ -1160,6 +1197,12 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
             let text = crate::input::slint_input::get_clipboard_text();
             if text.is_empty() {
                 panel.warn(&tr!("Pano boş."));
+                return;
+            }
+            if panel.camera_session.get() {
+                panel.warn(&tr!(
+                    "Kamera aynalanırken cihazın panosuna yazılamaz."
+                ));
                 return;
             }
             let controller = panel.controller.borrow().clone();
@@ -1354,6 +1397,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
     let Some(window) = panel.window.upgrade() else {
         return;
     };
+    panel.camera_session.set(opts.video_source == "camera");
 
     let mut session = match result {
         Ok(session) => session,
@@ -1779,6 +1823,7 @@ fn stop_session(panel: &Rc<Panel>) {
     panel.audio.borrow_mut().take();
     panel.metrics_timer.borrow_mut().take();
     panel.controller.borrow_mut().take();
+    panel.camera_session.set(false);
     panel.started_at.set(None);
     if let Some(session) = panel.embedded.borrow_mut().take() {
         session.shutdown();
@@ -1989,15 +2034,15 @@ fn apply_language(window: &PanelWindow) {
         .set_shortcuts(ModelRc::from(Rc::new(VecModel::from(shortcut_rows()))));
 }
 
-/// Where a pushed file lands, matching scrcpy's own default.
-const PUSH_TARGET: &str = "/sdcard/Download/";
-
 /// Install an APK, or push anything else to the device.
 ///
 /// This is what scrcpy does when a file is dropped on the mirror. Slint's
 /// DataTransfer exposes no file paths, so the panel asks for them with a file
 /// chooser and does the same two things with the answer.
-fn transfer_file(serial: &str, path: &std::path::Path) -> Transfer {
+///
+/// `push_target` is `--push-target`, which until now was a flag the parser
+/// accepted and nothing read.
+fn transfer_file(serial: &str, path: &std::path::Path, push_target: &str) -> Transfer {
     let name = path
         .file_name()
         .unwrap_or_default()
@@ -2014,7 +2059,7 @@ fn transfer_file(serial: &str, path: &std::path::Path) -> Transfer {
     if is_apk {
         command.arg("install").arg("-r").arg(path);
     } else {
-        command.arg("push").arg(path).arg(PUSH_TARGET);
+        command.arg("push").arg(path).arg(push_target);
     }
 
     let output = match command.output() {
@@ -2046,7 +2091,7 @@ fn transfer_file(serial: &str, path: &std::path::Path) -> Transfer {
     } else if is_apk {
         Transfer::done(format!("Kuruldu: {name}"))
     } else {
-        Transfer::done(tr!("Gönderildi: {} → {}", name, PUSH_TARGET))
+        Transfer::pushed(tr!("Gönderildi: {} → {}", name, push_target))
     }
 }
 
@@ -2054,14 +2099,20 @@ fn transfer_file(serial: &str, path: &std::path::Path) -> Transfer {
 struct Transfer {
     ok: bool,
     message: String,
+    /// A file that landed in the push target, which the device should be told
+    /// to index. An installed APK is not one, and neither is a failure.
+    scanworthy: bool,
 }
 
 impl Transfer {
     fn done(message: String) -> Self {
-        Self { ok: true, message }
+        Self { ok: true, message, scanworthy: false }
+    }
+    fn pushed(message: String) -> Self {
+        Self { ok: true, message, scanworthy: true }
     }
     fn failed(message: String) -> Self {
-        Self { ok: false, message }
+        Self { ok: false, message, scanworthy: false }
     }
 }
 

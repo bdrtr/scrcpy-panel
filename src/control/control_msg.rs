@@ -30,6 +30,7 @@ pub const MSG_CAMERA_SET_TORCH: u8 = 18;
 pub const MSG_CAMERA_ZOOM_IN: u8 = 19;
 pub const MSG_CAMERA_ZOOM_OUT: u8 = 20;
 pub const MSG_RESIZE_DISPLAY: u8 = 21;
+pub const MSG_SCAN_FILE: u8 = 22;
 
 /// Android motion event: hover
 pub const AMOTION_ACTION_HOVER_MOVE: u8 = 7;
@@ -129,6 +130,12 @@ pub enum ControlMsg {
     /// to choose, so there is nothing to send but the direction.
     CameraZoomIn,
     CameraZoomOut,
+    /// Have the device index what was just pushed to it, so a file arrives in
+    /// the gallery rather than only in the filesystem. scrcpy sends the target
+    /// directory rather than the file, and so does this.
+    ScanFile {
+        path: String,
+    },
 }
 
 impl ControlMsg {
@@ -273,6 +280,12 @@ impl ControlMsg {
             ControlMsg::CameraZoomOut => {
                 buf.write_u8(MSG_CAMERA_ZOOM_OUT)?;
             }
+            ControlMsg::ScanFile { path } => {
+                buf.write_u8(MSG_SCAN_FILE)?;
+                let bytes = path.as_bytes();
+                buf.write_u32::<BigEndian>(bytes.len() as u32)?;
+                buf.write_all(bytes)?;
+            }
         }
         Ok(buf)
     }
@@ -341,6 +354,7 @@ mod tests {
             ("CAMERA_ZOOM_IN", MSG_CAMERA_ZOOM_IN),
             ("CAMERA_ZOOM_OUT", MSG_CAMERA_ZOOM_OUT),
             ("RESIZE_DISPLAY", MSG_RESIZE_DISPLAY),
+            ("SCAN_FILE", MSG_SCAN_FILE),
         ];
 
         for (name, id) in ours {
@@ -353,6 +367,20 @@ mod tests {
                 "{name} must be {index}; scrcpy numbers them in this order"
             );
         }
+    }
+
+    /// The path is a length and then the bytes, with no terminator: the same
+    /// shape as the text messages, and the reason a length that disagreed with
+    /// the bytes would desynchronise everything after it.
+    #[test]
+    fn a_scan_carries_its_path_by_length() {
+        let buf = ControlMsg::ScanFile { path: "/sdcard/Download/".into() }
+            .serialize()
+            .expect("serialize");
+        assert_eq!(buf[0], MSG_SCAN_FILE);
+        assert_eq!(&buf[1..5], &[0, 0, 0, 17], "17 bytes of path");
+        assert_eq!(&buf[5..], b"/sdcard/Download/");
+        assert_eq!(buf.len(), 1 + 4 + 17);
     }
 
     /// The torch carries the state rather than toggling, so a client that has

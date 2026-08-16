@@ -87,6 +87,8 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | MOD+Shift+r | works — the device encodes again, the stream continues |
 | `--pause-on-exit=if-error` | works — waits only on the run that failed |
 | Terminal title | works — written into a pty and taken back at the end |
+| SCAN_FILE after a push | accepted — a POWER keycode sent straight after it still reached the device, so the control channel survived the message |
+| Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
 
 Recording a mostly static screen produces a file shorter than the session, which
 is correct rather than a bug: scrcpy's encoder only emits a frame when the
@@ -163,6 +165,19 @@ with the opening session header, which every run exercises.
   not a log line: `ESC ]0;<title> BEL`, the same escape scrcpy writes, with the window's
   title in it. It is written only when standard output is a terminal, and taken back when
   the session ends.
+- **The server has two control handlers, and a camera session's is small.** Mirroring a
+  camera it takes the torch, the two zoom steps and a video reset; anything else — a touch,
+  a key, the clipboard — is a protocol error it answers with an AssertionError on its
+  control thread, which ends the control channel for the rest of the session. So the client
+  holds those back while mirroring a camera: the pointer and keyboard send nothing, the
+  shortcuts that reach the device are refused, and the panel's clipboard button says why.
+  This was found by sending a scan-file to a camera session and watching the thread die.
+- A pushed file is followed by a scan request, so it turns up in the gallery rather than
+  only in the filesystem. scrcpy hands the device the target directory rather than the file,
+  and so does this — one request for a batch. `--push-target` says where the file goes and
+  what the scan names; until now it was a flag the parser accepted and nothing read. On
+  Android 11 and above adbd indexes what it pushes anyway, so on the test tablet the scan
+  changed nothing observable; it is what scrcpy does, and older devices need it.
 - The two-finger gestures are on Ctrl and Shift now, where scrcpy has them, rather than on
   the shortcut modifier: Ctrl+drag pinches and rotates about the centre, Shift+drag slides
   two fingers up and down, Ctrl+Shift+drag slides them left and right. It is one mechanism

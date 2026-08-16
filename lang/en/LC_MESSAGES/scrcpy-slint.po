@@ -1204,3 +1204,6 @@ msgstr "Slide two fingers left and right"
 
 msgid "Son uygulamalar / bildirimler"
 msgstr "Recents / notifications"
+
+msgid "Kamera aynalanırken cihazın panosuna yazılamaz."
+msgstr "A camera mirror cannot write to the device's clipboard."

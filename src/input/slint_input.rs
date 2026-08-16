@@ -360,6 +360,11 @@ impl SlintInput {
         controller: &Controller,
     ) {
         self.alt_held = alt;
+        // A camera has nothing to touch, and the server ends the control
+        // channel over a touch it did not expect.
+        if self.camera {
+            return;
+        }
         let (x, y) = self.to_frame(u, v);
 
         if button != BUTTON_LEFT {
@@ -420,7 +425,7 @@ impl SlintInput {
     }
 
     pub fn pointer_up(&mut self, u: f32, v: f32, button: i32, controller: &Controller) {
-        if button != BUTTON_LEFT {
+        if button != BUTTON_LEFT || self.camera {
             return;
         }
         let (x, y) = self.to_frame(u, v);
@@ -434,7 +439,7 @@ impl SlintInput {
     }
 
     pub fn pointer_moved(&mut self, u: f32, v: f32, pressed: bool, controller: &Controller) {
-        if !pressed && !self.mouse_hover {
+        if self.camera || (!pressed && !self.mouse_hover) {
             return;
         }
         let (x, y) = self.to_frame(u, v);
@@ -457,6 +462,9 @@ impl SlintInput {
     }
 
     pub fn pointer_scroll(&mut self, u: f32, v: f32, dx: f32, dy: f32, controller: &Controller) {
+        if self.camera {
+            return;
+        }
         let (x, y) = self.to_frame(u, v);
         // Slint reports scroll in pixels; the server wants discrete steps.
         let h = dx.signum() as i16 * (dx.abs() > 0.5) as i16;
@@ -507,7 +515,7 @@ impl SlintInput {
 
         // Ctrl+V without the shortcut modifier pastes the host clipboard as
         // text, matching upstream.
-        if control && !shortcut_active && (c == 'v' || c == 'V') && !repeat {
+        if control && !shortcut_active && !self.camera && (c == 'v' || c == 'V') && !repeat {
             // Ctrl+V always types the text, which is what --legacy-paste asks
             // the shortcut to do as well.
             let text = get_clipboard_text();
@@ -519,6 +527,12 @@ impl SlintInput {
 
         // A repeat that reaches no shortcut is a repeat the device would see.
         if repeat && !self.key_repeat && !shortcut_active {
+            return WindowAction::None;
+        }
+
+        // Same as the pointer: a camera takes the shortcuts written for it and
+        // nothing else, so a key that is not one goes nowhere.
+        if self.camera && !shortcut_active {
             return WindowAction::None;
         }
 
@@ -591,7 +605,7 @@ impl SlintInput {
     ) {
         self.alt_held = alt;
         let Some(c) = text.chars().next() else { return };
-        if is_modifier(c) || self.shortcut_mod.active(alt, control, meta) {
+        if self.camera || is_modifier(c) || self.shortcut_mod.active(alt, control, meta) {
             return;
         }
 
@@ -615,6 +629,11 @@ impl SlintInput {
     }
 
     fn run_shortcut(&mut self, action: ShortcutAction, controller: &Controller) -> WindowAction {
+        if self.camera && !a_camera_takes(action) {
+            log::debug!("{action:?} is not something a camera session can be sent");
+            return WindowAction::None;
+        }
+
         match action {
             ShortcutAction::None => {}
             ShortcutAction::Home => send_key(controller, AKEYCODE_HOME),
@@ -752,6 +771,39 @@ fn send_key(controller: &Controller, keycode: u32) {
 
 /// The same shortcut table upstream had, keyed by character instead of by SDL
 /// keycode.
+/// Whether an action may be carried out while mirroring a camera.
+///
+/// The server splits its control handler in two: mirroring a camera it takes
+/// the torch, the zoom and a video reset, and treats anything else as a
+/// protocol error — an AssertionError on its control thread, which ends the
+/// control channel for the rest of the session. So a click on a camera mirror
+/// is not merely useless, and neither is Home.
+///
+/// The window's own actions are all allowed: they never reach the device.
+fn a_camera_takes(action: ShortcutAction) -> bool {
+    use ShortcutAction as A;
+    matches!(
+        action,
+        A::CameraTorchOn
+            | A::CameraTorchOff
+            | A::CameraZoomIn
+            | A::CameraZoomOut
+            | A::ResetVideo
+            | A::ToggleFullscreen
+            | A::ResizeToFit
+            | A::PixelPerfect
+            | A::ToggleFps
+            | A::RotateCW
+            | A::RotateCCW
+            | A::FlipHorizontal
+            | A::FlipVertical
+            | A::PauseDisplay
+            | A::UnpauseDisplay
+            | A::Quit
+            | A::None
+    )
+}
+
 /// What MOD plus a key means.
 ///
 /// `camera` decides one pair of them: scrcpy gives MOD+Up and MOD+Down to the
@@ -1114,6 +1166,51 @@ mod tests {
                 (_, other) => panic!("expected a touch, got {other:?}"),
             }
         }
+    }
+
+    /// The server ends the control channel over a message a camera session
+    /// cannot answer, so the client has to know which ones those are.
+    #[test]
+    fn a_camera_session_sends_only_what_a_camera_can_answer() {
+        let (controller, messages) = Controller::collecting();
+        let mut input = input();
+        input.set_camera(true);
+
+        input.pointer_down(0.5, 0.5, BUTTON_LEFT, false, false, false, &controller);
+        input.pointer_moved(0.5, 0.5, true, &controller);
+        input.pointer_up(0.5, 0.5, BUTTON_LEFT, &controller);
+        input.pointer_scroll(0.5, 0.5, 0.0, -3.0, &controller);
+        input.key_down("a", false, false, false, false, false, &controller);
+        input.key_up("a", false, false, false, false, &controller);
+        input.key_down("h", true, false, false, false, false, &controller); // MOD+h
+        assert!(messages.try_recv().is_err(), "nothing of that reaches a camera");
+
+        // What it does take.
+        input.key_down("t", true, false, false, false, false, &controller);
+        assert!(matches!(
+            messages.try_recv(),
+            Ok(ControlMsg::CameraSetTorch { on: true })
+        ));
+        input.key_down("\u{F700}", true, false, false, false, false, &controller);
+        assert!(matches!(messages.try_recv(), Ok(ControlMsg::CameraZoomIn)));
+        input.key_down("r", true, false, true, false, false, &controller);
+        assert!(matches!(messages.try_recv(), Ok(ControlMsg::ResetVideo)));
+
+        // And the window's own actions, which never leave this machine.
+        assert_eq!(
+            input.key_down("f", true, false, false, false, false, &controller),
+            WindowAction::ToggleFullscreen
+        );
+        assert!(messages.try_recv().is_err());
+    }
+
+    /// The same events on a display session are the ones that always worked.
+    #[test]
+    fn a_display_session_still_takes_a_touch() {
+        let (controller, messages) = Controller::collecting();
+        let mut input = input();
+        input.pointer_down(0.5, 0.5, BUTTON_LEFT, false, false, false, &controller);
+        assert!(matches!(messages.try_recv(), Ok(ControlMsg::InjectTouch { .. })));
     }
 
     /// The shortcut modifier reads its own repeats — holding MOD+f must not

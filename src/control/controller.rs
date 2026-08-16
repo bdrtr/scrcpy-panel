@@ -32,6 +32,17 @@ impl Controller {
         }
     }
 
+    /// A way to reach the queue from another thread.
+    ///
+    /// The controller itself is held behind an `Rc` on the event loop, because
+    /// that is where the input arrives; the queue behind it is a channel and
+    /// does not care who pushes. The file transfer runs on a worker thread and
+    /// needs to say what it pushed, hence this.
+    #[allow(dead_code)]
+    pub fn handle(&self) -> ControlHandle {
+        ControlHandle { sender: self.sender.clone() }
+    }
+
     /// A controller with no socket behind it, for tests.
     ///
     /// Nothing is serialized and no thread runs: the messages stay in the queue
@@ -86,6 +97,21 @@ impl Controller {
             }
         }
         log::debug!("Controller sender thread stopped");
+    }
+}
+
+/// A sender-side handle to a controller, which can cross threads.
+#[derive(Clone)]
+pub struct ControlHandle {
+    sender: Option<Sender<ControlMsg>>,
+}
+
+impl ControlHandle {
+    pub fn push_msg(&self, msg: ControlMsg) -> bool {
+        match &self.sender {
+            Some(sender) => sender.try_send(msg).is_ok(),
+            None => false,
+        }
     }
 }
 
