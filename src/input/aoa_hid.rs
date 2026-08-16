@@ -43,6 +43,28 @@ const SETTLE: Duration = Duration::from_millis(200);
 /// small size is the one every device takes.
 const DESC_CHUNK: usize = 64;
 
+/// The serials of the USB devices that speak the accessory protocol.
+///
+/// Without adb there is no device list to ask, so the bus is asked instead:
+/// anything that answers a protocol query with 2 or more is an Android device
+/// willing to take HID. Devices that refuse to open are somebody else's.
+pub fn accessory_devices() -> Vec<String> {
+    let Ok(devices) = rusb::devices() else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for device in devices.iter() {
+        let Ok(descriptor) = device.device_descriptor() else { continue };
+        let Ok(handle) = device.open() else { continue };
+        let Ok(serial) = handle.read_serial_number_string_ascii(&descriptor) else { continue };
+        let candidate = AoaHid { handle, registered: Vec::new() };
+        if matches!(candidate.protocol_version(), Ok(2..)) {
+            found.push(serial);
+        }
+    }
+    found
+}
+
 /// An open USB connection to the device, for HID and nothing else.
 pub struct AoaHid {
     handle: rusb::DeviceHandle<rusb::GlobalContext>,
@@ -116,10 +138,13 @@ impl AoaHid {
         )
         .with_context(|| format!("The device refused a HID registration for id {id}"))?;
 
-        // A descriptor longer than a packet goes in pieces; the device
-        // reassembles them in the order they arrive.
-        for chunk in report_desc.chunks(DESC_CHUNK) {
-            self.control(ACCESSORY_SET_HID_REPORT_DESC, id, 0, chunk)
+        // A descriptor longer than a packet goes in pieces, and each piece has
+        // to say where it belongs: wIndex is the offset, not a spare zero. The
+        // keyboard's 63 bytes fit in one and hid this for as long as the mouse
+        // — 67 of them — was not being registered.
+        for (index, chunk) in report_desc.chunks(DESC_CHUNK).enumerate() {
+            let offset = (index * DESC_CHUNK) as u16;
+            self.control(ACCESSORY_SET_HID_REPORT_DESC, id, offset, chunk)
                 .with_context(|| format!("The device refused the report descriptor for {id}"))?;
         }
         self.registered.push(id);

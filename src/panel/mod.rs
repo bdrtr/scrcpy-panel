@@ -1469,7 +1469,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
             {
                 match (panel.uhid.borrow().as_ref(), controller.as_ref()) {
                     (Some(uhid), Some(controller)) => {
-                        uhid.attach(controller.clone(), opts, &session.serial);
+                        uhid.attach(Some(controller.clone()), opts, &session.serial);
                         uhid_keyboard = uhid.keyboard_attached();
                         uhid_mouse = uhid.mouse_attached();
                     }

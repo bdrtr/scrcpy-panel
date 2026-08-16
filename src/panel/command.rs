@@ -653,7 +653,7 @@ mod tests {
     fn unsupported_flags_are_reported_rather_than_passed_on() {
         let mut cfg = PanelConfig::default();
         cfg.max_size = "800".into();          // supported
-        cfg.otg = true;                    // needs USB/AOA, not implemented
+        cfg.otg = true;                    // a mode of its own, not a session to host
         cfg.gamepad = "uhid".into();       // read by gilrs since the port grew a source
 
         let (accepted, dropped) = cfg.to_client_args();
@@ -775,7 +775,10 @@ mod tests {
         for flag in [
             // Nothing is unimplemented-but-offered right now. The list is kept
             // so the next flag added without an implementation lands here.
-            "--otg",      // needs USB and AOA rather than a control socket
+            // Implemented, but not as something the panel can host: OTG is a
+            // session with no session in it — no adb, no server, no picture —
+            // and the panel's model is a mirror in a tab.
+            "--otg",
         ] {
             assert!(
                 !SUPPORTED.contains(&flag),

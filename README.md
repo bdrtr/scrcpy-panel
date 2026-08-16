@@ -90,6 +90,7 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | SCAN_FILE after a push | accepted — a POWER keycode sent straight after it still reached the device, so the control channel survived the message |
 | Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
 | `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
+| `--otg` | works — the device is found on the bus with no adb at all, a keyboard and a mouse are registered over USB, and the pointer's motion comes out of the phone's kernel as `REL_X`/`REL_Y` while the window has it |
 | `--keyboard=aoa` | works — the AOA keyboard registers over USB during a session and is given back at the end. `cargo test -- --ignored aoa`, with `AOA_SERIAL` set, registers one and types an "a": `KEY_A DOWN`/`UP` came out of the phone's kernel with no adb, no server and no control socket in the way |
 | `--mouse=uhid` | works — the device it adds has REL_X, REL_Y and the two wheels; a report of 30,30 came out of the phone's kernel as `REL_X 0x1e`, `REL_Y 0x1e`, and a click as `BTN_MOUSE DOWN`/`UP`. The pointer moving on this desk arrived the same way, 655 relative events in fourteen seconds |
 
@@ -144,6 +145,12 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   carried it, and an event that arrives while it is still building is not a valid event;
   registration now leaves it two tenths of a second, which is more than the tenth it took
   to be ready on the phone this was found on.
+- **`--otg` is the whole of the input path with nothing else attached.** No adb, no server,
+  no video: the window exists only to be typed into, and says so instead of showing a
+  picture. Without adb there is no device list to ask, so the USB bus is asked directly —
+  anything that answers an accessory-protocol query with 2 or more is an Android device
+  willing to take HID, and if exactly one does, that is the one. `--keyboard` and `--mouse`
+  are forced to `aoa` there, since there is no socket for UHID to use.
 - **`--gamepad=uhid` works, and is the one thing here with no gamepad to prove it on.**
   The report side was ported with the rest of scrcpy's HID code; what it lacked was a
   source, and neither Slint nor winit reads gamepads. gilrs does, on every desktop this
@@ -169,10 +176,12 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   `--v4l2-buffer`. It needs the module first:
   `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
 - Of the 74 flags the form can produce, 73 reach the device. The one that does not is
-  `--otg`, which needs USB and the AOA protocol rather than a control socket; the panel
-  names it as dropped rather than pretending. An earlier version of this line claimed all
-  of them, which was a miscount: the check that produced the number was reading the list of
-  deliberately unimplemented flags in a test as though it were the supported list.
+  `--otg`, and not for want of an implementation: OTG is a session with no session in it —
+  no adb, no server, no picture — and the panel's model is a mirror in a tab. The command
+  line has it; the panel names it as dropped rather than pretending. An earlier version of
+  this line claimed all of them, which was a miscount: the check that produced the number
+  was reading the list of deliberately unimplemented flags in a test as though it were the
+  supported list.
 - **The command line is scrcpy 4.1's, less three.** Comparing the two `--help` outputs
   leaves `--otg` and `--gamepad`, which want an input source Slint does not have, and
   `--no-window-aspect-ratio-lock`, which has nothing to turn off: SDL3 can lock a window to
@@ -340,12 +349,12 @@ curl -L -o target/release/scrcpy-server \
 3. ~~Embed the mirror in the panel~~ — done; Ayarlar switches between embedded and a
    window of its own
 4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, pinned to 4.1
-5. Get input parity back: ~~UHID keyboard and mouse~~, ~~gamepads~~ and ~~AOA~~ — done;
-   `--otg`, which is input over USB with no adb and no video at all, is what is left
+5. ~~Get input parity back: UHID keyboard and mouse, gamepads, AOA and OTG~~ — done, bar a
+   gamepad to try the gamepads on
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
 7. GPU frame path (Slint's `unstable-wgpu-29` texture import) to remove the per-frame copies
-8. Fill in what upstream left out: ~~virtual display (`--new-display`)~~ and ~~the rest of
-   camera~~ — done; OTG remains, and waits on the same scancode source as 5
+8. ~~Fill in what upstream left out: virtual display (`--new-display`), the rest of camera,
+   OTG~~ — done
 
 The interface being built is in [`design/`](./design/) — a control panel with device
 management, an eight-section configuration form covering ~85 scrcpy flags, session control,

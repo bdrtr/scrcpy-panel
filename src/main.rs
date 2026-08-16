@@ -160,6 +160,82 @@ pub fn select_backend(opts: &Options, uhid_wanted: bool) -> Option<UhidInput> {
     uhid
 }
 
+/// `--otg`: input over the cable, and nothing else.
+///
+/// No adb, no server, no picture — the window exists only to have somewhere for
+/// the keyboard and mouse to be typed into, which is why it says so and shows
+/// nothing. This is the mode that works before Android has booted far enough to
+/// have a screen worth mirroring, and on the lock screen, where injection is
+/// refused and a HID device is not.
+fn run_otg(opts: Options) -> Result<()> {
+    let serial = match opts.serial.clone() {
+        Some(serial) => serial,
+        None => {
+            let mut found = input::aoa_hid::accessory_devices();
+            match found.len() {
+                1 => found.remove(0),
+                0 => anyhow::bail!(
+                    "No USB device answering the accessory protocol. --otg is the cable: \
+                     a device on TCP/IP cannot do it, and one that is only charging is \
+                     not connected for data."
+                ),
+                n => anyhow::bail!("{n} devices on the bus; say which with --serial"),
+            }
+        }
+    };
+    log::info!("OTG: {serial}, over USB and nothing else");
+
+    // AOA is the only road here — there is no socket to send UHID down.
+    let mut opts = opts;
+    if opts.keyboard != "disabled" {
+        opts.keyboard = "aoa".to_string();
+    }
+    if opts.mouse != "disabled" {
+        opts.mouse = "aoa".to_string();
+    }
+
+    let Some(uhid) = select_backend(&opts, true) else {
+        anyhow::bail!("--otg needs the winit backend, which could not be configured");
+    };
+
+    let window = MirrorWindow::new().context("Failed to create the Slint window")?;
+    window.set_borderless(opts.borderless);
+    window.set_window_title(format!("scrcpy-slint OTG — {serial}").as_str().into());
+    window.global::<Mirror>().set_placeholder(
+        tr!("OTG: klavye ve fare cihaza gidiyor, görüntü yok").as_str().into(),
+    );
+    if opts.fullscreen {
+        window.window().set_fullscreen(true);
+    }
+
+    uhid.attach(None, &opts, &serial);
+
+    let reason = Rc::new(Cell::new("the window closing"));
+    let interrupt = watch_for_interrupt(reason.clone());
+    let time_limit = slint::Timer::default();
+    if let Some(seconds) = opts.time_limit.filter(|&s| s > 0) {
+        time_limit.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_secs(seconds as u64),
+            {
+                let reason = reason.clone();
+                move || {
+                    reason.set("the time limit");
+                    let _ = slint::quit_event_loop();
+                }
+            },
+        );
+    }
+
+    window.run().context("Slint event loop failed")?;
+
+    log::info!("Shutting down after {}...", reason.get());
+    drop(interrupt);
+    drop(time_limit);
+    uhid.detach();
+    Ok(())
+}
+
 /// `--no-window`: the session with nothing drawing it.
 ///
 /// The frames still have to be taken. Recording is fed by the demuxer, but the
@@ -244,6 +320,11 @@ fn run_windowless(opts: &Options, video: session::VideoStream) -> Result<()> {
 fn run(opts: Options) -> Result<()> {
     if session::run_list_query(&opts)? {
         return Ok(());
+    }
+
+    // OTG is not a session: there is no adb in it at all.
+    if opts.otg {
+        return run_otg(opts);
     }
 
     if opts.render_driver.is_some() {
@@ -363,7 +444,7 @@ fn run(opts: Options) -> Result<()> {
     // The UHID devices need something to reach, which is only now that the
     // control channel is up.
     if let (Some(uhid), Some(controller)) = (uhid.as_ref(), controller.as_ref()) {
-        uhid.attach(controller.clone(), &opts, &session.serial);
+        uhid.attach(Some(controller.clone()), &opts, &session.serial);
     }
 
     let attachment = {

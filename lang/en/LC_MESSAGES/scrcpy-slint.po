@@ -1207,3 +1207,6 @@ msgstr "Recents / notifications"
 
 msgid "Kamera aynalanırken cihazın panosuna yazılamaz."
 msgstr "A camera mirror cannot write to the device's clipboard."
+
+msgid "OTG: klavye ve fare cihaza gidiyor, görüntü yok"
+msgstr "OTG: the keyboard and mouse reach the device; there is no picture"

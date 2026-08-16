@@ -290,10 +290,10 @@ impl UhidInput {
     /// The options come in here rather than at construction because the panel
     /// chooses the input modes in its form, which is long after the backend —
     /// and this handler — had to exist.
-    pub fn attach(&self, controller: Rc<Controller>, opts: &Options, serial: &str) {
+    pub fn attach(&self, controller: Option<Rc<Controller>>, opts: &Options, serial: &str) {
         let mut uhid = self.inner.borrow_mut();
         uhid.shortcut_mod = ShortcutMod::parse(&opts.shortcut_mod);
-        uhid.controller = Some(controller);
+        uhid.controller = controller;
 
         let mut keyboard_road = Road::of(&opts.keyboard);
         let mut mouse_road = Road::of(&opts.mouse);

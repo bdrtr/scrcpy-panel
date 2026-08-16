@@ -287,6 +287,14 @@ pub struct Options {
     #[arg(long)]
     pub camera_zoom: Option<String>,
 
+    /// Input only, over USB: no adb, no server, no picture
+    ///
+    /// The computer's keyboard and mouse become the device's, through AOA, and
+    /// nothing is mirrored — which is what makes it work before Android has
+    /// booted far enough to have a screen worth mirroring.
+    #[arg(long, default_value = "false")]
+    pub otg: bool,
+
     /// Keyboard input mode: sdk, uhid, aoa, disabled
     #[arg(long, default_value = "sdk", value_parser = ["sdk", "uhid", "aoa", "disabled"])]
     pub keyboard: String,
