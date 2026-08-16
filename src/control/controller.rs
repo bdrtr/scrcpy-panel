@@ -32,6 +32,17 @@ impl Controller {
         }
     }
 
+    /// A controller with no socket behind it, for tests.
+    ///
+    /// Nothing is serialized and no thread runs: the messages stay in the queue
+    /// and the returned receiver reads them back, which is how a test can tell
+    /// an event that was forwarded from one that was dropped.
+    #[cfg(test)]
+    pub fn collecting() -> (Self, Receiver<ControlMsg>) {
+        let (sender, receiver) = bounded(QUEUE_LIMIT);
+        (Self { sender: Some(sender), thread: None }, receiver)
+    }
+
     /// Push a control message onto the queue
     pub fn push_msg(&self, msg: ControlMsg) -> bool {
         let sender = match &self.sender {

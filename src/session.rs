@@ -484,19 +484,32 @@ impl Session {
     }
 }
 
+/// Which one-shot query the flags ask the server for, if any.
+///
+/// The server answers one at a time, and this is the only place that turns a
+/// `--list-…` flag into the option it sends: a flag added to `Options` and
+/// forgotten here parses, prints nothing and exits as though it had worked.
+fn list_query(opts: &Options) -> Option<&'static str> {
+    if opts.list_encoders {
+        Some("list_encoders")
+    } else if opts.list_displays {
+        Some("list_displays")
+    } else if opts.list_cameras {
+        Some("list_cameras")
+    } else if opts.list_camera_sizes {
+        Some("list_camera_sizes")
+    } else if opts.list_apps {
+        Some("list_apps")
+    } else {
+        None
+    }
+}
+
 /// Handle `--list-encoders` and friends, which run the server once and exit.
 ///
 /// Returns true when a query ran, meaning there is no session to start.
 pub fn run_list_query(opts: &Options) -> Result<bool> {
-    let list_what = if opts.list_encoders {
-        "list_encoders"
-    } else if opts.list_displays {
-        "list_displays"
-    } else if opts.list_cameras {
-        "list_cameras"
-    } else if opts.list_apps {
-        "list_apps"
-    } else {
+    let Some(list_what) = list_query(opts) else {
         return Ok(false);
     };
 
@@ -902,4 +915,34 @@ fn random_scid() -> u32 {
         .unwrap_or_default()
         .subsec_nanos();
     nanos & 0x7FFF_FFFF
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn opts(flags: &[&str]) -> Options {
+        let mut argv = vec!["scrcpy-slint"];
+        argv.extend_from_slice(flags);
+        Options::try_parse_from(argv).expect("valid arguments")
+    }
+
+    #[test]
+    fn every_list_flag_names_a_query_the_server_knows() {
+        for (flag, query) in [
+            ("--list-encoders", "list_encoders"),
+            ("--list-displays", "list_displays"),
+            ("--list-cameras", "list_cameras"),
+            ("--list-camera-sizes", "list_camera_sizes"),
+            ("--list-apps", "list_apps"),
+        ] {
+            assert_eq!(list_query(&opts(&[flag])), Some(query), "{flag}");
+        }
+    }
+
+    #[test]
+    fn no_list_flag_is_a_session_rather_than_a_query() {
+        assert_eq!(list_query(&opts(&[])), None);
+    }
 }

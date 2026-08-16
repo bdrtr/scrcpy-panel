@@ -105,6 +105,15 @@ with the opening session header, which every run exercises.
   version of this line claimed all of them, which was a miscount: the check that produced
   the number was reading the list of deliberately unimplemented flags in a test as though
   it were the supported list.
+- **The command line is not all of scrcpy 4.1's yet.** The form is one surface and the
+  arguments are another, and the second is the wider of the two: the camera is complete
+  now (`--camera-torch` and `--camera-zoom` are server options, `--list-camera-sizes` is a
+  query like `--list-cameras`), and `--no-key-repeat` and `--no-mouse-hover` drop events at
+  the window. Still missing are `--background-color`, `--render-fit`, `--no-window`,
+  `--no-window-aspect-ratio-lock`, `--flex-display`, `--keep-active`, `--min-size-alignment`,
+  `--ignore-video-encoder-constraints`, `--no-downsize-on-error`, `--no-terminal-title` and
+  `--pause-on-exit`, besides `--otg` and `--gamepad` above. The list is what
+  `scrcpy --help` accepts and this client's `--help` does not.
 - `--adb-port` reaches both paths to the daemon: adb's own command line through
   `ANDROID_ADB_SERVER_PORT`, and `src/adb/protocol.rs`, which reads the same variable
   rather than the 5037 it used to hardcode.
@@ -206,7 +215,8 @@ curl -L -o target/release/scrcpy-server \
 5. Get input parity back: UHID and AOA keyboards, mice and gamepads
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
 7. GPU frame path (Slint's `unstable-wgpu-29` texture import) to remove the per-frame copies
-8. Fill in what upstream left out: virtual display (`--new-display`), OTG, the rest of camera
+8. Fill in what upstream left out: ~~virtual display (`--new-display`)~~ and ~~the rest of
+   camera~~ — done; OTG remains, and waits on the same scancode source as 5
 
 The interface being built is in [`design/`](./design/) — a control panel with device
 management, an eight-section configuration form covering ~85 scrcpy flags, session control,

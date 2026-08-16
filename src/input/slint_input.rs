@@ -224,6 +224,10 @@ pub struct SlintInput {
     /// --display-orientation=flipN: the picture is mirrored, so a pointer at
     /// the left of the window is at the right of the device.
     flip: bool,
+    /// --no-key-repeat: a held key reaches the device once.
+    key_repeat: bool,
+    /// --no-mouse-hover: motion with no button down is not forwarded.
+    mouse_hover: bool,
 }
 
 impl SlintInput {
@@ -248,6 +252,8 @@ impl SlintInput {
             vfinger_down: false,
             alt_held: false,
             flip: false,
+            key_repeat: true,
+            mouse_hover: true,
         }
     }
 
@@ -259,6 +265,13 @@ impl SlintInput {
     /// Mirror pointer positions to match a flipped picture.
     pub fn set_flip(&mut self, flip: bool) {
         self.flip = flip;
+    }
+
+    /// --no-key-repeat and --no-mouse-hover, which both drop events rather
+    /// than change them.
+    pub fn set_event_filters(&mut self, key_repeat: bool, mouse_hover: bool) {
+        self.key_repeat = key_repeat;
+        self.mouse_hover = mouse_hover;
     }
 
     pub fn set_orientation(&mut self, orientation: Orientation) {
@@ -393,6 +406,9 @@ impl SlintInput {
     }
 
     pub fn pointer_moved(&mut self, u: f32, v: f32, pressed: bool, controller: &Controller) {
+        if !pressed && !self.mouse_hover {
+            return;
+        }
         let (x, y) = self.to_frame(u, v);
 
         if pressed {
@@ -464,6 +480,11 @@ impl SlintInput {
             if !text.is_empty() {
                 controller.push_msg(ControlMsg::InjectText { text });
             }
+            return WindowAction::None;
+        }
+
+        // A repeat that reaches no shortcut is a repeat the device would see.
+        if repeat && !self.key_repeat && !shortcut_active {
             return WindowAction::None;
         }
 
@@ -861,5 +882,68 @@ mod tests {
         assert_eq!(bindings.for_button(BUTTON_RIGHT, false), Some(SecondaryClick::Ignore));
         assert_eq!(bindings.for_button(5, false), Some(SecondaryClick::AppSwitch));
         assert_eq!(bindings.for_button(BUTTON_RIGHT, true), Some(SecondaryClick::Notifications));
+    }
+
+    fn input() -> SlintInput {
+        SlintInput::new(1080, 1920, "lalt,lsuper", "mixed", false, None, Orientation::Normal)
+    }
+
+    /// --no-mouse-hover drops the motion that carries no button, and only that:
+    /// a drag is motion too, and the device still needs it.
+    #[test]
+    fn hover_stops_at_the_client_when_it_is_turned_off() {
+        let (controller, messages) = Controller::collecting();
+        let mut input = input();
+
+        input.pointer_moved(0.5, 0.5, false, &controller);
+        assert!(messages.try_recv().is_ok(), "hover travels by default");
+
+        input.set_event_filters(true, false);
+        input.pointer_moved(0.5, 0.5, false, &controller);
+        assert!(messages.try_recv().is_err(), "hover was forwarded anyway");
+
+        input.pointer_moved(0.6, 0.6, true, &controller);
+        assert!(messages.try_recv().is_ok(), "a drag is not a hover");
+    }
+
+    /// --no-key-repeat: the press travels, the repeats the keyboard generates
+    /// while the key is held do not.
+    #[test]
+    fn a_held_key_reaches_the_device_once_when_repeats_are_off() {
+        let (controller, messages) = Controller::collecting();
+        let mut input = input();
+
+        input.key_down("a", false, false, false, false, true, &controller);
+        assert!(messages.try_recv().is_ok(), "repeats travel by default");
+
+        input.set_event_filters(false, true);
+        input.key_down("a", false, false, false, false, false, &controller);
+        assert!(matches!(
+            messages.try_recv(),
+            Ok(ControlMsg::InjectKeycode { repeat: 0, .. })
+        ), "the first press must still travel");
+
+        input.key_down("a", false, false, false, false, true, &controller);
+        assert!(messages.try_recv().is_err(), "the repeat must not");
+    }
+
+    /// The shortcut modifier reads its own repeats — holding MOD+f must not
+    /// toggle fullscreen over and over — so the filter has to leave them alone
+    /// rather than return before the shortcut is looked at.
+    #[test]
+    fn dropping_repeats_does_not_disarm_the_shortcuts() {
+        let (controller, _messages) = Controller::collecting();
+        let mut input = input();
+        input.set_event_filters(false, true);
+
+        assert_eq!(
+            input.key_down("f", true, false, false, false, false, &controller),
+            WindowAction::ToggleFullscreen
+        );
+        assert_eq!(
+            input.key_down("f", true, false, false, false, true, &controller),
+            WindowAction::None,
+            "a held shortcut fires once, as it always did"
+        );
     }
 }

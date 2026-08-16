@@ -107,6 +107,10 @@ pub struct Options {
     #[arg(long, default_value = "false")]
     pub list_cameras: bool,
 
+    /// List the sizes the device's cameras support, then exit
+    #[arg(long)]
+    pub list_camera_sizes: bool,
+
     /// List installed apps and exit
     #[arg(long, default_value = "false")]
     pub list_apps: bool,
@@ -240,6 +244,14 @@ pub struct Options {
     #[arg(long, default_value = "false")]
     pub camera_high_speed: bool,
 
+    /// Turn the camera torch on when the camera starts
+    #[arg(long)]
+    pub camera_torch: bool,
+
+    /// Initial camera zoom
+    #[arg(long)]
+    pub camera_zoom: Option<String>,
+
     /// Keyboard input mode: sdk, uhid, disabled
     #[arg(long, default_value = "sdk")]
     pub keyboard: String,
@@ -295,6 +307,14 @@ pub struct Options {
     /// Forward key repeat events to the device
     #[arg(long, default_value = "true")]
     pub forward_key_repeat: bool,
+
+    /// Do not forward repeated key events when a key is held down
+    #[arg(long)]
+    pub no_key_repeat: bool,
+
+    /// Do not forward mouse motion that happens with no button down
+    #[arg(long)]
+    pub no_mouse_hover: bool,
 
     /// Enable clipboard auto-sync
     #[arg(long, default_value = "true")]
@@ -420,6 +440,14 @@ pub struct Options {
 }
 
 impl Options {
+    /// Whether a held key keeps reaching the device.
+    ///
+    /// scrcpy spells this as a switch that turns the forwarding off, and this
+    /// client already had one that turns it on; either can say no.
+    pub fn key_repeat_forwarded(&self) -> bool {
+        self.forward_key_repeat && !self.no_key_repeat
+    }
+
     /// The window's rotation and whether the picture is flipped first.
     ///
     /// `--display-orientation` wins over `--orientation`, which scrcpy defines
@@ -503,5 +531,15 @@ mod tests {
         let opts = parse(&[]);
         assert_eq!(opts.display_rotation(), (0, false));
         assert_eq!(opts.record_rotation(), 0);
+    }
+
+    /// Held keys are forwarded until something says otherwise, and the only
+    /// thing that can say otherwise is the negative switch: `--forward-key-repeat`
+    /// is a switch as well, so it cannot carry a `false`.
+    #[test]
+    fn a_held_key_is_forwarded_unless_the_negative_switch_is_given() {
+        assert!(parse(&[]).key_repeat_forwarded());
+        assert!(parse(&["--forward-key-repeat"]).key_repeat_forwarded());
+        assert!(!parse(&["--no-key-repeat"]).key_repeat_forwarded());
     }
 }

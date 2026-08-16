@@ -96,7 +96,11 @@ pub fn attach(
         mouse_bind,
         orientation.get(),
     )));
-    input.borrow_mut().set_flip(flip);
+    {
+        let mut input = input.borrow_mut();
+        input.set_flip(flip);
+        input.set_event_filters(opts.key_repeat_forwarded(), !opts.no_mouse_hover);
+    }
     let fps = Rc::new(RefCell::new(FpsCounter::new()));
     if opts.print_fps {
         fps.borrow_mut().start();

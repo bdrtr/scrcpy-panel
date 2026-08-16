@@ -109,6 +109,12 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_forward: bool) -> Vec
     if let Some(ref ar) = opts.camera_ar {
         args.push(format!("camera_ar={}", ar));
     }
+    if opts.camera_torch {
+        args.push("camera_torch=true".to_string());
+    }
+    if let Some(ref zoom) = opts.camera_zoom {
+        args.push(format!("camera_zoom={}", zoom));
+    }
     if opts.camera_high_speed {
         args.push("camera_high_speed=true".to_string());
     }
@@ -173,4 +179,40 @@ pub fn build_server_command(server_args: &[String]) -> Vec<String> {
     ];
     cmd.extend(server_args.iter().cloned());
     cmd
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn args_for(flags: &[&str]) -> Vec<String> {
+        let mut argv = vec!["scrcpy-slint"];
+        argv.extend_from_slice(flags);
+        let opts = Options::try_parse_from(argv).expect("valid arguments");
+        build_server_args(&opts, 0, true)
+    }
+
+    /// The torch and the zoom are the server's to apply — the camera is opened
+    /// on the device — so they have to survive the trip as server options.
+    #[test]
+    fn the_camera_torch_and_zoom_reach_the_server() {
+        let args = args_for(&[
+            "--video-source", "camera",
+            "--camera-torch",
+            "--camera-zoom", "2.0",
+        ]);
+        assert!(args.contains(&"video_source=camera".to_string()), "{args:?}");
+        assert!(args.contains(&"camera_torch=true".to_string()), "{args:?}");
+        assert!(args.contains(&"camera_zoom=2.0".to_string()), "{args:?}");
+    }
+
+    /// A server told to turn the torch on does it whether or not anyone asked,
+    /// so an untouched camera has to send neither option.
+    #[test]
+    fn an_untouched_camera_sends_neither() {
+        let args = args_for(&[]);
+        assert!(!args.iter().any(|a| a.starts_with("camera_torch")), "{args:?}");
+        assert!(!args.iter().any(|a| a.starts_with("camera_zoom")), "{args:?}");
+    }
 }
