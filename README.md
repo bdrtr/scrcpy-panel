@@ -59,6 +59,7 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | Ayarlar: adb path, adb port, record dir, screenshot dir | consulted at runtime |
 | Ayarlar: autostart profile, version check, log to disk | work |
 | Recording started and stopped mid-session | implemented, not yet run against a device |
+| Several devices selected and started together | implemented, needs a second device to try |
 | `--max-size`, `--max-fps`, `--time-limit` | work |
 | `--list-encoders/-displays/-cameras/-apps` | work |
 | scrcpy 4.1 server handshake | works, no unknown-option warnings |
@@ -99,8 +100,6 @@ with the opening session header, which every run exercises.
   `--tunnel-port` (connecting through a remote adb server) and `--v4l2-buffer`. The panel
   names them as dropped. Everything else the form can produce — 76 of 79 flags — is
   implemented.
-- **One device at a time.** The mockup promises simultaneous mirroring on several devices;
-  the panel selects one, and the tab copy says so.
 - **`--adb-port` applies to the panel's adb commands but not to a session.**
   `src/adb/protocol.rs` speaks the daemon protocol on a hardcoded 5037. The panel warns at
   startup when the setting differs rather than leaving the two out of step silently.

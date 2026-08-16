@@ -310,7 +310,11 @@ export component PanelWindow inherits Window {
                     clicked => { App.save-profile(); }
                 }
                 Btn {
-                    text: App.session-running ? "Oturumu durdur" : "Ayarlarınla başlat";
+                    text: App.session-running
+                        ? "Oturumu durdur"
+                        : App.selected-count > 1
+                            ? App.selected-count + " cihazda başlat"
+                            : "Ayarlarınla başlat";
                     kind: "primary";
                     y: (parent.height - self.height) / 2;
                     clicked => {

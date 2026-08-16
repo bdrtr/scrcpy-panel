@@ -513,12 +513,41 @@ impl PanelConfig {
 
     /// The command as one line, for the bar at the bottom and for the clipboard.
     pub fn to_command_line(&self) -> String {
-        let flags = self.to_flags();
-        if flags.is_empty() {
-            "scrcpy".to_string()
-        } else {
-            format!("scrcpy {}", flags.join(" "))
+        self.to_command_line_for(&[])
+    }
+
+    /// The same, for a set of devices.
+    ///
+    /// One device is one command. Several become a shell loop, which is both
+    /// what the panel actually does — one client per serial — and something the
+    /// user can paste into a terminal unchanged.
+    pub fn to_command_line_for(&self, serials: &[String]) -> String {
+        if serials.len() < 2 {
+            let flags = self.to_flags();
+            return if flags.is_empty() {
+                "scrcpy".to_string()
+            } else {
+                format!("scrcpy {}", flags.join(" "))
+            };
         }
+
+        // --serial is per device here, so drop the one the form carries.
+        let flags: Vec<String> = self
+            .to_flags()
+            .into_iter()
+            .filter(|flag| !flag.starts_with("--serial="))
+            .collect();
+
+        let joined = if flags.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", flags.join(" "))
+        };
+        format!(
+            "for s in {}; do scrcpy --serial=$s{} & done",
+            serials.join(" "),
+            joined
+        )
     }
 
     /// How many flags the current form produces.
@@ -637,6 +666,40 @@ mod tests {
         let mut cfg = PanelConfig::default();
         cfg.record_path = "/tmp/capture".into();
         assert!(cfg.effective_record_path().starts_with("/tmp/capture-"));
+    }
+
+    #[test]
+    fn one_device_is_one_command() {
+        let mut cfg = PanelConfig::default();
+        cfg.max_size = "1024".into();
+        assert_eq!(
+            cfg.to_command_line_for(&["ABC123".to_string()]),
+            "scrcpy --max-size=1024"
+        );
+    }
+
+    #[test]
+    fn several_devices_become_a_loop() {
+        let mut cfg = PanelConfig::default();
+        cfg.max_size = "1024".into();
+        cfg.serial = "ABC123".into();
+
+        let line = cfg.to_command_line_for(&["ABC123".to_string(), "DEF456".to_string()]);
+        assert_eq!(
+            line,
+            "for s in ABC123 DEF456; do scrcpy --serial=$s --max-size=1024 & done"
+        );
+        // The form's own --serial would have pinned every window to one phone.
+        assert!(!line.contains("--serial=ABC123"), "got {line}");
+    }
+
+    #[test]
+    fn a_loop_with_no_other_flags_is_still_valid() {
+        let cfg = PanelConfig::default();
+        assert_eq!(
+            cfg.to_command_line_for(&["A".to_string(), "B".to_string()]),
+            "for s in A B; do scrcpy --serial=$s & done"
+        );
     }
 
     #[test]

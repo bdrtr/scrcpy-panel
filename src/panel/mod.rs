@@ -18,6 +18,7 @@ use std::cell::{Cell, RefCell};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
@@ -54,8 +55,10 @@ struct Panel {
     profiles: Rc<RefCell<Vec<Profile>>>,
     profile_cards: Rc<VecModel<ProfileCard>>,
 
-    /// A session in "ayrı pencere" mode: a second copy of this binary.
-    process: Rc<RefCell<Option<Child>>>,
+    /// Sessions in "ayrı pencere" mode: one copy of this binary per device.
+    /// Several devices can only be mirrored this way — an embedded mirror has
+    /// one place to draw.
+    process: Rc<RefCell<Vec<Child>>>,
     /// A dropped Slint timer stops firing, so the watch that notices a session
     /// ending on its own has to be held somewhere that outlives start_session.
     session_watch: RefCell<Option<slint::Timer>>,
@@ -75,6 +78,10 @@ struct Panel {
     /// Which profile "Düzenle" loaded, so the next save overwrites it instead
     /// of leaving a near-duplicate behind.
     editing_profile: std::cell::Cell<Option<usize>>,
+    /// Every device the user ticked. The mockup's device table is multi-select
+    /// and its copy promises one configuration started on all of them, so the
+    /// selection has to be a set rather than a single serial.
+    selected: Arc<Mutex<Vec<String>>>,
     /// Session setup blocks on adb, so it runs on a worker thread and arrives
     /// here; a timer on the event loop picks it up.
     pending: RefCell<Option<Receiver<Result<Session>>>>,
@@ -119,7 +126,7 @@ pub fn run(opts: &Options) -> Result<()> {
         devices: Rc::new(VecModel::default()),
         profiles: Rc::new(RefCell::new(load_profiles())),
         profile_cards: Rc::new(VecModel::default()),
-        process: Rc::new(RefCell::new(None)),
+        process: Rc::new(RefCell::new(Vec::new())),
         session_watch: RefCell::new(None),
         embedded: RefCell::new(None),
         attachment: RefCell::new(None),
@@ -128,6 +135,7 @@ pub fn run(opts: &Options) -> Result<()> {
         metrics_timer: RefCell::new(None),
         started_at: std::cell::Cell::new(None),
         editing_profile: std::cell::Cell::new(None),
+        selected: Arc::new(Mutex::new(Vec::new())),
         pending: RefCell::new(None),
         pending_timer: RefCell::new(None),
         log_file: RefCell::new(None),
@@ -226,7 +234,7 @@ pub fn run(opts: &Options) -> Result<()> {
 impl Panel {
     /// Is a session running, or on its way up?
     fn is_running(&self) -> bool {
-        self.process.borrow().is_some()
+        !self.process.borrow().is_empty()
             || self.embedded.borrow().is_some()
             || self.pending.borrow().is_some()
     }
@@ -682,10 +690,26 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
         let panel = panel.clone();
         app.on_select_device(move |serial| {
             if let Some(window) = weak.upgrade() {
-                window.global::<Cfg>().set_serial(serial.clone());
-                window.global::<App>().set_selection_label(serial.clone());
-                refresh_command(&window);
-                panel.info(&format!("Cihaz seçildi: {}", serial));
+                let serial = serial.to_string();
+                let added = {
+                    let mut selected = panel.selected.lock().expect("selection lock");
+                    match selected.iter().position(|s| *s == serial) {
+                        Some(index) => {
+                            selected.remove(index);
+                            false
+                        }
+                        None => {
+                            selected.push(serial.clone());
+                            true
+                        }
+                    }
+                };
+                apply_selection(&window, &panel);
+                panel.info(&format!(
+                    "{} {}",
+                    serial,
+                    if added { "seçildi" } else { "seçimden çıkarıldı" }
+                ));
             }
         });
     }
@@ -695,9 +719,9 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
         let panel = panel.clone();
         app.on_mirror_device(move |serial| {
             if let Some(window) = weak.upgrade() {
-                window.global::<Cfg>().set_serial(serial.clone());
-                window.global::<App>().set_selection_label(serial.clone());
-                refresh_command(&window);
+                // Mirroring one row means that row alone, whatever was ticked.
+                *panel.selected.lock().expect("selection lock") = vec![serial.to_string()];
+                apply_selection(&window, &panel);
                 start_session(&window, &panel);
             }
         });
@@ -1096,12 +1120,23 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
 // =====================================================================
 
 fn refresh_command(window: &PanelWindow) {
+    refresh_command_for(window, &[]);
+}
+
+/// Recompute the command bar.
+///
+/// With more than one device ticked the bar shows the loop the mockup promises,
+/// because that is genuinely what the panel does: one client per serial.
+fn refresh_command_for(window: &PanelWindow, serials: &[String]) {
     let config = read_config(window);
     let app = window.global::<App>();
-    app.set_command(config.to_command_line().into());
+    app.set_command(config.to_command_line_for(serials).into());
     app.set_flag_count(config.flag_count() as i32);
 
-    let serial = config.serial.clone();
+    let serial = match serials.len() {
+        0 | 1 => config.serial.clone(),
+        n => format!("{n} cihaz"),
+    };
     let codecs = if config.no_audio {
         config.video_codec.clone()
     } else {
@@ -1181,12 +1216,27 @@ fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
     };
 
     let config = launch_config(window);
-    panel.info(&format!("Başlatılıyor: {}", config.to_command_line()));
+    let serials = selected_serials(panel);
+    panel.info(&format!(
+        "Başlatılıyor: {}",
+        config.to_command_line_for(&serials)
+    ));
 
-    if window.global::<Settings>().get_mirror_mode() == "embedded" {
-        start_embedded(window, panel, opts);
-    } else {
-        start_windowed(window, panel, &config);
+    let embedded_wanted = window.global::<Settings>().get_mirror_mode() == "embedded";
+    match serials.len() {
+        // Nothing ticked: let the client pick the only connected device.
+        0 | 1 if embedded_wanted => start_embedded(window, panel, opts),
+        0 | 1 => start_windowed(window, panel, &config, None),
+        n => {
+            // An embedded mirror has one place to draw, so several devices are
+            // always separate windows.
+            if embedded_wanted {
+                panel.info(&format!("{n} cihaz seçili — her biri ayrı pencerede açılıyor."));
+            }
+            for serial in &serials {
+                start_windowed(window, panel, &config, Some(serial));
+            }
+        }
     }
 }
 
@@ -1322,8 +1372,19 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
 }
 
 /// Run the session as a second copy of this binary, in its own window.
-fn start_windowed(window: &PanelWindow, panel: &Rc<Panel>, config: &PanelConfig) {
-    let (args, _) = config.to_client_args();
+fn start_windowed(
+    window: &PanelWindow,
+    panel: &Rc<Panel>,
+    config: &PanelConfig,
+    serial: Option<&str>,
+) {
+    let (mut args, _) = config.to_client_args();
+    if let Some(serial) = serial {
+        // One client per device, so the form's own --serial is replaced rather
+        // than every window landing on the same phone.
+        args.retain(|flag| !flag.starts_with("--serial="));
+        args.push(format!("--serial={serial}"));
+    }
 
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
@@ -1372,11 +1433,21 @@ fn start_windowed(window: &PanelWindow, panel: &Rc<Panel>, config: &PanelConfig)
         });
     }
 
-    *panel.process.borrow_mut() = Some(child);
+    panel.process.borrow_mut().push(child);
     let app = window.global::<App>();
     app.set_session_running(true);
-    app.set_session_title(config.serial.as_str().into());
-    app.set_session_meta(format!("{} · ayrı pencere", config.video_codec).into());
+    app.set_session_title(serial.unwrap_or(config.serial.as_str()).into());
+    app.set_session_meta(
+        format!(
+            "{} · ayrı pencere{}",
+            config.video_codec,
+            match panel.process.borrow().len() {
+                n if n > 1 => format!(" ×{n}"),
+                _ => String::new(),
+            }
+        )
+        .into(),
+    );
 
     // Watch for the session ending on its own.
     let panel_watch = panel.clone();
@@ -1385,19 +1456,19 @@ fn start_windowed(window: &PanelWindow, panel: &Rc<Panel>, config: &PanelConfig)
         slint::TimerMode::Repeated,
         Duration::from_millis(500),
         move || {
-            let ended = {
-                let mut slot = panel_watch.process.borrow_mut();
-                match slot.as_mut() {
-                    Some(child) => matches!(child.try_wait(), Ok(Some(_))),
-                    None => false,
-                }
+            let (before, after) = {
+                let mut children = panel_watch.process.borrow_mut();
+                let before = children.len();
+                children.retain_mut(|child| !matches!(child.try_wait(), Ok(Some(_))));
+                (before, children.len())
             };
-            if ended {
-                panel_watch.process.borrow_mut().take();
+            if after == 0 && before > 0 {
                 if let Some(window) = panel_watch.window.upgrade() {
                     window.global::<App>().set_session_running(false);
                 }
                 panel_watch.info("Oturum sona erdi.");
+            } else if after < before {
+                panel_watch.info(&format!("Bir pencere kapandı, {after} sürüyor."));
             }
         },
     );
@@ -1407,6 +1478,51 @@ fn start_windowed(window: &PanelWindow, panel: &Rc<Panel>, config: &PanelConfig)
 enum Stream {
     Out(std::process::ChildStdout),
     Err(std::process::ChildStderr),
+}
+
+/// Push the selection into the UI: tick the rows, name it in the chrome, and
+/// point the configuration at the first device.
+///
+/// `Cfg.serial` stays a single value because that is what one launched client
+/// takes; with several devices selected the panel starts one client per serial
+/// and the command bar shows the loop.
+fn apply_selection(window: &PanelWindow, panel: &Rc<Panel>) {
+    let selected = panel.selected.lock().expect("selection lock").clone();
+
+    let app = window.global::<App>();
+    if let Some(model) = app.get_devices().as_any().downcast_ref::<VecModel<DeviceRow>>() {
+        let rows: Vec<DeviceRow> = model
+            .iter()
+            .map(|row| DeviceRow {
+                selected: selected.iter().any(|s| *s == row.serial.as_str()),
+                ..row
+            })
+            .collect();
+        model.set_vec(rows);
+    }
+
+    window
+        .global::<Cfg>()
+        .set_serial(selected.first().cloned().unwrap_or_default().as_str().into());
+
+    app.set_selection_label(
+        match selected.len() {
+            0 => "cihaz seçilmedi".to_string(),
+            1 => selected[0].clone(),
+            n => format!("{n} cihaz seçildi"),
+        }
+        .as_str()
+        .into(),
+    );
+    app.set_selected_count(selected.len() as i32);
+
+    refresh_command_for(window, &selected);
+}
+
+/// The serials a launch should cover: everything ticked, or nothing, in which
+/// case the client picks the only connected device itself.
+fn selected_serials(panel: &Rc<Panel>) -> Vec<String> {
+    panel.selected.lock().expect("selection lock").clone()
 }
 
 /// Refresh the Ölçümler table while a session runs.
@@ -1572,7 +1688,7 @@ fn stop_session(panel: &Rc<Panel>) {
     panel.pending_timer.borrow_mut().take();
     panel.session_watch.borrow_mut().take();
 
-    if let Some(mut child) = panel.process.borrow_mut().take() {
+    for mut child in panel.process.borrow_mut().drain(..) {
         let _ = child.kill();
         let _ = child.wait();
         stopped = true;
@@ -1680,6 +1796,7 @@ struct ScannedDevice {
 
 fn spawn_device_scan(panel: &Rc<Panel>) {
     let weak = panel.window.clone();
+    let selected = panel.selected.clone();
 
     std::thread::spawn(move || {
         let output = adb().args(["devices", "-l"]).output();
@@ -1706,6 +1823,13 @@ fn spawn_device_scan(panel: &Rc<Panel>) {
             let Some(window) = weak.upgrade() else { return };
             let app = window.global::<App>();
 
+            // A rescan must not silently clear the ticks, and must drop any
+            // device that has gone away.
+            let mut chosen = selected.lock().expect("selection lock");
+            chosen.retain(|serial| rows.iter().any(|d| d.serial == *serial));
+            let chosen_now = chosen.clone();
+            drop(chosen);
+
             if let Some(model) = app.get_devices().as_any().downcast_ref::<VecModel<DeviceRow>>() {
                 model.set_vec(
                     rows.into_iter()
@@ -1715,8 +1839,8 @@ fn spawn_device_scan(panel: &Rc<Panel>) {
                             conn: d.conn.as_str().into(),
                             android: d.android.as_str().into(),
                             screen: d.screen.as_str().into(),
+                            selected: chosen_now.iter().any(|s| *s == d.serial),
                             state: d.state.as_str().into(),
-                            selected: false,
                         })
                         .collect::<Vec<_>>(),
                 );
