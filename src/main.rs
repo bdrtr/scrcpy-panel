@@ -83,40 +83,31 @@ pub fn watch_for_interrupt() -> slint::Timer {
     timer
 }
 
-/// `--always-on-top` and `--borderless`, through the window winit owns.
+/// `--always-on-top`, through the window winit owns.
 ///
-/// Slint's own `Window` has neither, but the winit backend sits underneath and
-/// exposes both. What the platform then does with them is its own business:
-/// Wayland leaves stacking to the compositor and ignores always-on-top, and
-/// winit reports nothing back either way — so this logs what was asked for, not
-/// what happened.
-fn apply_window_flags(window: slint::Weak<MirrorWindow>, always_on_top: bool, borderless: bool) {
-    use slint::winit_030::{winit::window::WindowLevel, WinitWindowAccessor};
+/// Slint has no property for the window level, and it is an attribute the
+/// window is created with rather than something set afterwards. What the
+/// platform does with it is its own business: Wayland leaves stacking to the
+/// compositor, and winit reports nothing back either way — so this logs what
+/// was asked for, not what happened.
+fn apply_always_on_top(always_on_top: bool) {
+    if !always_on_top {
+        return;
+    }
 
-    // The winit window is created when the loop shows it, which is after this
-    // runs — hence the future rather than the immediate accessor, which would
-    // simply find nothing there.
-    let spawned = slint::spawn_local(async move {
-        let Some(mirror) = window.upgrade() else { return };
-        match mirror.window().winit_window().await {
-            Ok(winit_window) => {
-                if always_on_top {
-                    winit_window.set_window_level(WindowLevel::AlwaysOnTop);
-                    log::info!(
-                        "Window level: always on top (Wayland leaves stacking to the compositor)"
-                    );
-                }
-                if borderless {
-                    winit_window.set_decorations(false);
-                    log::info!("Window decorations off");
-                }
-            }
-            Err(e) => log::warn!("--always-on-top/--borderless need a winit window: {e}"),
-        }
-    });
+    use slint::winit_030::winit::window::WindowLevel;
+    let selected = slint::BackendSelector::new()
+        .with_winit_window_attributes_hook(|attributes| {
+            attributes.with_window_level(WindowLevel::AlwaysOnTop)
+        })
+        .select();
 
-    if let Err(e) = spawned {
-        log::warn!("--always-on-top/--borderless could not be scheduled: {e}");
+    match selected {
+        Ok(()) => log::info!(
+            "Window level: always on top (Wayland leaves stacking to the compositor)"
+        ),
+        // Not being able to say so is no reason to refuse to mirror.
+        Err(e) => log::warn!("--always-on-top could not be applied: {e}"),
     }
 }
 
@@ -156,7 +147,12 @@ fn run(opts: Options) -> Result<()> {
     let orientation = Orientation::from_degrees(opts.orientation);
     let (frame_w, frame_h) = (video.info.width, video.info.height);
 
+    // --always-on-top is a window attribute and has to be set before the
+    // window exists. --borderless is not: Slint owns that one.
+    apply_always_on_top(opts.always_on_top);
+
     let window = MirrorWindow::new().context("Failed to create the Slint window")?;
+    window.set_borderless(opts.borderless);
     window.set_window_title(
         opts.window_title
             .clone()
@@ -247,9 +243,6 @@ fn run(opts: Options) -> Result<()> {
                 let _ = slint::quit_event_loop();
             },
         );
-    }
-    if opts.always_on_top || opts.borderless {
-        apply_window_flags(window.as_weak(), opts.always_on_top, opts.borderless);
     }
 
     let interrupt = watch_for_interrupt();

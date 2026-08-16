@@ -8,10 +8,16 @@ import { Mirror, MirrorView } from "mirror_view.slint";
 
 export component MirrorWindow inherits Window {
     in property <string> window-title: "scrcpy-slint";
+    /// --borderless. This is Slint's own property rather than anything done to
+    /// the winit window: the adapter re-applies decorations from `no-frame`
+    /// every time it updates window properties, so a decoration set any other
+    /// way is overwritten moments later.
+    in property <bool> borderless;
     in property <string> status;
     in property <bool> status-visible: false;
 
     title: root.window-title;
+    no-frame: root.borderless;
     background: #0d0b0a;
     preferred-width: 420px;
     preferred-height: 860px;
