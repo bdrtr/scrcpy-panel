@@ -26,6 +26,7 @@ mod failure;
 
 use crate::control::control_msg::ControlMsg;
 use crate::tr;
+use crate::input::slint_input::WindowAction;
 use crate::mirror_host::{attach, start_audio, Attachment, MirrorUpdate};
 use crate::options::Options;
 use crate::session::{self, Session};
@@ -1397,15 +1398,27 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
             *panel.controller.borrow_mut() = controller.clone();
 
             let weak_panel = Rc::downgrade(panel);
+            let panel_for_quit = Rc::downgrade(panel);
             let attachment = attach(
                 video,
                 controller,
                 &window.global::<Mirror>(),
                 opts,
                 apply,
-                // Fullscreen and window resizing belong to a window of its own;
-                // embedded, the mirror is one tab among seven.
-                |_action, _size, _orientation| {},
+                // Fullscreen and window resizing belong to a window of its
+                // own; embedded, the mirror is one tab among seven. MOD+q is
+                // the exception: quitting a session is stopping it, and the
+                // panel outlives it.
+                {
+                    let weak_panel = panel_for_quit;
+                    move |action, _size, _orientation| {
+                        if action == WindowAction::Quit {
+                            if let Some(panel) = weak_panel.upgrade() {
+                                stop_session(&panel);
+                            }
+                        }
+                    }
+                },
                 move || {
                     if let Some(panel) = weak_panel.upgrade() {
                         panel.info(&tr!("Görüntü akışı sona erdi."));
@@ -2480,26 +2493,35 @@ fn save_settings(window: &PanelWindow) {
 
 fn shortcut_rows() -> Vec<ShortcutRow> {
     [
-        ("MOD+f", "Tam ekranı aç/kapat"),
+        ("MOD+q", "Oturumu kapat"),
+        ("MOD+f / F11", "Tam ekranı aç/kapat"),
+        ("MOD+w / çift tık", "Pencereyi görüntüye sığdır"),
+        ("MOD+g", "1:1 boyut"),
+        ("MOD+← / MOD+→", "Görüntüyü döndür"),
+        ("MOD+Shift+← / →", "Görüntüyü yatay çevir"),
+        ("MOD+Shift+↑ / ↓", "Görüntüyü dikey çevir"),
+        ("MOD+z / MOD+Shift+z", "Görüntüyü dondur / çöz"),
+        ("MOD+Shift+r", "Yeni bir anahtar kareden başla"),
+        ("MOD+i", "Kare sayacını aç/kapat"),
         ("MOD+h", "Ana ekran"),
         ("MOD+b / MOD+Backspace", "Geri"),
         ("MOD+s", "Son uygulamalar"),
-        ("MOD+p", "Güç"),
         ("MOD+m", "Menü"),
-        ("MOD+↑ / MOD+↓", "Ses aç / kıs"),
-        ("MOD+n", "Bildirim panelini aç"),
-        ("MOD+Shift+n", "Panelleri kapat"),
-        ("MOD+r", "Cihazı döndür"),
-        ("MOD+← / MOD+→", "Görüntüyü döndür"),
+        ("MOD+p", "Güç"),
+        ("MOD+↑ / MOD+↓", "Ses aç / kıs — kamerada yakınlaştır / uzaklaştır"),
         ("MOD+o / MOD+Shift+o", "Cihaz ekranını kapat / aç"),
+        ("MOD+r", "Cihazı döndür"),
+        ("MOD+n / MOD+Shift+n", "Bildirim panelini aç / kapat"),
         ("MOD+c / MOD+x", "Panoyu kopyala / kes"),
-        ("MOD+v", "Panoyu cihaza yapıştır"),
-        ("MOD+i", "Kare sayacını aç/kapat"),
-        ("MOD+w", "Pencereyi görüntüye sığdır"),
-        ("MOD+g", "1:1 boyut"),
+        ("MOD+v / MOD+Shift+v", "Panoyu yapıştır / yazdır"),
         ("MOD+k", "Klavye ayarlarını aç"),
+        ("MOD+t / MOD+Shift+t", "Kamera fenerini yak / söndür"),
+        ("Ctrl+sürükle", "Merkez etrafında yakınlaştır ve döndür"),
+        ("Shift+sürükle", "İki parmakla yukarı aşağı kaydır"),
+        ("Ctrl+Shift+sürükle", "İki parmakla sağa sola kaydır"),
         ("Sağ tık", "Geri"),
         ("Orta tık", "Ana ekran"),
+        ("4. tık / 5. tık", "Son uygulamalar / bildirimler"),
     ]
     .into_iter()
     // Translated here rather than in the table, so the table stays a plain

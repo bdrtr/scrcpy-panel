@@ -26,9 +26,9 @@ pub const MSG_UHID_DESTROY: u8 = 14;
 pub const MSG_OPEN_HARD_KB_SETTINGS: u8 = 15;
 pub const MSG_START_APP: u8 = 16;
 pub const MSG_RESET_VIDEO: u8 = 17;
-// 18, 19 and 20 are the camera controls — set torch, zoom in, zoom out — which
-// this client sets at startup as server options instead of sending while it
-// runs, and 22 is scan file. Skipping them is what puts the resize at 21.
+pub const MSG_CAMERA_SET_TORCH: u8 = 18;
+pub const MSG_CAMERA_ZOOM_IN: u8 = 19;
+pub const MSG_CAMERA_ZOOM_OUT: u8 = 20;
 pub const MSG_RESIZE_DISPLAY: u8 = 21;
 
 /// Android motion event: hover
@@ -121,6 +121,14 @@ pub enum ControlMsg {
         width: u16,
         height: u16,
     },
+    /// MOD+t and MOD+Shift+t, which are the running form of --camera-torch.
+    CameraSetTorch {
+        on: bool,
+    },
+    /// MOD+Up and MOD+Down while mirroring a camera. The step is the device's
+    /// to choose, so there is nothing to send but the direction.
+    CameraZoomIn,
+    CameraZoomOut,
 }
 
 impl ControlMsg {
@@ -255,6 +263,16 @@ impl ControlMsg {
                 buf.write_u16::<BigEndian>(*width)?;
                 buf.write_u16::<BigEndian>(*height)?;
             }
+            ControlMsg::CameraSetTorch { on } => {
+                buf.write_u8(MSG_CAMERA_SET_TORCH)?;
+                buf.write_u8(if *on { 1 } else { 0 })?;
+            }
+            ControlMsg::CameraZoomIn => {
+                buf.write_u8(MSG_CAMERA_ZOOM_IN)?;
+            }
+            ControlMsg::CameraZoomOut => {
+                buf.write_u8(MSG_CAMERA_ZOOM_OUT)?;
+            }
         }
         Ok(buf)
     }
@@ -319,6 +337,9 @@ mod tests {
             ("OPEN_HARD_KEYBOARD_SETTINGS", MSG_OPEN_HARD_KB_SETTINGS),
             ("START_APP", MSG_START_APP),
             ("RESET_VIDEO", MSG_RESET_VIDEO),
+            ("CAMERA_SET_TORCH", MSG_CAMERA_SET_TORCH),
+            ("CAMERA_ZOOM_IN", MSG_CAMERA_ZOOM_IN),
+            ("CAMERA_ZOOM_OUT", MSG_CAMERA_ZOOM_OUT),
             ("RESIZE_DISPLAY", MSG_RESIZE_DISPLAY),
         ];
 
@@ -332,6 +353,20 @@ mod tests {
                 "{name} must be {index}; scrcpy numbers them in this order"
             );
         }
+    }
+
+    /// The torch carries the state rather than toggling, so a client that has
+    /// lost track cannot turn it on by asking for off.
+    #[test]
+    fn the_torch_carries_which_way_it_is_going() {
+        assert_eq!(
+            ControlMsg::CameraSetTorch { on: true }.serialize().expect("serialize"),
+            vec![MSG_CAMERA_SET_TORCH, 1]
+        );
+        assert_eq!(
+            ControlMsg::CameraSetTorch { on: false }.serialize().expect("serialize"),
+            vec![MSG_CAMERA_SET_TORCH, 0]
+        );
     }
 
     /// Five bytes, and the size big-endian: a byte too many or too few would be
@@ -353,6 +388,8 @@ mod tests {
             ControlMsg::OpenHardKeyboardSettings,
             ControlMsg::RotateDevice,
             ControlMsg::CollapsePanels,
+            ControlMsg::CameraZoomIn,
+            ControlMsg::CameraZoomOut,
         ] {
             let buf = msg.serialize().expect("serialize");
             assert_eq!(buf.len(), 1, "{msg:?} should serialise to one byte");

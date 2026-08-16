@@ -328,6 +328,7 @@ fn run(opts: Options) -> Result<()> {
 
     let attachment = {
         let weak = window.as_weak();
+        let reason_for_action = reason.clone();
         attach(
             video,
             controller.clone(),
@@ -338,6 +339,10 @@ fn run(opts: Options) -> Result<()> {
                 let Some(window) = weak.upgrade() else { return };
                 let w = window.window();
                 match action {
+                    WindowAction::Quit => {
+                        reason_for_action.set("MOD+q");
+                        let _ = slint::quit_event_loop();
+                    }
                     WindowAction::ToggleFullscreen => w.set_fullscreen(!w.is_fullscreen()),
                     WindowAction::ResizeToFit => {
                         let (width, height) = optimal_window_size(frame_w, frame_h, orientation);

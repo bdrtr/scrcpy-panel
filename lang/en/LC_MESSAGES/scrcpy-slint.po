@@ -1135,3 +1135,72 @@ msgstr "List the encoders"
 
 msgid "Ayarları aç"
 msgstr "Open Settings"
+
+msgid "Oturumu kapat"
+msgstr "Close the session"
+
+msgid "Tam ekranı aç/kapat"
+msgstr "Toggle fullscreen"
+
+msgid "Pencereyi görüntüye sığdır"
+msgstr "Fit the window to the picture"
+
+msgid "1:1 boyut"
+msgstr "Resize to 1:1"
+
+msgid "Görüntüyü döndür"
+msgstr "Rotate the picture"
+
+msgid "Görüntüyü yatay çevir"
+msgstr "Flip the picture horizontally"
+
+msgid "Görüntüyü dikey çevir"
+msgstr "Flip the picture vertically"
+
+msgid "Görüntüyü dondur / çöz"
+msgstr "Freeze the picture / let it run"
+
+msgid "Yeni bir anahtar kareden başla"
+msgstr "Encode again from a fresh keyframe"
+
+msgid "Kare sayacını aç/kapat"
+msgstr "Toggle the FPS counter"
+
+msgid "Menü"
+msgstr "Menu"
+
+msgid "Ses aç / kıs — kamerada yakınlaştır / uzaklaştır"
+msgstr "Volume up / down — camera zoom in / out"
+
+msgid "Cihaz ekranını kapat / aç"
+msgstr "Device screen off / on"
+
+msgid "Cihazı döndür"
+msgstr "Rotate the device"
+
+msgid "Bildirim panelini aç / kapat"
+msgstr "Expand / collapse the notification panel"
+
+msgid "Panoyu kopyala / kes"
+msgstr "Copy / cut to the computer"
+
+msgid "Panoyu yapıştır / yazdır"
+msgstr "Paste the clipboard / type it"
+
+msgid "Klavye ayarlarını aç"
+msgstr "Open the keyboard settings"
+
+msgid "Kamera fenerini yak / söndür"
+msgstr "Camera torch on / off"
+
+msgid "Merkez etrafında yakınlaştır ve döndür"
+msgstr "Pinch and rotate about the centre"
+
+msgid "İki parmakla yukarı aşağı kaydır"
+msgstr "Slide two fingers up and down"
+
+msgid "İki parmakla sağa sola kaydır"
+msgstr "Slide two fingers left and right"
+
+msgid "Son uygulamalar / bildirimler"
+msgstr "Recents / notifications"

@@ -67,9 +67,13 @@ pub fn attach(
     on_action: impl Fn(WindowAction, (u32, u32), Orientation) + 'static,
     on_end: impl Fn() + 'static,
 ) -> Attachment {
-    let (degrees, flip) = opts.display_rotation();
+    let (degrees, start_flipped) = opts.display_rotation();
     let orientation = Rc::new(Cell::new(Orientation::from_degrees(degrees)));
     let frame_size = Rc::new(Cell::new((video.info.width, video.info.height)));
+    // Both are shared with the pump rather than read once, because MOD+Shift+
+    // arrow and MOD+z change them while it runs.
+    let flip = Rc::new(Cell::new(start_flipped));
+    let paused = Rc::new(Cell::new(false));
 
     // scrcpy spells some of these two ways: --prefer-text and --raw-key-events
     // are shorthands for a key inject mode, and --forward-all-clicks is one for
@@ -99,8 +103,9 @@ pub fn attach(
     )));
     {
         let mut input = input.borrow_mut();
-        input.set_flip(flip);
+        input.set_flip(flip.get());
         input.set_event_filters(opts.key_repeat_forwarded(), !opts.no_mouse_hover);
+        input.set_camera(opts.video_source == "camera");
     }
     let fps = Rc::new(RefCell::new(FpsCounter::new()));
     if opts.print_fps {
@@ -132,6 +137,9 @@ pub fn attach(
                 let orientation = orientation.clone();
                 let frame_size = frame_size.clone();
                 let fps = fps.clone();
+                let flip = flip.clone();
+                let paused = paused.clone();
+                let input_for_action = input.clone();
                 move |action| match action {
                     WindowAction::RotateCw | WindowAction::RotateCcw => {
                         let next = if action == WindowAction::RotateCw {
@@ -148,6 +156,43 @@ pub fn attach(
                             frame_height: h,
                         });
                         log::info!("Client rotation: {:?}", next);
+                    }
+                    // A vertical flip is a horizontal one turned half way
+                    // round, and half a turn is something the view can already
+                    // do — so only the horizontal mirror is ever drawn.
+                    WindowAction::FlipHorizontal | WindowAction::FlipVertical => {
+                        flip.set(!flip.get());
+                        let next = if action == WindowAction::FlipVertical {
+                            orientation.get().rotate_cw().rotate_cw()
+                        } else {
+                            orientation.get()
+                        };
+                        orientation.set(next);
+                        {
+                            let mut input = input_for_action.borrow_mut();
+                            input.set_flip(flip.get());
+                            input.set_orientation(next);
+                        }
+                        let (w, h) = frame_size.get();
+                        apply(MirrorUpdate::Geometry {
+                            aspect: display_aspect(w, h, next),
+                            rotation: next.degrees(),
+                            frame_width: w,
+                            frame_height: h,
+                        });
+                        log::info!(
+                            "Client flip: {} (rotation {:?})",
+                            if flip.get() { "on" } else { "off" },
+                            next
+                        );
+                    }
+                    // The stream keeps arriving while the picture is frozen;
+                    // stopping it would mean asking the device for a keyframe
+                    // to start again.
+                    WindowAction::Pause | WindowAction::Unpause => {
+                        let pause = action == WindowAction::Pause;
+                        paused.set(pause);
+                        log::info!("Display {}", if pause { "paused" } else { "running" });
                     }
                     WindowAction::ToggleFps => fps.borrow_mut().toggle(),
                     other => on_action(other, frame_size.get(), orientation.get()),
@@ -179,6 +224,7 @@ pub fn attach(
         apply,
         v4l2,
         flip,
+        paused,
         on_end,
     );
 
@@ -202,13 +248,24 @@ fn wire_input(
     // Keep the translator's idea of the rotation in step with the host's.
     input.borrow_mut().set_orientation(orientation.get());
 
+    // Two callbacks reach for it — the keyboard and the double click on the
+    // bars — and it is not `Clone`, so it is shared rather than copied.
+    let on_action = Rc::new(on_action);
+
+    {
+        let on_action = on_action.clone();
+        // Double-clicking the bars asks for a window with none, which is what
+        // MOD+w does; scrcpy offers both.
+        mirror.on_borders_double_clicked(move || on_action(WindowAction::ResizeToFit));
+    }
+
     {
         let input = input.clone();
         let controller = controller.clone();
-        mirror.on_pointer_down(move |u, v, button, alt, shift| {
+        mirror.on_pointer_down(move |u, v, button, alt, control, shift| {
             input
                 .borrow_mut()
-                .pointer_down(u, v, button, alt, shift, &controller);
+                .pointer_down(u, v, button, alt, control, shift, &controller);
         });
     }
     {
@@ -236,6 +293,7 @@ fn wire_input(
         let input = input.clone();
         let controller = controller.clone();
         let orientation = orientation.clone();
+        let on_action = on_action.clone();
         mirror.on_key_down(move |text, alt, control, shift, meta, repeat| {
             // The rotation shortcut changes `orientation`; feed it back so the
             // next click maps to the right device pixel.
@@ -278,8 +336,11 @@ fn start_pump(
     orientation: Rc<Cell<Orientation>>,
     apply: Rc<dyn Fn(MirrorUpdate)>,
     v4l2: Option<V4l2Sink>,
-    // --display-orientation=flipN: mirror the picture horizontally.
-    flip: bool,
+    // --display-orientation=flipN and MOD+Shift+arrow: mirror the picture
+    // horizontally. Shared rather than copied, since the shortcut changes it.
+    flip: Rc<Cell<bool>>,
+    // MOD+z: draw nothing until MOD+Shift+z, without stopping the stream.
+    paused: Rc<Cell<bool>>,
     on_end: impl Fn() + 'static,
 ) -> slint::Timer {
     let VideoStream {
@@ -336,10 +397,12 @@ fn start_pump(
             });
         }
 
-        // Under --no-video-playback the frame is still decoded and recycled —
-        // it is simply never turned into an image or drawn.
-        if playback {
-            apply(MirrorUpdate::Frame(frame_to_image(&latest, flip)));
+        // Under --no-video-playback, and while paused, the frame is still
+        // decoded and recycled — it is simply never turned into an image or
+        // drawn. A paused mirror that stopped taking frames would stall the
+        // decoder and the recording behind it.
+        if playback && !paused.get() {
+            apply(MirrorUpdate::Frame(frame_to_image(&latest, flip.get())));
             if !live.get() {
                 live.set(true);
                 apply(MirrorUpdate::Live(true));

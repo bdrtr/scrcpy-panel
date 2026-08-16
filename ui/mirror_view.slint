@@ -39,10 +39,14 @@ export global Mirror {
     in property <bool> live;
     in property <string> placeholder: @tr("Görüntü bekleniyor…");
 
-    // `alt` rides along on press because that is where the decision to place a
-    // second, mirrored finger (pinch to zoom) is made. TouchArea's `moved` has
-    // no event argument, so Rust caches the modifier state from here.
-    callback pointer-down(u: float, v: float, button: int, alt: bool, shift: bool);
+    // The modifiers ride along on press because that is where the decision to
+    // place a second, mirrored finger is made — Ctrl for a pinch, Shift for a
+    // two-finger slide. TouchArea's `moved` has no event argument, so Rust
+    // caches the modifier state from here.
+    callback pointer-down(u: float, v: float, button: int, alt: bool, control: bool, shift: bool);
+    /// A double click on the bars around the picture, which asks the window to
+    /// be the shape of the picture and leave none.
+    callback borders-double-clicked();
     callback pointer-up(u: float, v: float, button: int);
     callback pointer-moved(u: float, v: float, pressed: bool);
     callback pointer-scroll(u: float, v: float, dx: float, dy: float);
@@ -114,6 +118,17 @@ export component MirrorView inherits Rectangle {
             return EventResult.accept;
         }
 
+        // Behind the picture, so the only clicks it sees are the ones on the
+        // bars around it. Slint delivers a double click to the innermost area
+        // under the pointer, and over the picture that is the one below.
+        borders := TouchArea {
+            width: 100%;
+            height: 100%;
+            double-clicked => {
+                Mirror.borders-double-clicked();
+            }
+        }
+
         // The image is laid out unrotated and then turned about its centre, so
         // that a quarter turn still fills the letterboxed rectangle exactly.
         Image {
@@ -146,7 +161,8 @@ export component MirrorView inherits Rectangle {
                     keys.focus();
                     Mirror.pointer-down(root.pointer-u, root.pointer-v,
                                         root.button-id(event.button),
-                                        event.modifiers.alt, event.modifiers.shift);
+                                        event.modifiers.alt, event.modifiers.control,
+                                        event.modifiers.shift);
                 } else if (event.kind == PointerEventKind.up) {
                     Mirror.pointer-up(root.pointer-u, root.pointer-v, root.button-id(event.button));
                 }

@@ -149,6 +149,7 @@ mod key {
     pub const LEFT: char = '\u{F702}';
     pub const RIGHT: char = '\u{F703}';
     pub const F1: char = '\u{F704}';
+    pub const F11: char = '\u{F70E}';
     pub const F12: char = '\u{F70F}';
     pub const INSERT: char = '\u{F727}';
     pub const HOME: char = '\u{F729}';
@@ -202,6 +203,15 @@ pub enum WindowAction {
     ToggleFps,
     RotateCw,
     RotateCcw,
+    /// MOD+Shift+Left/Right and MOD+Shift+Up/Down. Mirroring is done while the
+    /// frame is copied, so it is the host's business rather than the device's.
+    FlipHorizontal,
+    FlipVertical,
+    /// MOD+z and MOD+Shift+z: stop drawing without stopping the stream.
+    Pause,
+    Unpause,
+    /// MOD+q, which is the only one that means the session rather than the view.
+    Quit,
 }
 
 pub struct SlintInput {
@@ -228,6 +238,11 @@ pub struct SlintInput {
     key_repeat: bool,
     /// --no-mouse-hover: motion with no button down is not forwarded.
     mouse_hover: bool,
+    /// --video-source=camera, which gives MOD+Up and MOD+Down to the zoom.
+    camera: bool,
+    /// Which axes the second finger is mirrored through, for as long as it is
+    /// down: the modifiers are read once, when it goes down.
+    vfinger_invert: (bool, bool),
 }
 
 impl SlintInput {
@@ -254,7 +269,15 @@ impl SlintInput {
             flip: false,
             key_repeat: true,
             mouse_hover: true,
+            camera: false,
+            vfinger_invert: (true, true),
         }
+    }
+
+    /// --video-source=camera. A camera has no volume, so MOD+Up and MOD+Down
+    /// mean the zoom instead.
+    pub fn set_camera(&mut self, camera: bool) {
+        self.camera = camera;
     }
 
     pub fn set_frame_size(&mut self, width: u32, height: u32) {
@@ -295,11 +318,16 @@ impl SlintInput {
         (x, y)
     }
 
-    /// The mirrored position of a point, used for the virtual second finger.
+    /// Where the virtual second finger goes for a point under the real one.
+    ///
+    /// scrcpy makes three gestures out of one mechanism by choosing which axes
+    /// to mirror through: both is a pinch about the centre, one is a two-finger
+    /// slide — the fingers stay level and move together — in the other axis.
     fn mirrored(&self, x: u32, y: u32) -> (u32, u32) {
+        let (invert_x, invert_y) = self.vfinger_invert;
         (
-            self.frame_width.saturating_sub(x),
-            self.frame_height.saturating_sub(y),
+            if invert_x { self.frame_width.saturating_sub(x) } else { x },
+            if invert_y { self.frame_height.saturating_sub(y) } else { y },
         )
     }
 
@@ -327,6 +355,7 @@ impl SlintInput {
         v: f32,
         button: i32,
         alt: bool,
+        control: bool,
         shift: bool,
         controller: &Controller,
     ) {
@@ -341,23 +370,22 @@ impl SlintInput {
             return;
         }
 
-        match button {
-            BUTTON_LEFT => {
-                // Shortcut modifier + click places a second finger mirrored
-                // through the centre, which is how scrcpy does pinch to zoom.
-                if self.shortcut_mod == ShortcutMod::Alt && alt {
-                    let (mx, my) = self.mirrored(x, y);
-                    controller.push_msg(self.touch(
-                        AMOTION_ACTION_DOWN, POINTER_ID_FINGER, mx, my, 0xFFFF, 0, 0,
-                    ));
-                    self.vfinger_down = true;
-                }
-                controller.push_msg(self.touch(
-                    AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, 0xFFFF, 1, 1,
-                ));
-            }
-            _ => {}
+        // Ctrl or Shift held on the way down puts a second finger on the
+        // screen: Ctrl mirrors it through the centre (pinch and rotate), Shift
+        // mirrors it horizontally only (a two-finger vertical slide), and the
+        // two together mirror it vertically only (a horizontal slide). The
+        // choice is made once here and kept while the finger is down.
+        if control || shift {
+            self.vfinger_invert = (control ^ shift, control);
+            let (mx, my) = self.mirrored(x, y);
+            controller.push_msg(self.touch(
+                AMOTION_ACTION_DOWN, POINTER_ID_FINGER, mx, my, 0xFFFF, 0, 0,
+            ));
+            self.vfinger_down = true;
         }
+        controller.push_msg(self.touch(
+            AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, 0xFFFF, 1, 1,
+        ));
     }
 
     /// Carry out whatever `--mouse-bind` says a secondary button does.
@@ -469,6 +497,12 @@ impl SlintInput {
             return WindowAction::None;
         }
 
+        // F11 is fullscreen with no modifier at all, as it is in scrcpy — and
+        // it is a key no device has a use for, so nothing is lost by keeping it.
+        if c == key::F11 {
+            return WindowAction::ToggleFullscreen;
+        }
+
         let shortcut_active = self.shortcut_mod.active(alt, control, meta);
 
         // Ctrl+V without the shortcut modifier pastes the host clipboard as
@@ -492,7 +526,7 @@ impl SlintInput {
             if repeat {
                 return WindowAction::None;
             }
-            let action = shortcut_for(c, shift);
+            let action = shortcut_for(c, shift, self.camera);
             return self.run_shortcut(action, controller);
         }
 
@@ -657,6 +691,38 @@ impl SlintInput {
             ShortcutAction::OpenKeyboardSettings => {
                 controller.push_msg(ControlMsg::OpenHardKeyboardSettings);
             }
+            ShortcutAction::PasteAsText => {
+                if !crate::control::clipboard::allows_to_device() {
+                    log::info!("Paste refused: --clipboard-direction is to-pc");
+                    return WindowAction::None;
+                }
+                let text = get_clipboard_text();
+                if !text.is_empty() {
+                    controller.push_msg(ControlMsg::InjectText { text });
+                    log::info!("Clipboard: host → device (typed)");
+                }
+            }
+            ShortcutAction::ResetVideo => {
+                controller.push_msg(ControlMsg::ResetVideo);
+                log::info!("Asked the device to encode again from a fresh keyframe");
+            }
+            ShortcutAction::CameraTorchOn => {
+                controller.push_msg(ControlMsg::CameraSetTorch { on: true });
+            }
+            ShortcutAction::CameraTorchOff => {
+                controller.push_msg(ControlMsg::CameraSetTorch { on: false });
+            }
+            ShortcutAction::CameraZoomIn => {
+                controller.push_msg(ControlMsg::CameraZoomIn);
+            }
+            ShortcutAction::CameraZoomOut => {
+                controller.push_msg(ControlMsg::CameraZoomOut);
+            }
+            ShortcutAction::FlipHorizontal => return WindowAction::FlipHorizontal,
+            ShortcutAction::FlipVertical => return WindowAction::FlipVertical,
+            ShortcutAction::PauseDisplay => return WindowAction::Pause,
+            ShortcutAction::UnpauseDisplay => return WindowAction::Unpause,
+            ShortcutAction::Quit => return WindowAction::Quit,
             ShortcutAction::ToggleFullscreen => return WindowAction::ToggleFullscreen,
             ShortcutAction::ResizeToFit => return WindowAction::ResizeToFit,
             ShortcutAction::PixelPerfect => return WindowAction::PixelPerfect,
@@ -686,7 +752,12 @@ fn send_key(controller: &Controller, keycode: u32) {
 
 /// The same shortcut table upstream had, keyed by character instead of by SDL
 /// keycode.
-fn shortcut_for(c: char, shift: bool) -> ShortcutAction {
+/// What MOD plus a key means.
+///
+/// `camera` decides one pair of them: scrcpy gives MOD+Up and MOD+Down to the
+/// volume while mirroring a display and to the camera zoom while mirroring a
+/// camera, since a camera has no volume to turn up.
+fn shortcut_for(c: char, shift: bool, camera: bool) -> ShortcutAction {
     match c.to_ascii_lowercase() {
         'h' => ShortcutAction::Home,
         'b' | key::BACKSPACE => ShortcutAction::Back,
@@ -697,17 +768,29 @@ fn shortcut_for(c: char, shift: bool) -> ShortcutAction {
         'w' => ShortcutAction::ResizeToFit,
         'g' => ShortcutAction::PixelPerfect,
         'i' => ShortcutAction::ToggleFps,
+        'q' => ShortcutAction::Quit,
+        'r' if shift => ShortcutAction::ResetVideo,
         'r' => ShortcutAction::RotateDevice,
+        'z' if shift => ShortcutAction::UnpauseDisplay,
+        'z' => ShortcutAction::PauseDisplay,
+        't' if shift => ShortcutAction::CameraTorchOff,
+        't' => ShortcutAction::CameraTorchOn,
         'c' => ShortcutAction::CopyToPC,
         'x' => ShortcutAction::CutToPC,
+        'v' if shift => ShortcutAction::PasteAsText,
         'v' => ShortcutAction::PasteFromPC,
         'k' => ShortcutAction::OpenKeyboardSettings,
         'n' if shift => ShortcutAction::CollapsePanels,
         'n' => ShortcutAction::ExpandNotifications,
         'o' if shift => ShortcutAction::SetDisplayPowerOn,
         'o' => ShortcutAction::SetDisplayPowerOff,
+        key::UP if shift => ShortcutAction::FlipVertical,
+        key::DOWN if shift => ShortcutAction::FlipVertical,
+        key::UP if camera => ShortcutAction::CameraZoomIn,
+        key::DOWN if camera => ShortcutAction::CameraZoomOut,
         key::UP => ShortcutAction::VolumeUp,
         key::DOWN => ShortcutAction::VolumeDown,
+        key::LEFT | key::RIGHT if shift => ShortcutAction::FlipHorizontal,
         key::RIGHT => ShortcutAction::RotateCW,
         key::LEFT => ShortcutAction::RotateCCW,
         _ => ShortcutAction::None,
@@ -925,6 +1008,112 @@ mod tests {
 
         input.key_down("a", false, false, false, false, true, &controller);
         assert!(messages.try_recv().is_err(), "the repeat must not");
+    }
+
+    /// scrcpy's shortcut list, as a table: every one of them has to land on
+    /// the action it names, and the ones that read Shift have to read it.
+    #[test]
+    fn the_shortcuts_are_the_ones_scrcpy_documents() {
+        use ShortcutAction as A;
+        let display = [
+            ('q', false, A::Quit),
+            ('f', false, A::ToggleFullscreen),
+            ('h', false, A::Home),
+            ('b', false, A::Back),
+            (key::BACKSPACE, false, A::Back),
+            ('s', false, A::AppSwitch),
+            ('m', false, A::Menu),
+            ('p', false, A::Power),
+            ('o', false, A::SetDisplayPowerOff),
+            ('o', true, A::SetDisplayPowerOn),
+            ('r', false, A::RotateDevice),
+            ('r', true, A::ResetVideo),
+            ('n', false, A::ExpandNotifications),
+            ('n', true, A::CollapsePanels),
+            ('c', false, A::CopyToPC),
+            ('x', false, A::CutToPC),
+            ('v', false, A::PasteFromPC),
+            ('v', true, A::PasteAsText),
+            ('k', false, A::OpenKeyboardSettings),
+            ('i', false, A::ToggleFps),
+            ('g', false, A::PixelPerfect),
+            ('w', false, A::ResizeToFit),
+            ('z', false, A::PauseDisplay),
+            ('z', true, A::UnpauseDisplay),
+            ('t', false, A::CameraTorchOn),
+            ('t', true, A::CameraTorchOff),
+            (key::LEFT, false, A::RotateCCW),
+            (key::RIGHT, false, A::RotateCW),
+            (key::LEFT, true, A::FlipHorizontal),
+            (key::RIGHT, true, A::FlipHorizontal),
+            (key::UP, true, A::FlipVertical),
+            (key::DOWN, true, A::FlipVertical),
+            (key::UP, false, A::VolumeUp),
+            (key::DOWN, false, A::VolumeDown),
+        ];
+
+        for (c, shift, expected) in display {
+            assert_eq!(
+                shortcut_for(c, shift, false),
+                expected,
+                "MOD+{}{:?} should be {expected:?}",
+                if shift { "Shift+" } else { "" },
+                c
+            );
+        }
+    }
+
+    /// A camera has no volume, so scrcpy gives those two keys to the zoom —
+    /// and only those two change.
+    #[test]
+    fn a_camera_takes_the_volume_keys_for_the_zoom() {
+        assert_eq!(shortcut_for(key::UP, false, true), ShortcutAction::CameraZoomIn);
+        assert_eq!(shortcut_for(key::DOWN, false, true), ShortcutAction::CameraZoomOut);
+        assert_eq!(shortcut_for(key::UP, true, true), ShortcutAction::FlipVertical);
+        assert_eq!(shortcut_for('h', false, true), ShortcutAction::Home);
+    }
+
+    /// F11 is fullscreen with no modifier, and a device that never sees it
+    /// loses nothing.
+    #[test]
+    fn f11_is_fullscreen_on_its_own() {
+        let (controller, messages) = Controller::collecting();
+        let mut input = input();
+        assert_eq!(
+            input.key_down(&key::F11.to_string(), false, false, false, false, false, &controller),
+            WindowAction::ToggleFullscreen
+        );
+        assert!(messages.try_recv().is_err(), "F11 is the window's, not the device's");
+    }
+
+    /// One mechanism, three gestures: which axes the second finger is mirrored
+    /// through is what tells a pinch from a two-finger slide.
+    #[test]
+    fn the_modifiers_choose_where_the_second_finger_goes() {
+        // 0.25 of 1080x1920 is (270, 480); mirroring an axis takes it to
+        // (810, 1440).
+        for (control, shift, expected) in [
+            (true, false, Some((810, 1440))),  // pinch and rotate
+            (false, true, Some((810, 480))),   // slide up and down
+            (true, true, Some((270, 1440))),   // slide left and right
+            (false, false, None),              // one finger
+        ] {
+            let (controller, messages) = Controller::collecting();
+            let mut input = input();
+            input.pointer_down(0.25, 0.25, BUTTON_LEFT, false, control, shift, &controller);
+
+            let first = messages.try_recv().expect("a touch");
+            match (expected, first) {
+                (Some((x, y)), ControlMsg::InjectTouch { pointer_id, x: gx, y: gy, .. }) => {
+                    assert_eq!(pointer_id, POINTER_ID_FINGER, "ctrl={control} shift={shift}");
+                    assert_eq!((gx, gy), (x, y), "ctrl={control} shift={shift}");
+                }
+                (None, ControlMsg::InjectTouch { pointer_id, .. }) => {
+                    assert_eq!(pointer_id, POINTER_ID_MOUSE, "no modifier, no second finger");
+                }
+                (_, other) => panic!("expected a touch, got {other:?}"),
+            }
+        }
     }
 
     /// The shortcut modifier reads its own repeats — holding MOD+f must not

@@ -9,6 +9,7 @@ pub const AKEYCODE_MENU: u32 = 82;
 pub const AKEYCODE_APP_SWITCH: u32 = 187;
 
 /// Check if a key event is a shortcut and return the action
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutAction {
     Home,
     Back,
@@ -32,7 +33,26 @@ pub enum ShortcutAction {
     CopyToPC,
     CutToPC,
     PasteFromPC,
+    /// MOD+Shift+v: type the clipboard rather than hand it over, whatever
+    /// --legacy-paste says.
+    PasteAsText,
     OpenKeyboardSettings,
+    /// MOD+q, which ends the session rather than the mirroring.
+    Quit,
+    /// MOD+Shift+r: ask the device to encode again from a fresh keyframe.
+    ResetVideo,
+    /// MOD+z and MOD+Shift+z: freeze the picture without stopping the stream.
+    PauseDisplay,
+    UnpauseDisplay,
+    /// MOD+Shift+Left/Right and MOD+Shift+Up/Down. A vertical flip is a
+    /// horizontal one turned half way round, which is how it is done here.
+    FlipHorizontal,
+    FlipVertical,
+    /// MOD+t, MOD+Shift+t and MOD+Up/Down while mirroring a camera.
+    CameraTorchOn,
+    CameraTorchOff,
+    CameraZoomIn,
+    CameraZoomOut,
     None,
 }
 

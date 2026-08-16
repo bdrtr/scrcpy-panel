@@ -70,6 +70,24 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | scrcpy 4.1 server handshake | works, no unknown-option warnings |
 | Ctrl-C / SIGTERM shutdown | works — pipeline unwinds, no crash |
 
+Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless adb:
+
+| What | Result |
+| --- | --- |
+| `--no-window` | works — 374 frames in 9.05 s through a four-frame channel, recording throughout |
+| `--flex-display` | works — the display followed the window three times in one session, 948x492 → 472x492 → 948x492 as a second window came and went |
+| `--flex-display` with `--display-orientation 90` | works — the same window asked for 492x948 |
+| `--render-fit` | works — the backdrop measured in a screenshot: letterbox 142322 px, stretched 0, unscaled 71618 |
+| `--background-color` | works — that backdrop is the colour asked for |
+| MOD+t / MOD+Shift+t | works — the server logs the torch going on and off |
+| MOD+Up / MOD+Down on a camera | works — the server reports the zoom at 1.0625, then 1.1289, then back |
+| MOD+z / MOD+Shift+z | works — frozen, two screenshots differ by 105 RMSE; running, by 573 |
+| MOD+Shift+arrows | works — the flips compose, H then V leaving a half turn and no mirror |
+| MOD+q | works — a session with `--time-limit 30` ended after 4 s |
+| MOD+Shift+r | works — the device encodes again, the stream continues |
+| `--pause-on-exit=if-error` | works — waits only on the run that failed |
+| Terminal title | works — written into a pty and taken back at the end |
+
 Recording a mostly static screen produces a file shorter than the session, which
 is correct rather than a bug: scrcpy's encoder only emits a frame when the
 surface changes, so the last timestamp is the last thing that moved.
@@ -145,6 +163,15 @@ with the opening session header, which every run exercises.
   not a log line: `ESC ]0;<title> BEL`, the same escape scrcpy writes, with the window's
   title in it. It is written only when standard output is a terminal, and taken back when
   the session ends.
+- The two-finger gestures are on Ctrl and Shift now, where scrcpy has them, rather than on
+  the shortcut modifier: Ctrl+drag pinches and rotates about the centre, Shift+drag slides
+  two fingers up and down, Ctrl+Shift+drag slides them left and right. It is one mechanism
+  — a second finger mirrored through one axis, the other, or both — and which axes are
+  mirrored is decided when the button goes down, so letting the modifier go mid-drag does
+  not change the gesture under way.
+- MOD+z freezes the picture without pausing the stream. The frames keep arriving, are
+  decoded, and go back to the pool undrawn; stopping the stream instead would mean asking
+  the device for a fresh keyframe to start again, which is what MOD+Shift+r is for.
 - `--adb-port` reaches both paths to the daemon: adb's own command line through
   `ANDROID_ADB_SERVER_PORT`, and `src/adb/protocol.rs`, which reads the same variable
   rather than the 5037 it used to hardcode.
@@ -255,22 +282,36 @@ profiles, logs and shortcuts.
 
 ## Keyboard shortcuts
 
+Alt is the modifier unless `--shortcut-mod` says otherwise; scrcpy writes it MOD.
+
 | Shortcut | Action |
 |----------|--------|
-| `Alt+F` | Toggle fullscreen |
-| `Alt+H` | Home |
-| `Alt+B` | Back |
-| `Alt+S` | App switcher |
-| `Alt+P` | Power |
+| `Alt+Q` | Quit |
+| `Alt+F`, `F11` | Toggle fullscreen |
+| `Alt+W`, double-click the bars | Fit the window to the picture |
+| `Alt+G` | Resize to 1:1 |
+| `Alt+←` / `Alt+→` | Rotate the picture |
+| `Alt+Shift+←/→` | Flip the picture horizontally |
+| `Alt+Shift+↑/↓` | Flip the picture vertically |
+| `Alt+Z` / `Alt+Shift+Z` | Freeze the picture / let it run |
+| `Alt+Shift+R` | Encode again from a fresh keyframe |
+| `Alt+I` | Toggle the FPS counter |
+| `Alt+H`, middle-click | Home |
+| `Alt+B`, `Alt+Backspace`, right-click | Back |
+| `Alt+S`, 4th-click | App switcher |
 | `Alt+M` | Menu |
-| `Alt+↑/↓` | Volume up/down |
-| `Alt+N` | Notification panel |
-| `Alt+Shift+N` | Collapse panels |
-| `Alt+R` | Rotate device |
-| `Alt+O` / `Alt+Shift+O` | Screen off / on |
-| `Alt+I` | Toggle FPS counter |
-| Right-click | Back |
-| Middle-click | Home |
+| `Alt+P` | Power |
+| `Alt+↑/↓` | Volume up/down, or the camera zoom in camera mode |
+| `Alt+O` / `Alt+Shift+O` | Device screen off / on |
+| `Alt+R` | Rotate the device |
+| `Alt+N` / `Alt+Shift+N`, 5th-click | Expand / collapse the notification panel |
+| `Alt+C` / `Alt+X` | Copy / cut to the computer |
+| `Alt+V` / `Alt+Shift+V` | Paste the computer's clipboard / type it |
+| `Alt+K` | Open the keyboard settings |
+| `Alt+T` / `Alt+Shift+T` | Camera torch on / off |
+| Ctrl+drag | Pinch and rotate about the centre |
+| Shift+drag | Slide two fingers up and down |
+| Ctrl+Shift+drag | Slide two fingers left and right |
 
 ## Layout
 
