@@ -1464,10 +1464,12 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
             let panel_for_quit = Rc::downgrade(panel);
             let mut uhid_keyboard = false;
             let mut uhid_mouse = false;
-            if opts.keyboard == "uhid" || opts.mouse == "uhid" {
+            if matches!(opts.keyboard.as_str(), "uhid" | "aoa")
+                || matches!(opts.mouse.as_str(), "uhid" | "aoa")
+            {
                 match (panel.uhid.borrow().as_ref(), controller.as_ref()) {
                     (Some(uhid), Some(controller)) => {
-                        uhid.attach(controller.clone(), opts);
+                        uhid.attach(controller.clone(), opts, &session.serial);
                         uhid_keyboard = uhid.keyboard_attached();
                         uhid_mouse = uhid.mouse_attached();
                     }

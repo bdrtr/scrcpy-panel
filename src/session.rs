@@ -63,6 +63,8 @@ pub struct AudioStream {
 /// hardware teardown.
 pub struct Session {
     pub device_name: String,
+    /// The serial adb chose, which is also what AOA looks the USB device up by.
+    pub serial: String,
     pub video: Option<VideoStream>,
     pub audio: Option<AudioStream>,
     pub controller: Option<Controller>,
@@ -220,6 +222,7 @@ impl Session {
 
         let mut session = Session {
             device_name: device_info.device_name,
+            serial: serial.clone(),
             video: None,
             audio,
             controller,

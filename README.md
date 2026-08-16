@@ -90,6 +90,7 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | SCAN_FILE after a push | accepted — a POWER keycode sent straight after it still reached the device, so the control channel survived the message |
 | Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
 | `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
+| `--keyboard=aoa` | works — the AOA keyboard registers over USB during a session and is given back at the end. `cargo test -- --ignored aoa`, with `AOA_SERIAL` set, registers one and types an "a": `KEY_A DOWN`/`UP` came out of the phone's kernel with no adb, no server and no control socket in the way |
 | `--mouse=uhid` | works — the device it adds has REL_X, REL_Y and the two wheels; a report of 30,30 came out of the phone's kernel as `REL_X 0x1e`, `REL_Y 0x1e`, and a click as `BTN_MOUSE DOWN`/`UP`. The pointer moving on this desk arrived the same way, 655 relative events in fourteen seconds |
 
 `--keyboard=uhid` was verified in two halves, because nothing here can type into its own
@@ -129,9 +130,20 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   `hid_mouse.rs` were already able to build, and the device applies its own layout and its
   own pointer acceleration to them. The events are passed on rather than swallowed, so
   Slint keeps the modifier state its shortcut layer reads; what stops an input arriving
-  twice is that `SlintInput` sends nothing to the device while UHID is attached. OTG is
-  still out: it needs USB and AOA rather than a control socket, and so does `--gamepad`,
-  which additionally has no source — winit reports no gamepads.
+  twice is that `SlintInput` sends nothing to the device while UHID is attached.
+- **`--keyboard=aoa` and `--mouse=aoa` take the other road: the cable.** AOA is four USB
+  control transfers to the phone's own endpoint zero — register a HID device, hand it a
+  report descriptor, send events, unregister — and the reports are the same bytes UHID
+  sends over the socket. The device is never switched into accessory mode, which is the
+  part that matters: AOA HID works while the phone stays an ordinary USB device, so adb
+  keeps its own connection over the same cable and the input works on the lock screen,
+  where injection does not. Asking for it without a cable — a device reached over TCP/IP —
+  falls back to UHID with a line saying so, since UHID reaches the same place.
+- The first AOA keypress of a session used to be refused with a USB stall, every time. The
+  device builds its HID device from the descriptor *after* answering the request that
+  carried it, and an event that arrives while it is still building is not a valid event;
+  registration now leaves it two tenths of a second, which is more than the tenth it took
+  to be ready on the phone this was found on.
 - **`--gamepad=uhid` works, and is the one thing here with no gamepad to prove it on.**
   The report side was ported with the rest of scrcpy's HID code; what it lacked was a
   source, and neither Slint nor winit reads gamepads. gilrs does, on every desktop this
@@ -328,8 +340,8 @@ curl -L -o target/release/scrcpy-server \
 3. ~~Embed the mirror in the panel~~ — done; Ayarlar switches between embedded and a
    window of its own
 4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, pinned to 4.1
-5. Get input parity back: ~~UHID keyboard and mouse~~ — done, through winit's raw events —
-   and ~~gamepads~~, through gilrs; AOA and OTG need USB, and are what is left
+5. Get input parity back: ~~UHID keyboard and mouse~~, ~~gamepads~~ and ~~AOA~~ — done;
+   `--otg`, which is input over USB with no adb and no video at all, is what is left
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
 7. GPU frame path (Slint's `unstable-wgpu-29` texture import) to remove the per-frame copies
 8. Fill in what upstream left out: ~~virtual display (`--new-display`)~~ and ~~the rest of

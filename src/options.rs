@@ -287,12 +287,12 @@ pub struct Options {
     #[arg(long)]
     pub camera_zoom: Option<String>,
 
-    /// Keyboard input mode: sdk, uhid, disabled
-    #[arg(long, default_value = "sdk")]
+    /// Keyboard input mode: sdk, uhid, aoa, disabled
+    #[arg(long, default_value = "sdk", value_parser = ["sdk", "uhid", "aoa", "disabled"])]
     pub keyboard: String,
 
-    /// Mouse input mode: sdk, uhid, disabled
-    #[arg(long, default_value = "sdk")]
+    /// Mouse input mode: sdk, uhid, aoa, disabled
+    #[arg(long, default_value = "sdk", value_parser = ["sdk", "uhid", "aoa", "disabled"])]
     pub mouse: String,
 
     /// Gamepad input mode: disabled, uhid, aoa

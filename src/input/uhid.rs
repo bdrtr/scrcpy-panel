@@ -28,9 +28,11 @@ use slint::winit_030::winit::keyboard::{KeyCode, PhysicalKey};
 use slint::winit_030::winit::window::{CursorGrabMode, Window as WinitWindow};
 use slint::winit_030::{CustomApplicationHandler, EventResult};
 
+use crate::control::control_msg::ControlMsg;
 use crate::control::controller::Controller;
-use crate::input::hid_keyboard::HidKeyboard;
-use crate::input::hid_mouse::HidMouse;
+use crate::input::aoa_hid::AoaHid;
+use crate::input::hid_keyboard::{HidKeyboard, HID_ID_KEYBOARD};
+use crate::input::hid_mouse::{HidMouse, HID_ID_MOUSE};
 use crate::input::slint_input::ShortcutMod;
 use crate::input::winit_keys::{hid_usage, modifier_bit};
 use crate::options::Options;
@@ -41,6 +43,28 @@ use crate::options::Options;
 /// notch comes to, and the figure only decides how far a finger has to travel.
 const PIXELS_PER_NOTCH: f64 = 50.0;
 
+/// Which way a report travels.
+///
+/// The same bytes either way: UHID hands them to the server, which makes a
+/// kernel device out of them, and AOA hands them to the phone's USB stack,
+/// which does the same thing a step earlier. AOA needs the cable and works on
+/// the lock screen; UHID needs only the socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Road {
+    Socket,
+    Usb,
+}
+
+impl Road {
+    fn of(mode: &str) -> Option<Self> {
+        match mode {
+            "uhid" => Some(Road::Socket),
+            "aoa" => Some(Road::Usb),
+            _ => None,
+        }
+    }
+}
+
 /// The keys that give the pointer back to the computer, as scrcpy chooses them.
 fn is_capture_key(code: KeyCode) -> bool {
     matches!(code, KeyCode::AltLeft | KeyCode::SuperLeft | KeyCode::SuperRight)
@@ -48,10 +72,12 @@ fn is_capture_key(code: KeyCode) -> bool {
 
 /// What is attached, what is held, and where it all goes.
 struct Uhid {
-    /// Some once a session has asked for --keyboard=uhid.
-    keyboard: Option<HidKeyboard>,
-    /// Some once a session has asked for --mouse=uhid.
-    mouse: Option<HidMouse>,
+    /// Some once a session has asked for a keyboard, with the way it travels.
+    keyboard: Option<(HidKeyboard, Road)>,
+    /// Some once a session has asked for a mouse, with the way it travels.
+    mouse: Option<(HidMouse, Road)>,
+    /// The USB connection, opened only if something asked to go that way.
+    aoa: Option<AoaHid>,
     /// None until a session is up. The handler is installed while the backend
     /// is chosen, which is before there is any device to talk to.
     controller: Option<Rc<Controller>>,
@@ -165,6 +191,70 @@ impl Uhid {
         (h != 0 || v != 0).then_some((v, h))
     }
 
+    /// Make a HID device at the far end, whichever way it is reached.
+    fn create(&mut self, id: u16, road: Road, report_desc: &'static [u8]) {
+        match road {
+            Road::Socket => {
+                if let Some(controller) = self.controller.as_ref() {
+                    controller.push_msg(ControlMsg::UhidCreate {
+                        id,
+                        vendor_id: 0,
+                        product_id: 0,
+                        name: None,
+                        report_desc: report_desc.to_vec(),
+                    });
+                }
+            }
+            Road::Usb => {
+                if let Some(aoa) = self.aoa.as_mut() {
+                    if let Err(e) = aoa.register(id, report_desc) {
+                        log::warn!("AOA HID {id} could not be registered: {e:#}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Take it away again.
+    fn destroy(&mut self, id: u16, road: Road) {
+        match road {
+            Road::Socket => {
+                if let Some(controller) = self.controller.as_ref() {
+                    controller.push_msg(ControlMsg::UhidDestroy { id });
+                }
+            }
+            Road::Usb => {
+                if let Some(aoa) = self.aoa.as_mut() {
+                    if let Err(e) = aoa.unregister(id) {
+                        log::warn!("AOA HID {id} could not be unregistered: {e:#}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Hand one report over.
+    ///
+    /// A failure on the USB road is logged rather than propagated: a cable
+    /// pulled mid-session should end the session, and it will, through the
+    /// stream that notices first — not through a dropped keypress.
+    fn deliver(&self, id: u16, road: Road, report: &[u8]) {
+        match road {
+            Road::Socket => {
+                if let Some(controller) = self.controller.as_ref() {
+                    controller.push_msg(ControlMsg::UhidInput { id, data: report.to_vec() });
+                }
+            }
+            Road::Usb => {
+                if let Some(aoa) = self.aoa.as_ref() {
+                    if let Err(e) = aoa.send(id, report) {
+                        log::warn!("AOA HID {id}: {e:#}");
+                    }
+                }
+            }
+        }
+    }
+
     /// Whether the pointer is the device's at this moment.
     fn pointing(&self) -> bool {
         self.mouse.is_some() && self.captured
@@ -183,6 +273,7 @@ impl UhidInput {
             inner: Rc::new(RefCell::new(Uhid {
                 keyboard: None,
                 mouse: None,
+                aoa: None,
                 controller: None,
                 modifiers: 0,
                 buttons: 0,
@@ -199,26 +290,47 @@ impl UhidInput {
     /// The options come in here rather than at construction because the panel
     /// chooses the input modes in its form, which is long after the backend —
     /// and this handler — had to exist.
-    pub fn attach(&self, controller: Rc<Controller>, opts: &Options) {
+    pub fn attach(&self, controller: Rc<Controller>, opts: &Options, serial: &str) {
         let mut uhid = self.inner.borrow_mut();
         uhid.shortcut_mod = ShortcutMod::parse(&opts.shortcut_mod);
+        uhid.controller = Some(controller);
 
-        if opts.keyboard == "uhid" {
-            let keyboard = HidKeyboard::new();
-            keyboard.open(&controller);
-            uhid.keyboard = Some(keyboard);
-            log::info!("UHID keyboard opened: the device applies its own layout");
+        let mut keyboard_road = Road::of(&opts.keyboard);
+        let mut mouse_road = Road::of(&opts.mouse);
+
+        // One USB connection serves both, and it is only worth opening if
+        // something asked to go that way.
+        if keyboard_road == Some(Road::Usb) || mouse_road == Some(Road::Usb) {
+            match AoaHid::open(serial) {
+                Ok(aoa) => uhid.aoa = Some(aoa),
+                Err(e) => {
+                    // AOA is the cable; a device reached over TCP/IP has none.
+                    // UHID reaches the same place over the socket, so that is
+                    // where it goes rather than nowhere.
+                    log::warn!("AOA is unavailable ({e:#}); falling back to UHID");
+                    if keyboard_road == Some(Road::Usb) {
+                        keyboard_road = Some(Road::Socket);
+                    }
+                    if mouse_road == Some(Road::Usb) {
+                        mouse_road = Some(Road::Socket);
+                    }
+                }
+            }
         }
-        if opts.mouse == "uhid" {
-            let mouse = HidMouse::new();
-            mouse.open(&controller);
-            uhid.mouse = Some(mouse);
+
+        if let Some(road) = keyboard_road {
+            uhid.create(HID_ID_KEYBOARD, road, crate::input::hid_keyboard::REPORT_DESC);
+            uhid.keyboard = Some((HidKeyboard::new(), road));
+            log::info!("Keyboard opened over {road:?}: the device applies its own layout");
+        }
+        if let Some(road) = mouse_road {
+            uhid.create(HID_ID_MOUSE, road, crate::input::hid_mouse::REPORT_DESC);
+            uhid.mouse = Some((HidMouse::new(), road));
             // Captured from the start, as scrcpy does: a relative mouse with
             // nothing to move is no mouse at all.
             uhid.captured = true;
-            log::info!("UHID mouse opened, pointer captured; LAlt or Super gives it back");
+            log::info!("Mouse opened over {road:?}, pointer captured; LAlt or Super gives it back");
         }
-        uhid.controller = Some(controller);
     }
 
     /// Whether anything is attached, which is what the caller needs to know
@@ -235,15 +347,16 @@ impl UhidInput {
     /// stopped arriving.
     pub fn detach(&self) {
         let mut uhid = self.inner.borrow_mut();
-        let Some(controller) = uhid.controller.take() else {
-            return;
-        };
-        if let Some(keyboard) = uhid.keyboard.take() {
-            keyboard.close(&controller);
+        if let Some((_, road)) = uhid.keyboard.take() {
+            uhid.destroy(HID_ID_KEYBOARD, road);
         }
-        if let Some(mouse) = uhid.mouse.take() {
-            mouse.close(&controller);
+        if let Some((_, road)) = uhid.mouse.take() {
+            uhid.destroy(HID_ID_MOUSE, road);
         }
+        // Dropping it unregisters anything left, which is the other half of
+        // not leaving a keyboard behind.
+        uhid.aoa.take();
+        uhid.controller.take();
         uhid.captured = false;
     }
 
@@ -335,30 +448,30 @@ impl CustomApplicationHandler for UhidHandler {
                 }
 
                 if let Some((usage, modifiers)) = uhid.on_key(key.physical_key, pressed) {
-                    let controller = uhid.controller.clone();
-                    if let (Some(keyboard), Some(controller)) =
-                        (uhid.keyboard.as_mut(), controller)
-                    {
-                        keyboard.process_key(usage, pressed, modifiers, &controller);
+                    if let Some((keyboard, road)) = uhid.keyboard.as_mut() {
+                        let road = *road;
+                        if let Some(report) = keyboard.report_for(usage, pressed, modifiers) {
+                            uhid.deliver(HID_ID_KEYBOARD, road, &report);
+                        }
                     }
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let pressed = *state == ElementState::Pressed;
                 if let Some(buttons) = uhid.on_button(*button, pressed) {
-                    if let (Some(mouse), Some(controller)) =
-                        (uhid.mouse.as_ref(), uhid.controller.as_ref())
-                    {
-                        mouse.send_click(buttons, controller);
+                    if let Some((mouse, road)) = uhid.mouse.as_ref() {
+                        let (report, road) = (mouse.click_report(buttons), *road);
+                        uhid.deliver(HID_ID_MOUSE, road, &report);
                     }
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 if let Some((vscroll, hscroll)) = uhid.on_scroll(*delta) {
-                    if let (Some(mouse), Some(controller)) =
-                        (uhid.mouse.as_ref(), uhid.controller.as_ref())
-                    {
-                        mouse.send_scroll(vscroll, hscroll, controller);
+                    if let Some((mouse, road)) = uhid.mouse.as_ref() {
+                        let buttons = uhid.buttons;
+                        let (report, road) =
+                            (mouse.scroll_report(vscroll, hscroll, buttons), *road);
+                        uhid.deliver(HID_ID_MOUSE, road, &report);
                     }
                 }
             }
@@ -398,9 +511,9 @@ impl CustomApplicationHandler for UhidHandler {
 
         let uhid = self.inner.borrow();
         if let Some((xrel, yrel, buttons)) = uhid.on_motion(dx, dy) {
-            if let (Some(mouse), Some(controller)) = (uhid.mouse.as_ref(), uhid.controller.as_ref())
-            {
-                mouse.send_motion(xrel, yrel, buttons, controller);
+            if let Some((mouse, road)) = uhid.mouse.as_ref() {
+                let report = mouse.motion_report(xrel, yrel, buttons);
+                uhid.deliver(HID_ID_MOUSE, *road, &report);
             }
         }
         EventResult::Propagate
@@ -413,8 +526,9 @@ mod tests {
 
     fn uhid(shortcut_mod: &str) -> Uhid {
         Uhid {
-            keyboard: Some(HidKeyboard::new()),
+            keyboard: Some((HidKeyboard::new(), Road::Socket)),
             mouse: None,
+            aoa: None,
             controller: None,
             modifiers: 0,
             buttons: 0,
@@ -427,7 +541,7 @@ mod tests {
 
     fn with_mouse() -> Uhid {
         let mut uhid = uhid("lalt");
-        uhid.mouse = Some(HidMouse::new());
+        uhid.mouse = Some((HidMouse::new(), Road::Socket));
         uhid.captured = true;
         uhid
     }

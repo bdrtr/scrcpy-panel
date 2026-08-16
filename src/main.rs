@@ -265,10 +265,8 @@ fn run(opts: Options) -> Result<()> {
         );
     }
     for (name, mode) in [("--keyboard", &opts.keyboard), ("--mouse", &opts.mouse)] {
-        if mode != "sdk" && mode != "uhid" && mode != "disabled" {
-            log::warn!(
-                "{name}={mode}: only SDK injection and UHID are available, falling back to SDK"
-            );
+        if !matches!(mode.as_str(), "sdk" | "uhid" | "aoa" | "disabled") {
+            log::warn!("{name}={mode} is not a mode this client has; falling back to SDK");
         }
     }
 
@@ -315,7 +313,10 @@ fn run(opts: Options) -> Result<()> {
 
     // The backend has to be chosen before any window exists, and both
     // --always-on-top and --keyboard=uhid want something from it.
-    let uhid = select_backend(&opts, opts.keyboard == "uhid" || opts.mouse == "uhid");
+    // Both roads are driven by the same winit handler, so both want the hook.
+    let hid_wanted = matches!(opts.keyboard.as_str(), "uhid" | "aoa")
+        || matches!(opts.mouse.as_str(), "uhid" | "aoa");
+    let uhid = select_backend(&opts, hid_wanted);
 
     let window = MirrorWindow::new().context("Failed to create the Slint window")?;
     window.set_borderless(opts.borderless);
@@ -362,7 +363,7 @@ fn run(opts: Options) -> Result<()> {
     // The UHID devices need something to reach, which is only now that the
     // control channel is up.
     if let (Some(uhid), Some(controller)) = (uhid.as_ref(), controller.as_ref()) {
-        uhid.attach(controller.clone(), &opts);
+        uhid.attach(controller.clone(), &opts, &session.serial);
     }
 
     let attachment = {

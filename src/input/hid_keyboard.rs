@@ -6,8 +6,6 @@
 //!   byte 1: reserved (0)
 //!   bytes 2-7: up to 6 currently-pressed scancodes
 
-use crate::control::control_msg::ControlMsg;
-use crate::control::controller::Controller;
 
 /// HID device ID for the keyboard
 pub const HID_ID_KEYBOARD: u16 = 1;
@@ -22,7 +20,7 @@ const REPORT_SIZE: usize = 2 + MAX_KEYS;
 
 /// USB HID Keyboard Report Descriptor (standard boot protocol keyboard)
 /// Matches scrcpy's SC_HID_KEYBOARD_REPORT_DESC exactly.
-static REPORT_DESC: &[u8] = &[
+pub static REPORT_DESC: &[u8] = &[
     0x05, 0x01, // Usage Page (Generic Desktop)
     0x09, 0x06, // Usage (Keyboard)
     0xA1, 0x01, // Collection (Application)
@@ -70,24 +68,7 @@ impl HidKeyboard {
     }
 
     /// Send UHID_CREATE to register the virtual keyboard on the device
-    pub fn open(&self, controller: &Controller) {
-        controller.push_msg(ControlMsg::UhidCreate {
-            id: HID_ID_KEYBOARD,
-            vendor_id: 0,
-            product_id: 0,
-            name: None,
-            report_desc: REPORT_DESC.to_vec(),
-        });
-        log::info!("UHID keyboard created (id={})", HID_ID_KEYBOARD);
-    }
 
-    /// Send UHID_DESTROY to remove the virtual keyboard
-    pub fn close(&self, controller: &Controller) {
-        controller.push_msg(ControlMsg::UhidDestroy {
-            id: HID_ID_KEYBOARD,
-        });
-        log::info!("UHID keyboard destroyed");
-    }
 
     /// Send a HID report for one key transition.
     ///
@@ -96,14 +77,13 @@ impl HidKeyboard {
     /// values were the usage ids already, so the translation was an identity —
     /// what the caller has to supply is unchanged.
     ///
-    /// Returns true if the event was handled, false if it should be ignored.
-    pub fn process_key(
+    /// Returns the report to send, or None for a key with no place in it.
+    pub fn report_for(
         &mut self,
         hid_usage: u8,
         pressed: bool,
         modifiers: u8,
-        controller: &Controller,
-    ) -> bool {
+    ) -> Option<[u8; REPORT_SIZE]> {
         let hid_scancode = hid_usage;
 
         // Modifier keys (0xE0-0xE7) are handled via the modifier byte,
@@ -113,7 +93,7 @@ impl HidKeyboard {
         if !is_modifier {
             if hid_scancode >= NUM_KEYS as u8 {
                 // Unsupported scancode
-                return false;
+                return None;
             }
             self.keys[hid_scancode as usize] = pressed;
         }
@@ -143,12 +123,6 @@ impl HidKeyboard {
             }
         }
 
-        // Send UHID_INPUT
-        controller.push_msg(ControlMsg::UhidInput {
-            id: HID_ID_KEYBOARD,
-            data: report.to_vec(),
-        });
-
-        true
+        Some(report)
     }
 }
