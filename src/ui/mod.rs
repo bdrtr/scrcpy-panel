@@ -109,3 +109,92 @@ pub fn frame_to_image(frame: &DecodedFrame) -> Image {
     bytes[..n].copy_from_slice(&frame.data[..n]);
     Image::from_rgb8(buffer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The window hands over a point inside the visible rectangle; the device
+    /// needs the pixel it came from. Getting this backwards sends taps to the
+    /// mirrored corner, which is the kind of bug that only shows up once the
+    /// screen is rotated — so pin all four corners in all four orientations.
+    fn corners(orientation: Orientation) -> [(f32, f32); 4] {
+        // top-left, top-right, bottom-right, bottom-left of what is on screen
+        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+            .map(|(u, v)| orientation.unrotate(u, v))
+    }
+
+    #[test]
+    fn unrotated_coordinates_pass_straight_through() {
+        assert_eq!(
+            corners(Orientation::Normal),
+            [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+        );
+    }
+
+    #[test]
+    fn a_quarter_turn_clockwise_maps_the_top_right_back_to_the_top_left() {
+        // Drawing turns the frame 90° clockwise, so the frame's top-left is
+        // displayed top-right; a click there must come back as (0, 0).
+        assert_eq!(
+            corners(Orientation::Rot90),
+            [(0.0, 1.0), (0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+        );
+    }
+
+    #[test]
+    fn a_half_turn_mirrors_both_axes() {
+        assert_eq!(
+            corners(Orientation::Rot180),
+            [(1.0, 1.0), (0.0, 1.0), (0.0, 0.0), (1.0, 0.0)]
+        );
+    }
+
+    #[test]
+    fn a_quarter_turn_anticlockwise_maps_the_top_left_back_to_the_top_right() {
+        assert_eq!(
+            corners(Orientation::Rot270),
+            [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]
+        );
+    }
+
+    #[test]
+    fn the_centre_stays_put_whatever_the_rotation() {
+        for orientation in [
+            Orientation::Normal,
+            Orientation::Rot90,
+            Orientation::Rot180,
+            Orientation::Rot270,
+        ] {
+            assert_eq!(orientation.unrotate(0.5, 0.5), (0.5, 0.5), "{orientation:?}");
+        }
+    }
+
+    #[test]
+    fn rotating_four_times_returns_to_the_start() {
+        let mut orientation = Orientation::Normal;
+        for _ in 0..4 {
+            orientation = orientation.rotate_cw();
+        }
+        assert_eq!(orientation, Orientation::Normal);
+
+        for _ in 0..4 {
+            orientation = orientation.rotate_ccw();
+        }
+        assert_eq!(orientation, Orientation::Normal);
+    }
+
+    #[test]
+    fn a_quarter_turn_swaps_the_displayed_aspect() {
+        let portrait = display_aspect(1080, 2400, Orientation::Normal);
+        let landscape = display_aspect(1080, 2400, Orientation::Rot90);
+        assert!((portrait - 0.45).abs() < 1e-6, "got {portrait}");
+        assert!((landscape - 1.0 / 0.45).abs() < 1e-4, "got {landscape}");
+        assert_eq!(portrait, display_aspect(1080, 2400, Orientation::Rot180));
+    }
+
+    #[test]
+    fn a_zero_height_frame_does_not_divide_by_zero() {
+        assert_eq!(display_aspect(1080, 0, Orientation::Normal), 1.0);
+    }
+}

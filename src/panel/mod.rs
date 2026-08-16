@@ -73,7 +73,7 @@ struct Panel {
 }
 
 /// Open the panel and run until its window closes.
-pub fn run() -> Result<()> {
+pub fn run(opts: &Options) -> Result<()> {
     let window = PanelWindow::new().context("Failed to create the panel window")?;
 
     // Only the audio subsystem is used, but SDL insists on being initialised as
@@ -120,6 +120,21 @@ pub fn run() -> Result<()> {
     // Populate the device list without making the window wait for adb.
     spawn_device_scan(&panel);
 
+    // --start brings the panel up already mirroring.
+    let autostart = slint::Timer::default();
+    if opts.start {
+        let panel_for_start = panel.clone();
+        autostart.start(
+            slint::TimerMode::SingleShot,
+            Duration::from_millis(300),
+            move || {
+                if let Some(window) = panel_for_start.window.upgrade() {
+                    start_session(&window, &panel_for_start);
+                }
+            },
+        );
+    }
+
     // Ctrl-C and SIGTERM set a flag; Slint has no signal handling of its own, so
     // a timer is what turns that flag into leaving the event loop.
     let shutdown = slint::Timer::default();
@@ -138,6 +153,7 @@ pub fn run() -> Result<()> {
     drop(shutdown);
 
     // Leave nothing running behind the window.
+    drop(autostart);
     stop_session(&panel);
     Ok(())
 }

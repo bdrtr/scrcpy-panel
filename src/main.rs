@@ -45,7 +45,7 @@ fn main() -> Result<()> {
     log::info!("scrcpy-slint {} — Rust scrcpy client with a Slint UI", VERSION);
 
     if opts.panel {
-        return panel::run();
+        return panel::run(&opts);
     }
 
     run(opts)

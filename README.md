@@ -3,10 +3,9 @@
 A Rust scrcpy client with a [Slint](https://slint.dev) user interface — mirror and control
 Android devices from a single control panel.
 
-> **Status: early.** The mirror now renders and takes input in a Slint window — SDL2 no
-> longer draws anything. What does not exist yet is the control panel from
-> [`design/`](./design/): no tabs, no configuration form, no profiles. Options still come
-> from the command line.
+> **Status: usable.** `--panel` opens the control panel from [`design/`](./design/) — seven
+> tabs, the eight-section configuration form, a live command preview — and the mirror runs
+> inside it. `scrcpy-slint` with no flags still mirrors straight into a window of its own.
 
 ## What this is
 
@@ -45,6 +44,8 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | H.264 demux | works |
 | Hardware decode | works (CUDA negotiated automatically) |
 | Slint window render | works — 30–61 fps sustained at 720p |
+| Mirror embedded in the panel | works — live at 1080x2400, correct letterbox |
+| Control panel | works — adb detection, device list, command preview, profiles |
 | Opus audio decode and playback | works |
 | MP4 recording | works — valid file, 128 frames in 7.2 s |
 | `--list-encoders` | works |
@@ -117,7 +118,10 @@ with the opening session header, which every run exercises.
 
 ```bash
 cargo build --release
-./target/release/scrcpy-slint
+
+./target/release/scrcpy-slint            # mirror in a window of its own
+./target/release/scrcpy-slint --panel    # the control panel
+./target/release/scrcpy-slint --panel --start   # panel, already mirroring
 ```
 
 If scrcpy 4.1 is installed, its server is found automatically at
@@ -130,10 +134,10 @@ curl -L -o target/release/scrcpy-server \
 
 ## Roadmap
 
-1. ~~Replace SDL2 with a Slint window and an embedded mirror view~~ — done
-2. Build the control panel from [`design/`](./design/): device list, the eight-section
-   configuration form, session controls, profiles, log and shortcut tabs
-3. Drive the client from that panel instead of CLI flags
+1. ~~Replace SDL2 with a Slint window~~ — done
+2. ~~Build the control panel from [`design/`](./design/)~~ — done
+3. ~~Embed the mirror in the panel~~ — done; Ayarlar switches between embedded and a
+   window of its own
 4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, pinned to 4.1
 5. Get input parity back: UHID and AOA keyboards, mice and gamepads
 6. Drop SDL2 entirely — audio to `cpal`, clipboard to a native crate
@@ -166,10 +170,22 @@ profiles, logs and shortcuts.
 ## Layout
 
 ```
-ui/mirror.slint      # the mirror window: layout, rotation, input forwarding
+ui/
+├── app.slint        # the root: every window re-exported from one file
+├── mirror_view.slint# the mirror itself, shared by both hosts, on a Mirror global
+├── mirror.slint     # a window that is a frame around MirrorView
+├── panel.slint      # the control panel's chrome
+├── theme.slint      # design tokens transcribed from the mockup
+├── components.slint # the component library, keyed to the mockup's CSS classes
+├── state.slint      # Cfg / Settings / App globals
+├── config/          # the eight configuration sections
+└── tabs/            # the six non-configuration tabs
 src/
-├── main.rs          # orchestrator, pipeline threads, Slint event loop
-├── options.rs       # CLI parsing (clap) — to be replaced by the panel
+├── main.rs          # entry point and the standalone mirror window
+├── session.rs       # a session without a window: server, tunnel, decode threads
+├── mirror_host.rs   # drives a MirrorView wherever it is mounted
+├── panel/           # the control panel: command building, devices, profiles
+├── options.rs       # CLI parsing (clap)
 ├── ui/              # Slint bindings: orientation, frame → image
 ├── adb/             # ADB commands, tunnelling, sync
 ├── server/          # server push, parameters, socket connections

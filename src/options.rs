@@ -8,6 +8,10 @@ pub struct Options {
     #[arg(long, default_value = "false")]
     pub panel: bool,
 
+    /// With --panel, start a session as soon as the panel opens
+    #[arg(long, default_value = "false")]
+    pub start: bool,
+
     /// Device serial number (from `adb devices`)
     #[arg(short, long)]
     pub serial: Option<String>,
