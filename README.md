@@ -115,8 +115,11 @@ with the opening session header, which every run exercises.
   text and images, not dropped file paths. The transfer box takes a click instead and
   opens the desktop's own file chooser over the XDG portal, which reaches the same two
   outcomes — an APK is installed, anything else is pushed to `/sdcard/Download`.
-- `--always-on-top` and `--borderless` do nothing: Slint 1.17 exposes no window API for
-  either.
+- `--always-on-top` and `--borderless` reach the winit window under Slint's own, which is
+  the only place either exists — Slint's `Window` API has neither. The window is created
+  when the loop shows it, so both are applied from the future that resolves once it does,
+  not from the setup code that runs first. What the platform does with them is its own
+  business: Wayland leaves stacking to the compositor and ignores always-on-top.
 - `--render-driver` was an SDL renderer hint and is now ignored; pick a Slint backend with
   `SLINT_BACKEND` instead.
 - `--disable-screensaver` went with SDL and came back over D-Bus: the session holds an

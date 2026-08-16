@@ -83,6 +83,43 @@ pub fn watch_for_interrupt() -> slint::Timer {
     timer
 }
 
+/// `--always-on-top` and `--borderless`, through the window winit owns.
+///
+/// Slint's own `Window` has neither, but the winit backend sits underneath and
+/// exposes both. What the platform then does with them is its own business:
+/// Wayland leaves stacking to the compositor and ignores always-on-top, and
+/// winit reports nothing back either way — so this logs what was asked for, not
+/// what happened.
+fn apply_window_flags(window: slint::Weak<MirrorWindow>, always_on_top: bool, borderless: bool) {
+    use slint::winit_030::{winit::window::WindowLevel, WinitWindowAccessor};
+
+    // The winit window is created when the loop shows it, which is after this
+    // runs — hence the future rather than the immediate accessor, which would
+    // simply find nothing there.
+    let spawned = slint::spawn_local(async move {
+        let Some(mirror) = window.upgrade() else { return };
+        match mirror.window().winit_window().await {
+            Ok(winit_window) => {
+                if always_on_top {
+                    winit_window.set_window_level(WindowLevel::AlwaysOnTop);
+                    log::info!(
+                        "Window level: always on top (Wayland leaves stacking to the compositor)"
+                    );
+                }
+                if borderless {
+                    winit_window.set_decorations(false);
+                    log::info!("Window decorations off");
+                }
+            }
+            Err(e) => log::warn!("--always-on-top/--borderless need a winit window: {e}"),
+        }
+    });
+
+    if let Err(e) = spawned {
+        log::warn!("--always-on-top/--borderless could not be scheduled: {e}");
+    }
+}
+
 /// Mirror one device in a window of its own.
 fn run(opts: Options) -> Result<()> {
     if session::run_list_query(&opts)? {
@@ -102,9 +139,6 @@ fn run(opts: Options) -> Result<()> {
             opts.keyboard,
             opts.mouse
         );
-    }
-    if opts.always_on_top || opts.borderless {
-        log::warn!("--always-on-top and --borderless are not wired to the Slint window yet");
     }
 
     let mut session = session::Session::start(&opts)?;
@@ -214,6 +248,10 @@ fn run(opts: Options) -> Result<()> {
             },
         );
     }
+    if opts.always_on_top || opts.borderless {
+        apply_window_flags(window.as_weak(), opts.always_on_top, opts.borderless);
+    }
+
     let interrupt = watch_for_interrupt();
 
     log::info!("Entering Slint event loop...");
