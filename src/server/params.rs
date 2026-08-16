@@ -5,12 +5,7 @@ use crate::options::Options;
 /// `tunnel_forward` is the tunnel we actually opened, not the flag that asked
 /// for one: `open` falls back to forward when `adb reverse` is refused, and a
 /// server told the wrong direction waits for a connection that never comes.
-pub fn build_server_args(
-    opts: &Options,
-    scid: u32,
-    tunnel_port: u16,
-    tunnel_forward: bool,
-) -> Vec<String> {
+pub fn build_server_args(opts: &Options, scid: u32, tunnel_forward: bool) -> Vec<String> {
     let mut args = vec![
         format!("scid={:08x}", scid),
         format!("log_level={}", opts.verbosity),

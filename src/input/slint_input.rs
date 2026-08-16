@@ -578,15 +578,30 @@ impl SlintInput {
             ShortcutAction::SetDisplayPowerOn => {
                 controller.push_msg(ControlMsg::SetDisplayPower { on: true });
             }
+            // Both of these ask the device to copy and send the result back,
+            // so with that direction blocked there is nothing to ask for; the
+            // device-side copy on its own would only be a surprise.
             ShortcutAction::CopyToPC => {
+                if !crate::control::clipboard::allows_to_pc() {
+                    log::info!("Copy refused: --clipboard-direction is to-device");
+                    return WindowAction::None;
+                }
                 controller.push_msg(ControlMsg::GetClipboard { copy_key: 1 });
                 log::info!("Clipboard: device → host");
             }
             ShortcutAction::CutToPC => {
+                if !crate::control::clipboard::allows_to_pc() {
+                    log::info!("Cut refused: --clipboard-direction is to-device");
+                    return WindowAction::None;
+                }
                 controller.push_msg(ControlMsg::GetClipboard { copy_key: 2 });
                 log::info!("Clipboard cut: device → host");
             }
             ShortcutAction::PasteFromPC => {
+                if !crate::control::clipboard::allows_to_device() {
+                    log::info!("Paste refused: --clipboard-direction is to-pc");
+                    return WindowAction::None;
+                }
                 let text = get_clipboard_text();
                 if text.is_empty() {
                     return WindowAction::None;

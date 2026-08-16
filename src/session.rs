@@ -140,6 +140,8 @@ impl Session {
         // A tunnel that reaches another machine's adb cannot be a reverse one:
         // the device would connect back to itself. scrcpy forces forward mode
         // for the same reason.
+        crate::control::clipboard::set_direction(&opts.clipboard_direction);
+
         let remote_tunnel = opts.tunnel_host.is_some() || opts.tunnel_port.is_some();
         if remote_tunnel && !opts.force_adb_forward {
             log::info!("--tunnel-host/--tunnel-port given, using forward mode");
@@ -163,7 +165,7 @@ impl Session {
             None
         };
 
-        let server_args = server::params::build_server_args(opts, scid, port, !is_reverse);
+        let server_args = server::params::build_server_args(opts, scid, !is_reverse);
         let server_cmd = server::params::build_server_command(&server_args);
         let cmd_strs: Vec<&str> = server_cmd.iter().map(|s| s.as_str()).collect();
 
@@ -801,8 +803,14 @@ fn run_device_msg_reader(socket: TcpStream) {
     loop {
         match read_device_msg(&mut reader) {
             Ok(DeviceMsg::Clipboard { text }) => {
-                log::info!("Received clipboard from phone ({} chars)", text.len());
-                crate::input::slint_input::set_clipboard_text(&text);
+                if crate::control::clipboard::allows_to_pc() {
+                    log::info!("Received clipboard from phone ({} chars)", text.len());
+                    crate::input::slint_input::set_clipboard_text(&text);
+                } else {
+                    // The device still sends it; --clipboard-direction decides
+                    // whether it lands here.
+                    log::debug!("Clipboard from the phone dropped: direction is to-device");
+                }
             }
             Ok(DeviceMsg::AckClipboard { sequence }) => {
                 log::debug!("Clipboard ACK: seq={}", sequence);

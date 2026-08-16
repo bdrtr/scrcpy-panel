@@ -210,8 +210,8 @@ msgstr "Keyboard layout — once UHID lands"
 msgid "UHID henüz yok"
 msgstr "UHID not available yet"
 
-msgid "Pano yönü — henüz yok"
-msgstr "Clipboard direction — not available yet"
+msgid "Pano yönü · --clipboard-direction"
+msgstr "Clipboard direction · --clipboard-direction"
 
 msgid "İki yönlü"
 msgstr "Both ways"
@@ -877,6 +877,9 @@ msgstr "No file chosen."
 
 msgid "{} dosya gönderiliyor…"
 msgstr "Sending {} files…"
+
+msgid "Pano yönü \"yalnızca bilgisayara\" olduğu için gönderilmedi."
+msgstr "Not sent: the clipboard direction is \"to the computer only\"."
 
 msgid "Pano boş."
 msgstr "The clipboard is empty."

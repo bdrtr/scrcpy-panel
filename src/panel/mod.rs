@@ -1150,6 +1150,12 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
     {
         let panel = panel.clone();
         app.on_send_clipboard(move || {
+            if !crate::control::clipboard::allows_to_device() {
+                panel.warn(&tr!(
+                    "Pano yönü \"yalnızca bilgisayara\" olduğu için gönderilmedi."
+                ));
+                return;
+            }
             let text = crate::input::slint_input::get_clipboard_text();
             if text.is_empty() {
                 panel.warn(&tr!("Pano boş."));

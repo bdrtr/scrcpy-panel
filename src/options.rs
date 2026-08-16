@@ -133,6 +133,13 @@ pub struct Options {
     #[arg(long, default_value = "false")]
     pub no_power_on: bool,
 
+    /// Which way the clipboard may travel: both, to-device or to-pc
+    ///
+    /// Not a scrcpy option. scrcpy syncs both ways or not at all; this narrows
+    /// it without turning it off.
+    #[arg(long, default_value = "both", value_parser = ["both", "to-device", "to-pc"])]
+    pub clipboard_direction: String,
+
     /// Buffer the V4L2 output by this many milliseconds
     #[arg(long, default_value = "0")]
     pub v4l2_buffer: u32,

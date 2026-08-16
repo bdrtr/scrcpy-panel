@@ -116,6 +116,11 @@ with the opening session header, which every run exercises.
   the icon alone without consulting `visible`, so an icon bound to false is still shown.
   Presence is therefore controlled by creating and dropping the component, which is the
   documented lifecycle anyway.
+- `--clipboard-direction` is this client's own, not a scrcpy option: scrcpy syncs the
+  clipboard both ways or not at all, and the panel's mockup asks for a direction as well.
+  `to-device` keeps the phone's clipboard off this machine; `to-pc` keeps this machine's
+  clipboard off the phone. Both ends of the sync are on different threads, so the policy
+  is process-wide rather than threaded through both.
 - Drag-and-drop file transfer is not possible: Slint 1.17's `DataTransfer` exposes plain
   text and images, not dropped file paths. The transfer box takes a click instead and
   opens the desktop's own file chooser over the XDG portal, which reaches the same two

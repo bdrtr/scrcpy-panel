@@ -59,9 +59,9 @@ export component SectionControl inherits VerticalLayout {
                     changed => { Cfg.changed(); }
                 }
             }
-            // Both of these are disabled rather than removed: the mockup has
-            // them, but nothing reads them yet. An enabled control that does
-            // nothing is worse than one that says it does nothing.
+            // The layout field is disabled rather than removed: the mockup has
+            // it, but nothing reads it until UHID lands. An enabled control
+            // that does nothing is worse than one that says it does nothing.
             Fld {
                 label: @tr("Klavye düzeni — UHID gelince");
                 Inp {
@@ -72,11 +72,12 @@ export component SectionControl inherits VerticalLayout {
                 }
             }
             Fld {
-                label: @tr("Pano yönü — henüz yok");
+                label: @tr("Pano yönü · --clipboard-direction");
                 Sel {
                     labels: [@tr("İki yönlü"), @tr("Yalnızca cihaza"), @tr("Yalnızca bilgisayara")];
                     values: ["both", "toDevice", "toPc"];
                     value <=> Cfg.clipboard-direction;
+                    changed => { Cfg.changed(); }
                 }
             }
         }

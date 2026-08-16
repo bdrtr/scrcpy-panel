@@ -278,6 +278,7 @@ const SUPPORTED: &[&str] = &[
     "--no-vd-destroy-content",
     "--no-vd-system-decorations",
     "--legacy-paste",
+    "--clipboard-direction",
     "--new-display",
     "--start-app",
     "--camera-id",
@@ -415,6 +416,14 @@ impl PanelConfig {
         opt("--tunnel-host", &self.tunnel_host, &d.tunnel_host);
         opt("--tunnel-port", &self.tunnel_port, &d.tunnel_port);
         opt("--verbosity", &self.verbosity, &d.verbosity);
+        // The panel stores the camelCase spelling; the command line takes the
+        // dashed one, as every other multi-word value here does.
+        let direction = match self.clipboard_direction.as_str() {
+            "toDevice" => "to-device",
+            "toPc" => "to-pc",
+            other => other,
+        };
+        opt("--clipboard-direction", direction, &d.clipboard_direction);
 
         drop(opt);
 
@@ -806,9 +815,18 @@ mod tests {
                     | clap::ArgAction::Version
             );
 
+            // "1" satisfies most value arguments, but not one that names the
+            // values it accepts; ask clap for one of those rather than
+            // guessing, the same way the action is asked for above.
+            let value = argument
+                .get_possible_values()
+                .first()
+                .map(|possible| possible.get_name().to_string())
+                .unwrap_or_else(|| "1".to_string());
+
             let mut argv = vec!["scrcpy-slint".to_string()];
             argv.push(if takes_value {
-                format!("{name}=1")
+                format!("{name}={value}")
             } else {
                 name.to_string()
             });
