@@ -312,6 +312,21 @@ pub struct Options {
     #[arg(long, default_value = "50")]
     pub audio_buffer: u32,
 
+    /// How the mirror window shows the picture: 0, 90, 180, 270, or the same
+    /// with a `flip` prefix for a horizontal flip before the rotation
+    ///
+    /// Overrides `--orientation` for the window only.
+    #[arg(long, value_parser = ["0", "90", "180", "270", "flip0", "flip90", "flip180", "flip270"])]
+    pub display_orientation: Option<String>,
+
+    /// How the recording is rotated: 0, 90, 180, 270
+    ///
+    /// Written into the file as a display matrix, so players rotate on
+    /// playback and nothing is re-encoded. Overrides `--orientation` for the
+    /// file only.
+    #[arg(long, value_parser = ["0", "90", "180", "270"])]
+    pub record_orientation: Option<String>,
+
     /// Initial display orientation: 0, 90, 180, 270
     #[arg(long, default_value = "0")]
     pub orientation: u16,
@@ -405,6 +420,29 @@ pub struct Options {
 }
 
 impl Options {
+    /// The window's rotation and whether the picture is flipped first.
+    ///
+    /// `--display-orientation` wins over `--orientation`, which scrcpy defines
+    /// as the shorthand for setting the display and the recording together.
+    pub fn display_rotation(&self) -> (u16, bool) {
+        match self.display_orientation.as_deref() {
+            Some(value) => {
+                let flip = value.starts_with("flip");
+                let degrees = value.trim_start_matches("flip").parse().unwrap_or(0);
+                (degrees, flip)
+            }
+            None => (self.orientation, false),
+        }
+    }
+
+    /// The rotation to write into a recording.
+    pub fn record_rotation(&self) -> u16 {
+        self.record_orientation
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(self.orientation)
+    }
+
     pub fn video_enabled(&self) -> bool { !self.no_video }
     pub fn audio_enabled(&self) -> bool { !self.no_audio }
     pub fn control_enabled(&self) -> bool { !self.no_control }
@@ -421,5 +459,49 @@ impl Options {
         } else {
             (27183, 27199)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn parse(args: &[&str]) -> Options {
+        let mut argv = vec!["scrcpy-slint"];
+        argv.extend_from_slice(args);
+        Options::try_parse_from(argv).expect("valid arguments")
+    }
+
+    /// scrcpy defines --orientation as the shorthand for setting the window and
+    /// the recording together, and either of the specific ones overrides it.
+    #[test]
+    fn orientation_is_the_shorthand_for_both() {
+        let opts = parse(&["--orientation", "90"]);
+        assert_eq!(opts.display_rotation(), (90, false));
+        assert_eq!(opts.record_rotation(), 90);
+
+        let opts = parse(&["--orientation", "90", "--record-orientation", "180"]);
+        assert_eq!(opts.display_rotation(), (90, false), "the window keeps it");
+        assert_eq!(opts.record_rotation(), 180, "the file takes the specific one");
+
+        let opts = parse(&["--orientation", "90", "--display-orientation", "270"]);
+        assert_eq!(opts.display_rotation(), (270, false));
+        assert_eq!(opts.record_rotation(), 90, "the file keeps it");
+    }
+
+    /// "flip" is a horizontal mirror applied before the rotation.
+    #[test]
+    fn a_flip_is_a_rotation_with_a_mirror() {
+        assert_eq!(parse(&["--display-orientation", "flip0"]).display_rotation(), (0, true));
+        assert_eq!(parse(&["--display-orientation", "flip270"]).display_rotation(), (270, true));
+        assert_eq!(parse(&["--display-orientation", "180"]).display_rotation(), (180, false));
+    }
+
+    #[test]
+    fn nothing_given_means_no_rotation() {
+        let opts = parse(&[]);
+        assert_eq!(opts.display_rotation(), (0, false));
+        assert_eq!(opts.record_rotation(), 0);
     }
 }

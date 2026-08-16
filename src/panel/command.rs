@@ -289,6 +289,8 @@ const SUPPORTED: &[&str] = &[
     "--camera-high-speed",
     "--window-title",
     "--orientation",
+    "--display-orientation",
+    "--record-orientation",
     "--window-x",
     "--window-y",
     "--window-width",

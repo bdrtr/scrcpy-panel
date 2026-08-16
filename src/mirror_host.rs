@@ -66,7 +66,8 @@ pub fn attach(
     on_action: impl Fn(WindowAction, (u32, u32), Orientation) + 'static,
     on_end: impl Fn() + 'static,
 ) -> Attachment {
-    let orientation = Rc::new(Cell::new(Orientation::from_degrees(opts.orientation)));
+    let (degrees, flip) = opts.display_rotation();
+    let orientation = Rc::new(Cell::new(Orientation::from_degrees(degrees)));
     let frame_size = Rc::new(Cell::new((video.info.width, video.info.height)));
 
     // scrcpy spells some of these two ways: --prefer-text and --raw-key-events
@@ -95,6 +96,7 @@ pub fn attach(
         mouse_bind,
         orientation.get(),
     )));
+    input.borrow_mut().set_flip(flip);
     let fps = Rc::new(RefCell::new(FpsCounter::new()));
     if opts.print_fps {
         fps.borrow_mut().start();
@@ -160,6 +162,7 @@ pub fn attach(
         orientation.clone(),
         apply,
         v4l2,
+        flip,
         on_end,
     );
 
@@ -259,6 +262,8 @@ fn start_pump(
     orientation: Rc<Cell<Orientation>>,
     apply: Rc<dyn Fn(MirrorUpdate)>,
     v4l2: Option<V4l2Sink>,
+    // --display-orientation=flipN: mirror the picture horizontally.
+    flip: bool,
     on_end: impl Fn() + 'static,
 ) -> slint::Timer {
     let VideoStream {
@@ -316,7 +321,7 @@ fn start_pump(
         // Under --no-video-playback the frame is still decoded and recycled —
         // it is simply never turned into an image or drawn.
         if playback {
-            apply(MirrorUpdate::Frame(frame_to_image(&latest)));
+            apply(MirrorUpdate::Frame(frame_to_image(&latest, flip)));
             if !live.get() {
                 live.set(true);
                 apply(MirrorUpdate::Live(true));

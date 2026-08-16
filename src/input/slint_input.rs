@@ -221,6 +221,9 @@ pub struct SlintInput {
     vfinger_down: bool,
     /// Last known modifier state, for events that carry none
     alt_held: bool,
+    /// --display-orientation=flipN: the picture is mirrored, so a pointer at
+    /// the left of the window is at the right of the device.
+    flip: bool,
 }
 
 impl SlintInput {
@@ -244,12 +247,18 @@ impl SlintInput {
             clipboard_sequence: 0,
             vfinger_down: false,
             alt_held: false,
+            flip: false,
         }
     }
 
     pub fn set_frame_size(&mut self, width: u32, height: u32) {
         self.frame_width = width;
         self.frame_height = height;
+    }
+
+    /// Mirror pointer positions to match a flipped picture.
+    pub fn set_flip(&mut self, flip: bool) {
+        self.flip = flip;
     }
 
     pub fn set_orientation(&mut self, orientation: Orientation) {
@@ -263,6 +272,9 @@ impl SlintInput {
     /// Map a point given in displayed, normalised coordinates to a device pixel.
     fn to_frame(&self, u: f32, v: f32) -> (u32, u32) {
         let (fu, fv) = self.orientation.unrotate(u, v);
+        // The flip is applied before the rotation when drawing, so undoing it
+        // comes after undoing the rotation.
+        let fu = if self.flip { 1.0 - fu } else { fu };
         let max_x = self.frame_width.saturating_sub(1) as f32;
         let max_y = self.frame_height.saturating_sub(1) as f32;
         let x = (fu * self.frame_width as f32).clamp(0.0, max_x) as u32;

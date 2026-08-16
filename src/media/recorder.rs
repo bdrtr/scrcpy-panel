@@ -116,19 +116,29 @@ impl Recorder {
     ///
     /// `format` is `--record-format`; when it is None the container is inferred
     /// from the file extension, as scrcpy does.
+    /// `rotation` is `--record-orientation`, written into the file rather than
+    /// applied to the pixels: rotating a stream this client only remuxes would
+    /// mean decoding and encoding it again.
     pub fn spawn(
         &self,
         filename: String,
         format: Option<String>,
         has_video: bool,
         has_audio: bool,
+        rotation: u16,
     ) -> thread::JoinHandle<()> {
         let state = Arc::clone(&self.state);
         thread::Builder::new()
             .name("scrcpy-recorder".into())
             .spawn(move || {
-                if let Err(e) =
-                    run_recorder(state, &filename, format.as_deref(), has_video, has_audio)
+                if let Err(e) = run_recorder(
+                    state,
+                    &filename,
+                    format.as_deref(),
+                    has_video,
+                    has_audio,
+                    rotation,
+                )
                 {
                     log::error!("Recorder failed: {}", e);
                 }
@@ -147,6 +157,7 @@ fn run_recorder(
     format: Option<&str>,
     has_video: bool,
     has_audio: bool,
+    rotation: u16,
 ) -> Result<()> {
     let (lock, cvar) = &*state;
 
@@ -164,7 +175,20 @@ fn run_recorder(
     };
 
     // 2. Open output context using FFmpeg raw API
-    let result = unsafe { open_and_record(lock, cvar, filename, format, has_video, has_audio, &video_info, audio_codec_id, audio_expects_config) };
+    let result = unsafe {
+        open_and_record(
+            lock,
+            cvar,
+            filename,
+            format,
+            has_video,
+            has_audio,
+            &video_info,
+            audio_codec_id,
+            audio_expects_config,
+            rotation,
+        )
+    };
     if let Err(ref e) = result {
         log::error!("Recording error: {}", e);
     } else {
@@ -173,6 +197,7 @@ fn run_recorder(
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 unsafe fn open_and_record(
     lock: &Mutex<RecorderState>,
     cvar: &Condvar,
@@ -183,6 +208,7 @@ unsafe fn open_and_record(
     vi: &Option<VideoCodecInfo>,
     audio_codec_id: Option<u32>,
     audio_expects_config: bool,
+    rotation: u16,
 ) -> Result<()> {
     ffi::av_log_set_level(ffi::AV_LOG_WARNING);
 
@@ -290,6 +316,7 @@ unsafe fn open_and_record(
                 );
                 let vstream_ptr = get_stream(ctx, vid_idx as usize);
                 set_extradata((*vstream_ptr).codecpar, &config.data);
+                set_rotation((*vstream_ptr).codecpar, rotation);
             } else {
                 log::warn!("Recording stopped before a video config packet arrived");
             }
@@ -423,6 +450,45 @@ unsafe fn open_and_record(
     ffi::avformat_free_context(ctx);
 
     Ok(())
+}
+
+/// Write `--record-orientation` into the stream as a display matrix.
+///
+/// This is the same thing a phone does with a video shot sideways: the pixels
+/// are left alone and the container carries the rotation, which every player
+/// applies on playback. Rotating the pixels instead would mean decoding and
+/// re-encoding a stream this client otherwise only remuxes.
+unsafe fn set_rotation(codecpar: *mut ffi::AVCodecParameters, degrees: u16) {
+    if degrees % 360 == 0 {
+        return;
+    }
+
+    // The side data is owned by the codec parameters and freed with them, so
+    // it has to come from av_malloc rather than from Rust's allocator.
+    const MATRIX_BYTES: usize = 9 * std::mem::size_of::<i32>();
+    let matrix = ffi::av_malloc(MATRIX_BYTES) as *mut i32;
+    if matrix.is_null() {
+        log::warn!("Could not allocate a display matrix; the recording will not be rotated");
+        return;
+    }
+    // Negated: av_display_rotation_set takes the rotation a player must apply
+    // counter-clockwise, and everything else here counts clockwise.
+    ffi::av_display_rotation_set(matrix, -(degrees as f64));
+
+    let added = ffi::av_packet_side_data_add(
+        &mut (*codecpar).coded_side_data,
+        &mut (*codecpar).nb_coded_side_data,
+        ffi::AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX,
+        matrix as *mut std::ffi::c_void,
+        MATRIX_BYTES,
+        0,
+    );
+    if added.is_null() {
+        ffi::av_free(matrix as *mut std::ffi::c_void);
+        log::warn!("The muxer refused the display matrix; the recording will not be rotated");
+    } else {
+        log::info!("Recording rotated by {}°", degrees);
+    }
 }
 
 /// Set extradata on a codec parameters struct

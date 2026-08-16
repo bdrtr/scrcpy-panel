@@ -99,8 +99,12 @@ with the opening session header, which every run exercises.
   of `/dev/video9` by ffmpeg at the right size and in the right colours, with and without
   `--v4l2-buffer`. It needs the module first:
   `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
-- Every flag the form can produce — all 79 — now reaches the device; nothing is dropped
-  between the command bar and the session.
+- Of the 74 flags the form can produce, 72 reach the device. The two that do not are
+  `--otg` and `--gamepad`, which need a scancode source and a gamepad source the Slint
+  window does not have; the panel names them as dropped rather than pretending. An earlier
+  version of this line claimed all of them, which was a miscount: the check that produced
+  the number was reading the list of deliberately unimplemented flags in a test as though
+  it were the supported list.
 - `--adb-port` reaches both paths to the daemon: adb's own command line through
   `ANDROID_ADB_SERVER_PORT`, and `src/adb/protocol.rs`, which reads the same variable
   rather than the 5037 it used to hardcode.

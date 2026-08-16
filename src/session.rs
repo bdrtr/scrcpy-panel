@@ -90,6 +90,8 @@ pub struct Session {
     tunnel: adb::tunnel::AdbTunnel,
     no_cleanup: bool,
     kill_adb_on_close: bool,
+    /// --record-orientation, for a recording started after the session is up.
+    record_rotation: u16,
     /// --disable-screensaver, held for the life of the session. It lives here
     /// rather than next to a window so that both the standalone mirror and the
     /// panel's embedded one get it without wiring it twice.
@@ -231,6 +233,7 @@ impl Session {
             tunnel,
             no_cleanup: opts.no_cleanup,
             kill_adb_on_close: opts.kill_adb_on_close,
+            record_rotation: opts.record_rotation(),
             _screensaver: opts.disable_screensaver.then(inhibit_screensaver).flatten(),
         };
 
@@ -287,6 +290,7 @@ impl Session {
                     opts.record_format.clone(),
                     opts.video_enabled(),
                     opts.audio_enabled(),
+                    opts.record_rotation(),
                 );
                 match opts.record_format {
                     Some(ref format) => log::info!("Recording to: {} ({})", path, format),
@@ -383,6 +387,7 @@ impl Session {
             format.map(str::to_string),
             true,
             has_audio,
+            self.record_rotation,
         );
 
         // Seed the queues with the config packets from the top of the stream,

@@ -101,12 +101,33 @@ pub fn display_aspect(frame_width: u32, frame_height: u32, orientation: Orientat
 /// The decoder hands us tightly packed RGB8, so this is a single bulk copy into
 /// the pixel buffer Slint owns. A zero-copy GPU path would import the decoded
 /// surface as a texture instead — see the roadmap in the README.
-pub fn frame_to_image(frame: &DecodedFrame) -> Image {
+///
+/// `flip` is the horizontal mirror of `--display-orientation=flipN`. Slint can
+/// rotate an image but not mirror one, and the rotation is a property either
+/// way, so the flip happens here — a second pass over the frame, and only when
+/// it is asked for.
+pub fn frame_to_image(frame: &DecodedFrame, flip: bool) -> Image {
     let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(frame.width, frame.height);
     let expected = frame.width as usize * frame.height as usize * 3;
     let bytes = buffer.make_mut_bytes();
     let n = expected.min(frame.data.len()).min(bytes.len());
-    bytes[..n].copy_from_slice(&frame.data[..n]);
+
+    if !flip {
+        bytes[..n].copy_from_slice(&frame.data[..n]);
+        return Image::from_rgb8(buffer);
+    }
+
+    let stride = frame.width as usize * 3;
+    for (row, target) in bytes[..n].chunks_exact_mut(stride).enumerate() {
+        let start = row * stride;
+        let Some(source) = frame.data.get(start..start + stride) else {
+            break;
+        };
+        for (x, pixel) in target.chunks_exact_mut(3).enumerate() {
+            let mirrored = (frame.width as usize - 1 - x) * 3;
+            pixel.copy_from_slice(&source[mirrored..mirrored + 3]);
+        }
+    }
     Image::from_rgb8(buffer)
 }
 
