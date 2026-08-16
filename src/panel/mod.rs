@@ -1011,9 +1011,14 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 let on = !cfg.get_record_enabled();
                 cfg.set_record_enabled(on);
                 refresh_command(&window);
+                // An empty path used to be a warning and nothing else, which
+                // made the button useless until the user went and filled a
+                // field in another tab. Name the file for them instead.
+                // Just the base name: the timestamp checkbox is what adds the
+                // stamp, and naming it here as well produced scrcpy-<t>-<t>.mp4.
                 if on && cfg.get_record_path().is_empty() {
-                    panel.warn("Kayıt açıldı ama dosya yolu boş — Kayıt bölümünden doldurun.");
-                    return;
+                    cfg.set_record_path("scrcpy.mp4".into());
+                    refresh_command(&window);
                 }
 
                 // A running embedded session can start and stop recording in

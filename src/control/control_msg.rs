@@ -17,9 +17,15 @@ pub const MSG_ROTATE_DEVICE: u8 = 11;
 pub const MSG_UHID_CREATE: u8 = 12;
 pub const MSG_UHID_INPUT: u8 = 13;
 pub const MSG_UHID_DESTROY: u8 = 14;
-pub const MSG_START_APP: u8 = 15;
-pub const MSG_RESET_VIDEO: u8 = 16;
-pub const MSG_OPEN_HARD_KB_SETTINGS: u8 = 17;
+// These three were shifted against scrcpy's own numbering, in every version:
+// the client sent START_APP where the server expects OPEN_HARD_KEYBOARD_SETTINGS,
+// RESET_VIDEO where it expects START_APP, and so on. Because their payload
+// lengths differ, a mismatch does not merely do the wrong thing — a StartApp
+// name would be read as the next message's type byte, desynchronising the whole
+// control stream. `the_message_ids_match_scrcpy` pins them.
+pub const MSG_OPEN_HARD_KB_SETTINGS: u8 = 15;
+pub const MSG_START_APP: u8 = 16;
+pub const MSG_RESET_VIDEO: u8 = 17;
 
 /// Android motion event: hover
 pub const AMOTION_ACTION_HOVER_MOVE: u8 = 7;
@@ -219,9 +225,15 @@ impl ControlMsg {
             }
             ControlMsg::StartApp { name } => {
                 buf.write_u8(MSG_START_APP)?;
+                // scrcpy writes this one with write_string_tiny: a single length
+                // byte, max 255. A two-byte length shifted everything after it,
+                // and the server read the extra byte as the next message's type
+                // — a package name once arrived as RESIZE_DISPLAY and crashed
+                // the control thread.
                 let bytes = name.as_bytes();
-                buf.write_u16::<BigEndian>(bytes.len() as u16)?;
-                buf.write_all(bytes)?;
+                let len = bytes.len().min(255);
+                buf.write_u8(len as u8)?;
+                buf.write_all(&bytes[..len])?;
             }
             ControlMsg::ResetVideo => {
                 buf.write_u8(MSG_RESET_VIDEO)?;
@@ -231,5 +243,99 @@ impl ControlMsg {
             }
         }
         Ok(buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wire ids, taken from scrcpy's ControlMessage.java. Three of these
+    /// were wrong and the failure was invisible: the device did something
+    /// plausible-looking for another message instead of what was asked.
+    #[test]
+    fn the_message_ids_match_scrcpy() {
+        let expected: [(&str, u8); 18] = [
+            ("INJECT_KEYCODE", MSG_INJECT_KEYCODE),
+            ("INJECT_TEXT", MSG_INJECT_TEXT),
+            ("INJECT_TOUCH_EVENT", MSG_INJECT_TOUCH_EVENT),
+            ("INJECT_SCROLL_EVENT", MSG_INJECT_SCROLL_EVENT),
+            ("BACK_OR_SCREEN_ON", MSG_BACK_OR_SCREEN_ON),
+            ("EXPAND_NOTIFICATION_PANEL", MSG_EXPAND_NOTIFICATION_PANEL),
+            ("EXPAND_SETTINGS_PANEL", MSG_EXPAND_SETTINGS_PANEL),
+            ("COLLAPSE_PANELS", MSG_COLLAPSE_PANELS),
+            ("GET_CLIPBOARD", MSG_GET_CLIPBOARD),
+            ("SET_CLIPBOARD", MSG_SET_CLIPBOARD),
+            ("SET_DISPLAY_POWER", MSG_SET_DISPLAY_POWER),
+            ("ROTATE_DEVICE", MSG_ROTATE_DEVICE),
+            ("UHID_CREATE", MSG_UHID_CREATE),
+            ("UHID_INPUT", MSG_UHID_INPUT),
+            ("UHID_DESTROY", MSG_UHID_DESTROY),
+            ("OPEN_HARD_KEYBOARD_SETTINGS", MSG_OPEN_HARD_KB_SETTINGS),
+            ("START_APP", MSG_START_APP),
+            ("RESET_VIDEO", MSG_RESET_VIDEO),
+        ];
+
+        for (index, (name, id)) in expected.iter().enumerate() {
+            assert_eq!(
+                *id as usize, index,
+                "{name} must be {index}; scrcpy numbers them in this order"
+            );
+        }
+    }
+
+    /// A message with no payload is exactly one byte, so the next message's type
+    /// lands where the server expects it.
+    #[test]
+    fn empty_messages_are_one_byte() {
+        for msg in [
+            ControlMsg::ResetVideo,
+            ControlMsg::OpenHardKeyboardSettings,
+            ControlMsg::RotateDevice,
+            ControlMsg::CollapsePanels,
+        ] {
+            let buf = msg.serialize().expect("serialize");
+            assert_eq!(buf.len(), 1, "{msg:?} should serialise to one byte");
+        }
+    }
+
+    /// scrcpy has two string encodings and picks between them per message:
+    /// a four-byte length for text and clipboard, a single byte for a package
+    /// or UHID name. Using the wrong one shifts every byte after it, and the
+    /// server reads the overflow as another message.
+    #[test]
+    fn start_app_uses_a_one_byte_length() {
+        let name = "org.videolan.vlc";
+        let buf = ControlMsg::StartApp { name: name.into() }
+            .serialize()
+            .expect("serialize");
+
+        assert_eq!(buf[0], MSG_START_APP);
+        assert_eq!(buf[1] as usize, name.len(), "the length must be one byte");
+        assert_eq!(&buf[2..], name.as_bytes());
+        assert_eq!(buf.len(), 2 + name.len());
+    }
+
+    #[test]
+    fn inject_text_uses_a_four_byte_length() {
+        let text = "merhaba";
+        let buf = ControlMsg::InjectText { text: text.into() }
+            .serialize()
+            .expect("serialize");
+
+        assert_eq!(buf[0], MSG_INJECT_TEXT);
+        assert_eq!(
+            u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize,
+            text.len()
+        );
+        assert_eq!(buf.len(), 5 + text.len());
+    }
+
+    #[test]
+    fn a_package_name_longer_than_a_length_byte_is_truncated_not_wrapped() {
+        let name = "a".repeat(300);
+        let buf = ControlMsg::StartApp { name }.serialize().expect("serialize");
+        assert_eq!(buf[1], 255);
+        assert_eq!(buf.len(), 2 + 255);
     }
 }

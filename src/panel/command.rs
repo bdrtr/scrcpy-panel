@@ -668,6 +668,21 @@ mod tests {
         assert!(cfg.effective_record_path().starts_with("/tmp/capture-"));
     }
 
+    /// Ticking a device has to show up in the command, since that is the only
+    /// place the panel tells the user which phone it is about to talk to.
+    #[test]
+    fn a_selected_device_reaches_the_command() {
+        let mut cfg = PanelConfig::default();
+        cfg.serial = "a1683d6b0013".into();
+
+        let line = cfg.to_command_line_for(&["a1683d6b0013".to_string()]);
+        assert_eq!(line, "scrcpy --serial=a1683d6b0013");
+
+        let (accepted, dropped) = cfg.to_client_args();
+        assert_eq!(accepted, vec!["--serial=a1683d6b0013".to_string()]);
+        assert!(dropped.is_empty());
+    }
+
     #[test]
     fn one_device_is_one_command() {
         let mut cfg = PanelConfig::default();

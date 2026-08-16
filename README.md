@@ -62,6 +62,10 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | Several devices selected and started together | implemented, needs a second device to try |
 | `--max-size`, `--max-fps`, `--time-limit` | work |
 | `--list-encoders/-displays/-cameras/-apps` | work |
+| `--start-app` | works — server resolves and launches the package |
+| `--verbosity` | works — server logs at the requested level |
+| `--select-usb` / `--select-tcpip` | work, naming what is connected when nothing matches |
+| `--new-display` with `--no-vd-*` | accepted by the server |
 | scrcpy 4.1 server handshake | works, no unknown-option warnings |
 | Ctrl-C / SIGTERM shutdown | works — pipeline unwinds, no crash |
 

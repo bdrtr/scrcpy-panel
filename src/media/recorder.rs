@@ -257,30 +257,44 @@ unsafe fn open_and_record(
     if ret < 0 { anyhow::bail!("avio_open failed ({})", ret); }
 
     // 3. Wait for config packets → extradata (SPS/PPS for H.264)
+    //
+    // A recording started at launch sees the config packet first, so taking the
+    // head of the queue was enough. A recording started mid-session does not:
+    // media packets are already flowing when the recorder is installed, and the
+    // device only sends a fresh config after the ResetVideo that follows. Those
+    // leading packets belong to a GOP that began before recording and are
+    // undecodable in the file, so drop them until the config arrives — without
+    // it the muxer writes an empty stsd and the file will not open at all.
     {
         let mut s = lock.lock().unwrap();
-        loop {
-            let has_vcfg = vid_idx < 0 || !s.video_queue.is_empty();
-            let has_acfg = !has_audio || !audio_expects_config || !s.audio_queue.is_empty();
-            if (has_vcfg && has_acfg) || s.stopped { break; }
-            s = cvar.wait(s).unwrap();
-        }
 
-        // Video config → extradata
         if vid_idx >= 0 {
-            if let Some(cfg) = s.video_queue.pop_front() {
-                if cfg.pts == AV_NOPTS && !cfg.data.is_empty() {
-                    let vstream_ptr = get_stream(ctx, vid_idx as usize);
-                    set_extradata((*vstream_ptr).codecpar, &cfg.data);
-                } else if cfg.pts != AV_NOPTS {
-                    // Non-config first packet — put it back
-                    s.video_queue.push_front(cfg);
+            let config = loop {
+                let mut found = None;
+                while let Some(packet) = s.video_queue.pop_front() {
+                    if packet.pts == AV_NOPTS && !packet.data.is_empty() {
+                        found = Some(packet);
+                        break;
+                    }
                 }
+                if found.is_some() || s.stopped {
+                    break found;
+                }
+                s = cvar.wait(s).unwrap();
+            };
+            if let Some(config) = config {
+                let vstream_ptr = get_stream(ctx, vid_idx as usize);
+                set_extradata((*vstream_ptr).codecpar, &config.data);
+            } else {
+                log::warn!("Recording stopped before a video config packet arrived");
             }
         }
 
-        // Audio config → extradata
+        // Audio config → extradata, same reasoning as above.
         if has_audio && audio_expects_config && aud_idx >= 0 {
+            while s.audio_queue.is_empty() && !s.stopped {
+                s = cvar.wait(s).unwrap();
+            }
             if let Some(cfg) = s.audio_queue.pop_front() {
                 if cfg.pts == AV_NOPTS && !cfg.data.is_empty() {
                     let astream_ptr = get_stream(ctx, aud_idx as usize);
