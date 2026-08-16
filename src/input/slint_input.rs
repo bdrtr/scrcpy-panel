@@ -243,6 +243,8 @@ pub struct SlintInput {
     /// --keyboard=uhid: the keys travel as HID reports built from their
     /// physical positions, so nothing here may inject them a second time.
     uhid: bool,
+    /// --mouse=uhid: the pointer travels the same way, as relative motion.
+    uhid_mouse: bool,
     /// Which axes the second finger is mirrored through, for as long as it is
     /// down: the modifiers are read once, when it goes down.
     vfinger_invert: (bool, bool),
@@ -274,6 +276,7 @@ impl SlintInput {
             mouse_hover: true,
             camera: false,
             uhid: false,
+            uhid_mouse: false,
             vfinger_invert: (true, true),
         }
     }
@@ -289,6 +292,13 @@ impl SlintInput {
     /// as a HID report.
     pub fn set_uhid_keyboard(&mut self, uhid: bool) {
         self.uhid = uhid;
+    }
+
+    /// --mouse=uhid. The pointer is the winit handler's while the device has
+    /// it, and the computer's while it does not; either way nothing is
+    /// injected from here.
+    pub fn set_uhid_mouse(&mut self, uhid: bool) {
+        self.uhid_mouse = uhid;
     }
 
     pub fn set_frame_size(&mut self, width: u32, height: u32) {
@@ -372,8 +382,9 @@ impl SlintInput {
     ) {
         self.alt_held = alt;
         // A camera has nothing to touch, and the server ends the control
-        // channel over a touch it did not expect.
-        if self.camera {
+        // channel over a touch it did not expect. A UHID pointer is already on
+        // its way as a report of its own.
+        if self.camera || self.uhid_mouse {
             return;
         }
         let (x, y) = self.to_frame(u, v);
@@ -436,7 +447,7 @@ impl SlintInput {
     }
 
     pub fn pointer_up(&mut self, u: f32, v: f32, button: i32, controller: &Controller) {
-        if button != BUTTON_LEFT || self.camera {
+        if button != BUTTON_LEFT || self.camera || self.uhid_mouse {
             return;
         }
         let (x, y) = self.to_frame(u, v);
@@ -450,7 +461,7 @@ impl SlintInput {
     }
 
     pub fn pointer_moved(&mut self, u: f32, v: f32, pressed: bool, controller: &Controller) {
-        if self.camera || (!pressed && !self.mouse_hover) {
+        if self.camera || self.uhid_mouse || (!pressed && !self.mouse_hover) {
             return;
         }
         let (x, y) = self.to_frame(u, v);
@@ -473,7 +484,7 @@ impl SlintInput {
     }
 
     pub fn pointer_scroll(&mut self, u: f32, v: f32, dx: f32, dy: f32, controller: &Controller) {
-        if self.camera {
+        if self.camera || self.uhid_mouse {
             return;
         }
         let (x, y) = self.to_frame(u, v);

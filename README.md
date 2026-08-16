@@ -90,9 +90,10 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | SCAN_FILE after a push | accepted — a POWER keycode sent straight after it still reached the device, so the control channel survived the message |
 | Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
 | `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
+| `--mouse=uhid` | works — the device it adds has REL_X, REL_Y and the two wheels; a report of 30,30 came out of the phone's kernel as `REL_X 0x1e`, `REL_Y 0x1e`, and a click as `BTN_MOUSE DOWN`/`UP`. The pointer moving on this desk arrived the same way, 655 relative events in fourteen seconds |
 
 `--keyboard=uhid` was verified in two halves, because nothing here can type into its own
-window and be believed. The half above the client: keys pressed in the panel window arrived
+window and be believed. (The mouse needed no such split: the pointer was already moving.) The half above the client: keys pressed in the panel window arrived
 at the winit handler as positions — `Code(KeyA)`, `Code(KeyS)`, `Code(KeyD)`, pressed and
 released, not synthetic. The half below it, on the Redmi over USB: HID reports for usages
 0x08, 0x09 and 0x0A came out of the device's own kernel as `KEY_E`, `KEY_F` and `KEY_G`,
@@ -118,19 +119,27 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   `--capture-orientation`, which takes degrees with an optional `@` to lock.
 - The upstream README understates the code: it lists far fewer flags than `--help` actually
   accepts, and marks recording as "Phase 2" although it works.
-- **`--keyboard=uhid` works now; the mouse and OTG do not yet.** This entry used to say
+- **`--keyboard=uhid` and `--mouse=uhid` work now; OTG does not.** This entry used to say
   the position of a key was out of reach, because Slint reports keys as text and deriving a
   position from a character would apply the layout twice — which is the one thing UHID
   exists to avoid. The position was there all along, one layer down: Slint runs on winit,
   and `BackendSelector::with_winit_custom_application_handler` hands the raw winit events
-  to a handler of one's own, `physical_key` and all. `src/input/uhid.rs` turns those into
-  the HID reports `hid_keyboard.rs` was already able to build, and the device applies its
-  own layout to them. The events are passed on rather than swallowed, so Slint keeps the
-  modifier state its shortcut layer reads; what stops a key arriving twice is that
-  `SlintInput` injects nothing while UHID is attached. A UHID mouse is the same shape of
-  problem and no longer a blocked one — winit's `DeviceEvent::MouseMotion` is the raw
-  motion it wants — but it is not written yet. OTG is still out: it needs USB and AOA
-  rather than a control socket.
+  to a handler of one's own — `physical_key` on the keyboard side, `DeviceEvent::MouseMotion`
+  on the other. `src/input/uhid.rs` turns those into the HID reports `hid_keyboard.rs` and
+  `hid_mouse.rs` were already able to build, and the device applies its own layout and its
+  own pointer acceleration to them. The events are passed on rather than swallowed, so
+  Slint keeps the modifier state its shortcut layer reads; what stops an input arriving
+  twice is that `SlintInput` sends nothing to the device while UHID is attached. OTG is
+  still out: it needs USB and AOA rather than a control socket, and so does `--gamepad`,
+  which additionally has no source — winit reports no gamepads.
+- A UHID mouse is a relative mouse, so the pointer is captured while it runs, as it is in
+  scrcpy: the window locks it where the compositor allows that and confines it to the
+  window where it does not. LAlt, LSuper or RSuper give it back, and take it again. The
+  rule for that is stricter here than upstream's: a capture key counts only when it is
+  pressed and released with *nothing* in between, because LAlt is both a capture key and
+  the usual shortcut modifier, and MOD+f should not hand over the mouse on its way to
+  fullscreen. Losing the window's focus gives the pointer back as well — a grab that
+  outlives the focus is how a desktop ends up with a mouse nobody can move.
 - `--v4l2-sink` publishes the mirror as a webcam: `VIDIOC_S_FMT` once, then a write per
   frame. Verified end to end against a loopback device — the phone's screen read back out
   of `/dev/video9` by ffmpeg at the right size and in the right colours, with and without
@@ -302,8 +311,8 @@ curl -L -o target/release/scrcpy-server \
 3. ~~Embed the mirror in the panel~~ — done; Ayarlar switches between embedded and a
    window of its own
 4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, pinned to 4.1
-5. Get input parity back: ~~UHID keyboard~~ — done, through winit's raw key events; a UHID
-   mouse is next, and AOA and gamepads after it
+5. Get input parity back: ~~UHID keyboard and mouse~~ — done, through winit's raw events;
+   AOA and gamepads need USB and a gamepad source, and are what is left
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
 7. GPU frame path (Slint's `unstable-wgpu-29` texture import) to remove the per-frame copies
 8. Fill in what upstream left out: ~~virtual display (`--new-display`)~~ and ~~the rest of

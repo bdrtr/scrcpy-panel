@@ -83,7 +83,7 @@ struct Panel {
     camera_session: std::cell::Cell<bool>,
     /// The UHID keyboard, installed with the backend before any window exists
     /// and given a device only when an embedded session asks for --keyboard=uhid.
-    uhid: RefCell<Option<crate::input::uhid::UhidKeyboard>>,
+    uhid: RefCell<Option<crate::input::uhid::UhidInput>>,
     /// Refreshes the Ölçümler table once a second.
     metrics_timer: RefCell<Option<slint::Timer>>,
     started_at: std::cell::Cell<Option<std::time::Instant>>,
@@ -1455,15 +1455,17 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
 
             let weak_panel = Rc::downgrade(panel);
             let panel_for_quit = Rc::downgrade(panel);
-            let mut uhid_attached = false;
-            if opts.keyboard == "uhid" {
+            let mut uhid_keyboard = false;
+            let mut uhid_mouse = false;
+            if opts.keyboard == "uhid" || opts.mouse == "uhid" {
                 match (panel.uhid.borrow().as_ref(), controller.as_ref()) {
                     (Some(uhid), Some(controller)) => {
-                        uhid.attach(controller.clone(), &opts.shortcut_mod);
-                        uhid_attached = true;
+                        uhid.attach(controller.clone(), opts);
+                        uhid_keyboard = uhid.keyboard_attached();
+                        uhid_mouse = uhid.mouse_attached();
                     }
                     (None, _) => panel.warn(&tr!(
-                        "UHID klavye için winit arka ucu gerekiyor; SDK enjeksiyonuna dönüldü."
+                        "UHID girdi için winit arka ucu gerekiyor; SDK enjeksiyonuna dönüldü."
                     )),
                     (_, None) => {}
                 }
@@ -1496,8 +1498,10 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
                     }
                 },
             );
-            if uhid_attached {
-                attachment.input.borrow_mut().set_uhid_keyboard(true);
+            if uhid_keyboard || uhid_mouse {
+                let mut input = attachment.input.borrow_mut();
+                input.set_uhid_keyboard(uhid_keyboard);
+                input.set_uhid_mouse(uhid_mouse);
             }
             start_metrics(panel, &attachment);
             *panel.attachment.borrow_mut() = Some(attachment);

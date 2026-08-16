@@ -21,7 +21,7 @@ use std::rc::Rc;
 
 use control::control_msg::ControlMsg;
 use input::slint_input::WindowAction;
-use input::uhid::UhidKeyboard;
+use input::uhid::UhidInput;
 use mirror_host::{
     attach, optimal_window_size, start_audio, FlexDisplay, MirrorUpdate, FLEX_POLL_INTERVAL,
 };
@@ -118,8 +118,8 @@ pub fn watch_for_interrupt(reason: Rc<Cell<&'static str>>) -> slint::Timer {
 ///
 /// `--keyboard=uhid` wants the raw winit events, which is where a key's
 /// physical position is; see `input/uhid.rs`.
-pub fn select_backend(opts: &Options, uhid_wanted: bool) -> Option<UhidKeyboard> {
-    let uhid = uhid_wanted.then(|| UhidKeyboard::new(&opts.shortcut_mod));
+pub fn select_backend(opts: &Options, uhid_wanted: bool) -> Option<UhidInput> {
+    let uhid = uhid_wanted.then(UhidInput::new);
     if !opts.always_on_top && uhid.is_none() {
         return None;
     }
@@ -148,7 +148,10 @@ pub fn select_backend(opts: &Options, uhid_wanted: bool) -> Option<UhidKeyboard>
         Err(e) => {
             log::warn!("The winit backend could not be configured: {e}");
             if uhid.is_some() {
-                log::warn!("--keyboard=uhid needs it, so keys will go as SDK injection instead");
+                log::warn!(
+                    "--keyboard=uhid and --mouse=uhid need it, so input will go as SDK \
+                     injection instead"
+                );
                 return None;
             }
         }
@@ -254,18 +257,12 @@ fn run(opts: Options) -> Result<()> {
              the sink will stop at the first resize"
         );
     }
-    if opts.mouse != "sdk" {
-        log::warn!(
-            "--mouse={}: the pointer still goes as SDK injection — a UHID mouse wants \
-             raw motion, which is the next thing to take from winit",
-            opts.mouse
-        );
-    }
-    if opts.keyboard != "sdk" && opts.keyboard != "uhid" {
-        log::warn!(
-            "--keyboard={}: only SDK injection and UHID are available, falling back to SDK",
-            opts.keyboard
-        );
+    for (name, mode) in [("--keyboard", &opts.keyboard), ("--mouse", &opts.mouse)] {
+        if mode != "sdk" && mode != "uhid" && mode != "disabled" {
+            log::warn!(
+                "{name}={mode}: only SDK injection and UHID are available, falling back to SDK"
+            );
+        }
     }
 
     let mut session = session::Session::start(&opts)?;
@@ -311,7 +308,7 @@ fn run(opts: Options) -> Result<()> {
 
     // The backend has to be chosen before any window exists, and both
     // --always-on-top and --keyboard=uhid want something from it.
-    let uhid = select_backend(&opts, opts.keyboard == "uhid");
+    let uhid = select_backend(&opts, opts.keyboard == "uhid" || opts.mouse == "uhid");
 
     let window = MirrorWindow::new().context("Failed to create the Slint window")?;
     window.set_borderless(opts.borderless);
@@ -355,10 +352,10 @@ fn run(opts: Options) -> Result<()> {
     // own that have nothing to do with input.
     let controller = session.controller.take().map(Rc::new);
 
-    // The UHID keyboard needs a device to type on, which is only now that the
+    // The UHID devices need something to reach, which is only now that the
     // control channel is up.
     if let (Some(uhid), Some(controller)) = (uhid.as_ref(), controller.as_ref()) {
-        uhid.attach(controller.clone(), &opts.shortcut_mod);
+        uhid.attach(controller.clone(), &opts);
     }
 
     let attachment = {
@@ -406,9 +403,11 @@ fn run(opts: Options) -> Result<()> {
         )
     };
 
-    // Nothing may inject a key that is already on its way as a HID report.
-    if uhid.is_some() {
-        attachment.input.borrow_mut().set_uhid_keyboard(true);
+    // Nothing may inject an input that is already on its way as a HID report.
+    if let Some(ref uhid) = uhid {
+        let mut input = attachment.input.borrow_mut();
+        input.set_uhid_keyboard(uhid.keyboard_attached());
+        input.set_uhid_mouse(uhid.mouse_attached());
     }
 
     // --flex-display: the device's display follows the window, which means
