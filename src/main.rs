@@ -15,6 +15,7 @@ mod util;
 use anyhow::{Context, Result};
 use clap::Parser;
 use slint::ComponentHandle;
+use std::cell::Cell;
 use std::rc::Rc;
 
 use input::slint_input::WindowAction;
@@ -68,14 +69,14 @@ fn install_signal_handlers() {
 }
 
 /// Poll the signal flag and leave the event loop when it is set.
-pub fn watch_for_interrupt() -> slint::Timer {
+pub fn watch_for_interrupt(reason: Rc<Cell<&'static str>>) -> slint::Timer {
     let timer = slint::Timer::default();
     timer.start(
         slint::TimerMode::Repeated,
         std::time::Duration::from_millis(200),
-        || {
+        move || {
             if SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
-                log::info!("Interrupted");
+                reason.set("an interrupt");
                 let _ = slint::quit_event_loop();
             }
         },
@@ -143,6 +144,12 @@ fn run(opts: Options) -> Result<()> {
         session.shutdown();
         return Ok(());
     };
+
+    // Why the loop ended, so the shutdown line does not have to be read by
+    // elimination. Every path out of the loop names itself; a run that names
+    // none of them was closed by the user or the compositor. The signal handler
+    // is the exception — it logs "Interrupted" of its own accord.
+    let reason = Rc::new(Cell::new("the window closing"));
 
     let orientation = Orientation::from_degrees(opts.orientation);
     let (frame_w, frame_h) = (video.info.width, video.info.height);
@@ -223,9 +230,12 @@ fn run(opts: Options) -> Result<()> {
                     _ => {}
                 }
             },
-            || {
-                log::info!("Video stream ended");
-                let _ = slint::quit_event_loop();
+            {
+                let reason = reason.clone();
+                move || {
+                    reason.set("the end of the video stream");
+                    let _ = slint::quit_event_loop();
+                }
             },
         )
     };
@@ -238,19 +248,22 @@ fn run(opts: Options) -> Result<()> {
         time_limit.start(
             slint::TimerMode::SingleShot,
             std::time::Duration::from_secs(seconds as u64),
-            || {
-                log::info!("Time limit reached");
-                let _ = slint::quit_event_loop();
+            {
+                let reason = reason.clone();
+                move || {
+                    reason.set("the time limit");
+                    let _ = slint::quit_event_loop();
+                }
             },
         );
     }
 
-    let interrupt = watch_for_interrupt();
+    let interrupt = watch_for_interrupt(reason.clone());
 
     log::info!("Entering Slint event loop...");
     window.run().context("Slint event loop failed")?;
 
-    log::info!("Shutting down...");
+    log::info!("Shutting down after {}...", reason.get());
     drop(interrupt);
     drop(time_limit);
     // Dropping the attachment stops the pump and releases the frame channel,
