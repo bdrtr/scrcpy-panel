@@ -133,6 +133,18 @@ pub struct Options {
     #[arg(long, default_value = "false")]
     pub no_power_on: bool,
 
+    /// Buffer the V4L2 output by this many milliseconds
+    #[arg(long, default_value = "0")]
+    pub v4l2_buffer: u32,
+
+    /// IP of the adb tunnel reaching the server (implies --force-adb-forward)
+    #[arg(long)]
+    pub tunnel_host: Option<String>,
+
+    /// Port of the adb tunnel reaching the server (implies --force-adb-forward)
+    #[arg(long)]
+    pub tunnel_port: Option<u16>,
+
     /// Server log level: debug, info, warn, error
     #[arg(long, default_value = "info")]
     pub verbosity: String,

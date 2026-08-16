@@ -88,17 +88,27 @@ mod linux {
             as libc::c_ulong
     }
 
+    /// A frame waiting out `--v4l2-buffer`.
+    struct Delayed {
+        due: std::time::Instant,
+        rgb: Vec<u8>,
+    }
+
     pub struct V4l2Sink {
         device: String,
         fd: RawFd,
         frame_bytes: usize,
         width: u32,
         height: u32,
+        /// --v4l2-buffer: hold frames this long before publishing them, for
+        /// consumers that are behind the mirror window.
+        delay: std::time::Duration,
+        queue: std::cell::RefCell<std::collections::VecDeque<Delayed>>,
     }
 
     impl V4l2Sink {
         /// Open a loopback device and negotiate RGB24 at this size.
-        pub fn open(device: &str, width: u32, height: u32) -> Result<Self> {
+        pub fn open(device: &str, width: u32, height: u32, buffer_ms: u32) -> Result<Self> {
             let file = OpenOptions::new()
                 .write(true)
                 .read(true)
@@ -131,13 +141,19 @@ mod linux {
                 bail!("VIDIOC_S_FMT on {device} failed: {error}");
             }
 
-            log::info!("V4L2 sink: {device} at {width}x{height} RGB24");
+            if buffer_ms > 0 {
+                log::info!("V4L2 sink: {device} at {width}x{height} RGB24, {buffer_ms} ms buffer");
+            } else {
+                log::info!("V4L2 sink: {device} at {width}x{height} RGB24");
+            }
             Ok(Self {
                 device: device.to_string(),
                 fd,
                 frame_bytes: sizeimage as usize,
                 width,
                 height,
+                delay: std::time::Duration::from_millis(buffer_ms as u64),
+                queue: std::cell::RefCell::new(std::collections::VecDeque::new()),
             })
         }
 
@@ -153,7 +169,7 @@ mod linux {
             &self.device
         }
 
-        /// Write one packed RGB24 frame.
+        /// Publish one packed RGB24 frame, honouring `--v4l2-buffer`.
         pub fn write_frame(&self, rgb: &[u8]) -> bool {
             if rgb.len() < self.frame_bytes {
                 log::warn!(
@@ -163,6 +179,35 @@ mod linux {
                 );
                 return false;
             }
+
+            if self.delay.is_zero() {
+                return self.write_now(rgb);
+            }
+
+            let mut queue = self.queue.borrow_mut();
+            queue.push_back(Delayed {
+                due: std::time::Instant::now() + self.delay,
+                rgb: rgb[..self.frame_bytes].to_vec(),
+            });
+
+            // A frame is several megabytes, so the queue is capped by frame
+            // count as well as by time: a stalled consumer must not grow it
+            // without bound.
+            const MAX_QUEUED: usize = 16;
+            while queue.len() > MAX_QUEUED {
+                queue.pop_front();
+            }
+
+            let now = std::time::Instant::now();
+            let mut wrote = false;
+            while queue.front().is_some_and(|frame| frame.due <= now) {
+                let frame = queue.pop_front().expect("front was just checked");
+                wrote |= self.write_now(&frame.rgb);
+            }
+            wrote
+        }
+
+        fn write_now(&self, rgb: &[u8]) -> bool {
             let written = unsafe {
                 libc::write(
                     self.fd,

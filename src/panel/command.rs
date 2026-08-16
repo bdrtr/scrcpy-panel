@@ -248,6 +248,7 @@ const SUPPORTED: &[&str] = &[
     "--audio-buffer",
     "--no-audio",
     "--v4l2-sink",
+    "--v4l2-buffer",
     "--no-audio-playback",
     "--no-video-playback",
     "--no-playback",
@@ -267,6 +268,8 @@ const SUPPORTED: &[&str] = &[
     "--prefer-text",
     "--raw-key-events",
     "--verbosity",
+    "--tunnel-host",
+    "--tunnel-port",
     "--port",
     "--select-usb",
     "--select-tcpip",
@@ -638,13 +641,13 @@ mod tests {
     fn unsupported_flags_are_reported_rather_than_passed_on() {
         let mut cfg = PanelConfig::default();
         cfg.max_size = "800".into();          // supported
-        cfg.otg = true;                       // needs USB/AOA, not implemented
-        cfg.tunnel_host = "10.0.0.1".into();  // remote adb server, not implemented
+        cfg.otg = true;                    // needs USB/AOA, not implemented
+        cfg.gamepad = "uhid".into();       // no gamepad source on the Slint side
 
         let (accepted, dropped) = cfg.to_client_args();
         assert_eq!(accepted, vec!["--max-size=800".to_string()]);
         assert!(dropped.contains(&"--otg".to_string()));
-        assert!(dropped.contains(&"--tunnel-host=10.0.0.1".to_string()));
+        assert!(dropped.contains(&"--gamepad=uhid".to_string()));
     }
 
     #[test]

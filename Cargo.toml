@@ -9,6 +9,9 @@ repository = "https://github.com/bdrtr/scrcpy-panel"
 [dependencies]
 cpal = "0.18"
 arboard = { version = "3.6", features = ["wayland-data-control"] }
+# The desktop's own file chooser, over the XDG portal rather than GTK, so this
+# stays a Wayland-native dialog with no toolkit linked in.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 ffmpeg-next = "9"
 ffmpeg-sys-next = "9"
 clap = { version = "4", features = ["derive", "env"] }

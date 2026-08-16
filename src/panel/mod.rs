@@ -1094,6 +1094,30 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
         });
     }
     {
+        let weak = window.as_weak();
+        app.on_push_files(move || {
+            let serial = weak
+                .upgrade()
+                .map(|window| window.global::<Cfg>().get_serial().to_string())
+                .unwrap_or_default();
+            let weak = weak.clone();
+            // Both the dialog and the copy block for as long as the user and
+            // the cable take, which on the event loop would freeze the panel.
+            std::thread::spawn(move || {
+                let Some(paths) = rfd::FileDialog::new()
+                    .set_title("Cihaza gönderilecek dosyalar")
+                    .pick_files()
+                else {
+                    return;
+                };
+                report(&weak, &format!("{} dosya gönderiliyor…", paths.len()));
+                for path in paths {
+                    report(&weak, &transfer_file(&serial, &path));
+                }
+            });
+        });
+    }
+    {
         let panel = panel.clone();
         app.on_send_clipboard(move || {
             let text = crate::input::slint_input::get_clipboard_text();
@@ -1723,6 +1747,78 @@ fn stop_session(panel: &Rc<Panel>) {
     } else {
         panel.warn("Çalışan bir oturum yok.");
     }
+}
+
+/// Where a pushed file lands, matching scrcpy's own default.
+const PUSH_TARGET: &str = "/sdcard/Download/";
+
+/// Install an APK, or push anything else to the device.
+///
+/// This is what scrcpy does when a file is dropped on the mirror. Slint's
+/// DataTransfer exposes no file paths, so the panel asks for them with a file
+/// chooser and does the same two things with the answer.
+fn transfer_file(serial: &str, path: &std::path::Path) -> String {
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let is_apk = path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("apk"));
+
+    let mut command = adb();
+    if !serial.is_empty() {
+        command.args(["-s", serial]);
+    }
+    if is_apk {
+        command.arg("install").arg("-r").arg(path);
+    } else {
+        command.arg("push").arg(path).arg(PUSH_TARGET);
+    }
+
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(e) => return format!("ERROR adb çalıştırılamadı: {e}"),
+    };
+
+    // `adb install` reports a refused install on stdout and still exits 0, so
+    // the exit status alone would call a failed install a success.
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let failed = !output.status.success()
+        || said.contains("Failure")
+        || said.contains("error:")
+        || said.contains("adb: ");
+
+    if failed {
+        let why = said
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("bilinmeyen hata")
+            .trim();
+        let what = if is_apk { "Kurulamadı" } else { "Gönderilemedi" };
+        format!("ERROR {what}: {name} — {why}")
+    } else if is_apk {
+        format!("Kuruldu: {name}")
+    } else {
+        format!("Gönderildi: {name} → {PUSH_TARGET}")
+    }
+}
+
+/// Put a line in the panel's log from a worker thread.
+fn report(weak: &slint::Weak<PanelWindow>, line: &str) {
+    let weak = weak.clone();
+    let line = line.to_string();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(window) = weak.upgrade() {
+            append_log(&window, &line);
+        }
+    });
 }
 
 fn append_log(window: &PanelWindow, line: &str) {

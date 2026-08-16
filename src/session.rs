@@ -119,14 +119,23 @@ impl Session {
 
         let scid: u32 = random_scid();
 
+        // A tunnel that reaches another machine's adb cannot be a reverse one:
+        // the device would connect back to itself. scrcpy forces forward mode
+        // for the same reason.
+        let remote_tunnel = opts.tunnel_host.is_some() || opts.tunnel_port.is_some();
+        if remote_tunnel && !opts.force_adb_forward {
+            log::info!("--tunnel-host/--tunnel-port given, using forward mode");
+        }
+
         let tunnel = adb::tunnel::AdbTunnel::open(
             &serial,
             scid,
             opts.port_range_parsed(),
-            opts.force_adb_forward,
+            opts.force_adb_forward || remote_tunnel,
         )
         .context("Failed to open ADB tunnel")?;
-        let port = tunnel.port();
+        let tunnel_host = opts.tunnel_host.as_deref().unwrap_or("127.0.0.1").to_string();
+        let port = opts.tunnel_port.unwrap_or_else(|| tunnel.port());
         let is_reverse = tunnel.is_reverse();
 
         // In reverse mode the listener has to exist before the server starts.
@@ -136,7 +145,7 @@ impl Session {
             None
         };
 
-        let server_args = server::params::build_server_args(opts, scid, port);
+        let server_args = server::params::build_server_args(opts, scid, port, !is_reverse);
         let server_cmd = server::params::build_server_command(&server_args);
         let cmd_strs: Vec<&str> = server_cmd.iter().map(|s| s.as_str()).collect();
 
@@ -147,6 +156,7 @@ impl Session {
         log::info!("Connecting to server...");
         let (video_socket, audio_socket, control_socket, device_info) =
             server::connection::connect_sockets(
+                &tunnel_host,
                 port,
                 is_reverse,
                 listener,

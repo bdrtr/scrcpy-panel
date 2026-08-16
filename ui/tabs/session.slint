@@ -335,9 +335,13 @@ export component TabSession inherits VerticalLayout {
                 // Aktarım
                 Kicker { text: "AKTARIM"; }
 
+                // Slint's DataTransfer carries no file paths, so there is
+                // nothing to drop onto. Clicking opens the desktop's file
+                // chooser instead, which reaches the same place.
                 Rectangle {
                     border-width: 2px;
-                    border-color: Theme.divider;
+                    border-color: pick.has-hover ? Theme.accent : Theme.divider;
+                    background: pick.has-hover ? Theme.accent-100 : transparent;
 
                     VerticalLayout {
                         padding-left: Theme.s4;
@@ -347,17 +351,22 @@ export component TabSession inherits VerticalLayout {
                         spacing: 4px;
 
                         Text {
-                            text: "Dosyayı buraya bırakın";
+                            text: "Dosya seçmek için tıklayın";
                             font-size: 13px;
                             font-weight: 600;
-                            color: Theme.text;
+                            color: pick.has-hover ? Theme.accent-700 : Theme.text;
                         }
                         Text {
-                            text: "APK bırakılırsa kurulur, diğer dosyalar /sdcard/Download altına gönderilir.";
+                            text: "APK seçilirse kurulur, diğer dosyalar /sdcard/Download altına gönderilir.";
                             font-size: 12px;
                             color: Theme.neutral-700;
                             wrap: word-wrap;
                         }
+                    }
+
+                    pick := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { App.push-files(); }
                     }
                 }
 

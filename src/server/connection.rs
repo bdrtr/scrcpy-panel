@@ -44,7 +44,13 @@ fn accept_with_timeout(listener: &TcpListener, timeout: Duration) -> Result<TcpS
 
 /// Connect to the server in forward mode (we connect to device)
 pub fn connect_to_server(port: u16, attempts: u32) -> Result<TcpStream> {
-    let addr = format!("127.0.0.1:{}", port);
+    connect_to_server_at("127.0.0.1", port, attempts)
+}
+
+/// The same, against a chosen host — `--tunnel-host` points this at another
+/// machine's adb, which is why forward mode is the only one that can work there.
+pub fn connect_to_server_at(host: &str, port: u16, attempts: u32) -> Result<TcpStream> {
+    let addr = format!("{}:{}", host, port);
     for i in 0..attempts {
         log::debug!("Connecting to server attempt {}/{}...", i + 1, attempts);
         match TcpStream::connect(&addr) {
@@ -58,6 +64,39 @@ pub fn connect_to_server(port: u16, attempts: u32) -> Result<TcpStream> {
         }
     }
     bail!("Could not connect to server on port {}", port)
+}
+
+/// Connect in forward mode, confirming the server is really there.
+///
+/// `adb forward` accepts a connection whether or not anything is listening on
+/// the device end, so a bare `connect` proves nothing: it succeeds, and the
+/// first read then hits EOF. The server writes one byte as soon as it accepts,
+/// so reading that byte is what actually tells us the connection landed. Only
+/// the first socket does this — once it answers, the server is up and the
+/// remaining sockets can connect straight away.
+fn connect_and_read_dummy_byte(host: &str, port: u16, attempts: u32) -> Result<TcpStream> {
+    let addr = format!("{}:{}", host, port);
+    for i in 0..attempts {
+        log::debug!("Connecting to server attempt {}/{}...", i + 1, attempts);
+        if let Ok(mut stream) = TcpStream::connect(&addr) {
+            stream.set_nodelay(true)?;
+            // Bounded so a tunnel that connects but never answers cannot hang
+            // the client; a live server sends the byte the moment it accepts.
+            stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+            let mut dummy = [0u8; 1];
+            match stream.read(&mut dummy) {
+                Ok(1) => {
+                    stream.set_read_timeout(None)?;
+                    return Ok(stream);
+                }
+                // Ok(0) is EOF: the tunnel is up but the server is not listening
+                // yet. Anything else is the same story with a different error.
+                _ => drop(stream),
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    bail!("Could not connect to server on {}:{}", host, port)
 }
 
 /// Pre-bind a listener for reverse mode. Must be called BEFORE starting the server.
@@ -74,7 +113,9 @@ pub fn bind_listener(port: u16) -> Result<TcpListener> {
 ///
 /// For reverse mode, pass a pre-bound listener (created before server start).
 /// For forward mode, pass None.
+#[allow(clippy::too_many_arguments)]
 pub fn connect_sockets(
+    host: &str,
     port: u16,
     is_reverse: bool,
     listener: Option<TcpListener>,
@@ -107,7 +148,11 @@ pub fn connect_sockets(
     } else {
         for i in 0..socket_count {
             log::debug!("Connecting socket {}/{}...", i + 1, socket_count);
-            let stream = connect_to_server(port, 100)?;
+            let stream = if i == 0 {
+                connect_and_read_dummy_byte(host, port, 100)?
+            } else {
+                connect_to_server_at(host, port, 100)?
+            };
             sockets.push(stream);
         }
     }

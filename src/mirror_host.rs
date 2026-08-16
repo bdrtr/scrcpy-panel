@@ -143,7 +143,7 @@ pub fn attach(
     // here rather than in the session keeps the file descriptor next to the
     // frames it consumes.
     let v4l2 = opts.v4l2_sink.as_deref().and_then(|device| {
-        match V4l2Sink::open(device, video.info.width, video.info.height) {
+        match V4l2Sink::open(device, video.info.width, video.info.height, opts.v4l2_buffer) {
             Ok(sink) => Some(sink),
             Err(e) => {
                 log::warn!("V4L2 sink unavailable: {:#}", e);

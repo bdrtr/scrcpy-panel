@@ -1,11 +1,20 @@
 use crate::options::Options;
 
 /// Build the shell command-line arguments for the scrcpy server
-pub fn build_server_args(opts: &Options, scid: u32, tunnel_port: u16) -> Vec<String> {
+///
+/// `tunnel_forward` is the tunnel we actually opened, not the flag that asked
+/// for one: `open` falls back to forward when `adb reverse` is refused, and a
+/// server told the wrong direction waits for a connection that never comes.
+pub fn build_server_args(
+    opts: &Options,
+    scid: u32,
+    tunnel_port: u16,
+    tunnel_forward: bool,
+) -> Vec<String> {
     let mut args = vec![
         format!("scid={:08x}", scid),
         format!("log_level={}", opts.verbosity),
-        format!("tunnel_forward={}", opts.force_adb_forward),
+        format!("tunnel_forward={}", tunnel_forward),
     ];
 
     if opts.video_enabled() {
