@@ -68,6 +68,34 @@ pub struct Options {
     #[arg(long, alias = "window-borderless", default_value = "false")]
     pub borderless: bool,
 
+    /// How the picture fits the window: letterbox, stretched or unscaled
+    ///
+    /// Unset means letterbox, or unscaled alongside --flex-display, where the
+    /// display is the size of the window already.
+    #[arg(long, value_parser = ["letterbox", "stretched", "unscaled"])]
+    pub render_fit: Option<String>,
+
+    /// Colour behind and around the picture, as #RGB or #RRGGBB
+    #[arg(long, value_parser = hex_colour)]
+    pub background_color: Option<String>,
+
+    /// Do not name the terminal after the session
+    #[arg(long, default_value = "false")]
+    pub no_terminal_title: bool,
+
+    /// Wait for a keypress before exiting: true, false or if-error
+    ///
+    /// A terminal that closes with the process takes the last message with it,
+    /// which is what this is for. The flag on its own means "true".
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_value = "false",
+        default_missing_value = "true",
+        value_parser = ["true", "false", "if-error"]
+    )]
+    pub pause_on_exit: String,
+
     /// Record to file
     #[arg(short = 'r', long)]
     pub record: Option<String>,
@@ -128,6 +156,13 @@ pub struct Options {
     /// Keep the device awake while plugged in
     #[arg(short = 'w', long, default_value = "false")]
     pub stay_awake: bool,
+
+    /// Keep the screen on by simulating user activity
+    ///
+    /// Unlike --stay-awake this does not need the device to be charging: the
+    /// server pokes the activity timer instead of holding a wake lock.
+    #[arg(long, default_value = "false")]
+    pub keep_active: bool,
 
     /// Turn the device power on at start
     #[arg(long, default_value = "true")]
@@ -382,9 +417,17 @@ pub struct Options {
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     pub new_display: Option<String>,
 
+    /// Resize the virtual display to follow the window
+    #[arg(short = 'x', long, default_value = "false")]
+    pub flex_display: bool,
+
     /// Capture video for recording but don't display it
     #[arg(long, default_value = "false")]
     pub no_video_playback: bool,
+
+    /// Run with no window at all, which implies --no-video-playback
+    #[arg(long, default_value = "false")]
+    pub no_window: bool,
 
     /// Disable audio playback on the computer (still decoded for recording)
     #[arg(long, default_value = "false")]
@@ -418,6 +461,21 @@ pub struct Options {
     #[arg(long, default_value = "true")]
     pub downsize_on_error: bool,
 
+    /// Do not reduce the video resolution when the encoder fails
+    #[arg(long, default_value = "false")]
+    pub no_downsize_on_error: bool,
+
+    /// Minimum video size alignment: 1, 2, 4, 8 or 16
+    ///
+    /// The width and height are multiples of this, or of the codec's own
+    /// alignment where that is coarser.
+    #[arg(long, value_parser = alignment)]
+    pub min_size_alignment: Option<u32>,
+
+    /// Ignore what the video encoder says it can do
+    #[arg(long, default_value = "false")]
+    pub ignore_video_encoder_constraints: bool,
+
     /// SDL audio output buffer size in ms (default 5)
     #[arg(long, default_value = "5")]
     pub audio_output_buffer: u32,
@@ -439,6 +497,61 @@ pub struct Options {
     pub screen_off_timeout: Option<i32>,
 }
 
+/// Whether `--pause-on-exit` wants a keypress after a run that did or did not
+/// fail.
+///
+/// `if-error` is the useful setting and the reason the option exists: a
+/// terminal that closes with the process shows the error for the length of a
+/// blink. A free function rather than a method because the pause outlives the
+/// options — the run has consumed them by the time it is asked.
+pub fn pauses_on_exit(mode: &str, failed: bool) -> bool {
+    match mode {
+        "true" => true,
+        "if-error" => failed,
+        _ => false,
+    }
+}
+
+/// `--background-color`, as scrcpy writes it: `#RGB` or `#RRGGBB`.
+///
+/// The short form is the long one with every digit doubled, which is what CSS
+/// does and what makes `#abc` and `#aabbcc` the same colour.
+pub fn rgb_from_hex(value: &str) -> Option<(u8, u8, u8)> {
+    let digits = value.strip_prefix('#').unwrap_or(value);
+    if !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let pairs: Vec<String> = match digits.len() {
+        3 => digits.chars().map(|d| format!("{d}{d}")).collect(),
+        6 => (0..3).map(|i| digits[i * 2..i * 2 + 2].to_string()).collect(),
+        _ => return None,
+    };
+    let channel = |s: &String| u8::from_str_radix(s, 16).ok();
+    Some((channel(&pairs[0])?, channel(&pairs[1])?, channel(&pairs[2])?))
+}
+
+/// `--background-color`, refused at the command line rather than silently
+/// falling back to the default colour when it is mistyped.
+fn hex_colour(value: &str) -> Result<String, String> {
+    match rgb_from_hex(value) {
+        Some(_) => Ok(value.to_string()),
+        None => Err(format!("`{value}` is not a colour like #RGB or #RRGGBB")),
+    }
+}
+
+/// `--min-size-alignment`, which the server rounds sizes up to.
+///
+/// The server takes whatever number it is given and the codec's own alignment
+/// on top of it, so an unaligned value is not refused there — it is simply
+/// ignored, which looks like the flag not working. Refuse it here instead.
+fn alignment(value: &str) -> Result<u32, String> {
+    match value.parse::<u32>() {
+        Ok(n) if n.is_power_of_two() && n <= 16 => Ok(n),
+        Ok(_) => Err(format!("`{value}` is not one of 1, 2, 4, 8 or 16")),
+        Err(_) => Err(format!("`{value}` is not a number")),
+    }
+}
+
 impl Options {
     /// Whether a held key keeps reaching the device.
     ///
@@ -446,6 +559,19 @@ impl Options {
     /// client already had one that turns it on; either can say no.
     pub fn key_repeat_forwarded(&self) -> bool {
         self.forward_key_repeat && !self.no_key_repeat
+    }
+
+    /// How the picture fits the window.
+    ///
+    /// scrcpy leaves this unset and decides late, because a flex display is
+    /// already the size of the window: fitting it would be scaling a picture to
+    /// the size it already is.
+    pub fn render_fit_mode(&self) -> &str {
+        match self.render_fit.as_deref() {
+            Some(fit) => fit,
+            None if self.flex_display => "unscaled",
+            None => "letterbox",
+        }
     }
 
     /// The window's rotation and whether the picture is flipped first.
@@ -474,8 +600,13 @@ impl Options {
     pub fn video_enabled(&self) -> bool { !self.no_video }
     pub fn audio_enabled(&self) -> bool { !self.no_audio }
     pub fn control_enabled(&self) -> bool { !self.no_control }
-    /// Video is captured (for recording) but playback is suppressed
-    pub fn video_playback(&self) -> bool { self.video_enabled() && !self.no_video_playback }
+    /// Video is captured (for recording) but playback is suppressed.
+    ///
+    /// `--no-window` implies it, as it does in scrcpy: there is nowhere to play
+    /// a frame back to.
+    pub fn video_playback(&self) -> bool {
+        self.video_enabled() && !self.no_video_playback && !self.no_window
+    }
     pub fn audio_playback(&self) -> bool { self.audio_enabled() }
 
     pub fn port_range_parsed(&self) -> (u16, u16) {
@@ -531,6 +662,68 @@ mod tests {
         let opts = parse(&[]);
         assert_eq!(opts.display_rotation(), (0, false));
         assert_eq!(opts.record_rotation(), 0);
+    }
+
+    /// scrcpy says --no-window implies --no-video-playback, and one place has
+    /// to be where that is true, or half the code draws to a window that is not
+    /// there.
+    #[test]
+    fn no_window_is_no_playback() {
+        assert!(parse(&[]).video_playback());
+        assert!(!parse(&["--no-window"]).video_playback());
+        assert!(!parse(&["--no-video-playback"]).video_playback());
+        assert!(!parse(&["--no-video"]).video_playback());
+    }
+
+    /// The bare flag means "true", and "if-error" is the only one that asks
+    /// what happened.
+    #[test]
+    fn the_pause_reads_the_run_only_when_it_is_asked_to() {
+        assert_eq!(parse(&[]).pause_on_exit, "false");
+        assert_eq!(parse(&["--pause-on-exit"]).pause_on_exit, "true");
+
+        assert!(pauses_on_exit("true", false));
+        assert!(pauses_on_exit("true", true));
+        assert!(!pauses_on_exit("false", true));
+        assert!(pauses_on_exit("if-error", true));
+        assert!(!pauses_on_exit("if-error", false));
+    }
+
+    /// `#abc` is `#aabbcc`, which is the rule CSS uses and the one scrcpy's
+    /// help implies by offering both forms for the same colour.
+    #[test]
+    fn a_short_colour_is_the_long_one_with_its_digits_doubled() {
+        assert_eq!(rgb_from_hex("#abc"), Some((0xaa, 0xbb, 0xcc)));
+        assert_eq!(rgb_from_hex("#aabbcc"), Some((0xaa, 0xbb, 0xcc)));
+        assert_eq!(rgb_from_hex("222"), Some((0x22, 0x22, 0x22)), "the hash is optional");
+        assert_eq!(rgb_from_hex("#FFFFFF"), Some((255, 255, 255)), "case does not matter");
+    }
+
+    /// A mistyped colour is refused at the command line rather than quietly
+    /// leaving the default in place, which looks like the flag not working.
+    #[test]
+    fn a_colour_that_is_not_one_is_refused() {
+        for value in ["#ab", "#abcd", "#gggggg", "", "#", "red"] {
+            assert_eq!(rgb_from_hex(value), None, "{value} should not be a colour");
+            assert!(
+                Options::try_parse_from(["scrcpy-slint", "--background-color", value]).is_err(),
+                "--background-color={value} should not have parsed"
+            );
+        }
+    }
+
+    /// A flex display is already the size of the window, so scaling it to fit
+    /// the window is scaling a picture to the size it is.
+    #[test]
+    fn the_fit_follows_the_flex_display_unless_it_is_asked_for() {
+        assert_eq!(parse(&[]).render_fit_mode(), "letterbox");
+        assert_eq!(parse(&["--flex-display"]).render_fit_mode(), "unscaled");
+        assert_eq!(
+            parse(&["--flex-display", "--render-fit", "letterbox"]).render_fit_mode(),
+            "letterbox",
+            "asking for one wins over the default"
+        );
+        assert_eq!(parse(&["--render-fit", "stretched"]).render_fit_mode(), "stretched");
     }
 
     /// Held keys are forwarded until something says otherwise, and the only

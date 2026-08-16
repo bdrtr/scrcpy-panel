@@ -1380,9 +1380,11 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
                     let mirror = window.global::<Mirror>();
                     match update {
                         MirrorUpdate::Frame(image) => mirror.set_frame(image),
-                        MirrorUpdate::Geometry { aspect, rotation } => {
+                        MirrorUpdate::Geometry { aspect, rotation, frame_width, frame_height } => {
                             mirror.set_display_aspect(aspect);
                             mirror.set_rotation(rotation);
+                            mirror.set_frame_width(frame_width as i32);
+                            mirror.set_frame_height(frame_height as i32);
                         }
                         MirrorUpdate::Live(live) => mirror.set_live(live),
                     }

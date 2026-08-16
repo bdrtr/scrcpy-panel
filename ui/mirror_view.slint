@@ -9,6 +9,18 @@
 // (0..1 on each axis). Rust undoes the rotation and scales to device pixels, so
 // this file never needs to know the device resolution.
 
+/// --render-fit: how the picture is fitted into the window.
+export enum RenderFit {
+    /// Keep the aspect ratio and show all of it, with bars where the window
+    /// does not have the same shape.
+    letterbox,
+    /// Fill the window and let the aspect ratio go.
+    stretched,
+    /// One video pixel per screen pixel, centred, and clipped where the window
+    /// is too small for it.
+    unscaled,
+}
+
 export global Mirror {
     in property <image> frame;
     /// Aspect ratio (width / height) of the video *as displayed*, i.e. with the
@@ -16,6 +28,13 @@ export global Mirror {
     in property <float> display-aspect: 0.5;
     /// Client-side rotation in degrees, clockwise. One of 0, 90, 180, 270.
     in property <float> rotation: 0;
+    in property <RenderFit> render-fit: RenderFit.letterbox;
+    /// The frame's own size in device pixels, which only `unscaled` needs: the
+    /// other two fits are a function of the window and the aspect ratio.
+    in property <int> frame-width;
+    in property <int> frame-height;
+    /// --background-color: what shows around and behind the picture.
+    in property <color> backdrop: #0d0b0a;
     /// False before the first frame arrives, so the view can say so.
     in property <bool> live;
     in property <string> placeholder: @tr("Görüntü bekleniyor…");
@@ -35,20 +54,32 @@ export component MirrorView inherits Rectangle {
     /// Set false where the host does its own keyboard handling.
     in property <bool> keyboard-enabled: true;
 
-    background: #0d0b0a;
+    background: Mirror.backdrop;
+    // `unscaled` can be larger than the window, and a picture spilling past the
+    // view would paint over whatever the host put beside it.
+    clip: true;
     // Makes the view itself a valid focus target, so a host can say
     // "forward-focus: view".
     forward-focus: keys;
 
-    // The letterboxed rectangle the video occupies, in view coordinates.
+    // The rectangle the video occupies, in view coordinates.
     property <float> view-aspect: root.height > 0px ? root.width / root.height : 1;
     property <bool> quarter-turn: Mirror.rotation == 90 || Mirror.rotation == 270;
-    property <length> fit-w: root.view-aspect > Mirror.display-aspect
+    // One device pixel per screen pixel, as displayed: the rotation swaps it.
+    property <length> raw-w: (root.quarter-turn ? Mirror.frame-height : Mirror.frame-width) * 1phx;
+    property <length> raw-h: (root.quarter-turn ? Mirror.frame-width : Mirror.frame-height) * 1phx;
+    property <length> letterbox-w: root.view-aspect > Mirror.display-aspect
         ? root.height * Mirror.display-aspect
         : root.width;
-    property <length> fit-h: root.view-aspect > Mirror.display-aspect
+    property <length> letterbox-h: root.view-aspect > Mirror.display-aspect
         ? root.height
         : root.width / Mirror.display-aspect;
+    property <length> fit-w: Mirror.render-fit == RenderFit.stretched ? root.width
+        : Mirror.render-fit == RenderFit.unscaled ? root.raw-w
+        : root.letterbox-w;
+    property <length> fit-h: Mirror.render-fit == RenderFit.stretched ? root.height
+        : Mirror.render-fit == RenderFit.unscaled ? root.raw-h
+        : root.letterbox-h;
     property <length> fit-x: (root.width - root.fit-w) / 2;
     property <length> fit-y: (root.height - root.fit-h) / 2;
 

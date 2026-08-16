@@ -341,7 +341,7 @@ impl Session {
 
         self.video = Some(VideoStream {
             info,
-            playback: !(opts.no_playback || opts.no_video_playback),
+            playback: !opts.no_playback && opts.video_playback(),
             frames,
             recycle: recycle_tx,
         });

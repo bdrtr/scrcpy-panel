@@ -105,15 +105,46 @@ with the opening session header, which every run exercises.
   version of this line claimed all of them, which was a miscount: the check that produced
   the number was reading the list of deliberately unimplemented flags in a test as though
   it were the supported list.
-- **The command line is not all of scrcpy 4.1's yet.** The form is one surface and the
-  arguments are another, and the second is the wider of the two: the camera is complete
-  now (`--camera-torch` and `--camera-zoom` are server options, `--list-camera-sizes` is a
-  query like `--list-cameras`), and `--no-key-repeat` and `--no-mouse-hover` drop events at
-  the window. Still missing are `--background-color`, `--render-fit`, `--no-window`,
-  `--no-window-aspect-ratio-lock`, `--flex-display`, `--keep-active`, `--min-size-alignment`,
-  `--ignore-video-encoder-constraints`, `--no-downsize-on-error`, `--no-terminal-title` and
-  `--pause-on-exit`, besides `--otg` and `--gamepad` above. The list is what
-  `scrcpy --help` accepts and this client's `--help` does not.
+- **The command line is scrcpy 4.1's, less three.** Comparing the two `--help` outputs
+  leaves `--otg` and `--gamepad`, which want an input source Slint does not have, and
+  `--no-window-aspect-ratio-lock`, which has nothing to turn off: SDL3 can lock a window to
+  the video's aspect ratio and neither Slint nor winit 0.30 exposes anything of the kind, so
+  the window is already free to be any shape and the picture letterboxes inside it. Going
+  the other way, this client's `--help` has flags scrcpy's does not — `--panel`, `--start`,
+  `--server-path`, `--clipboard-direction`, and the positive halves of switch pairs like
+  `--power-on`.
+- `--no-downsize-on-error` exists because `--downsize-on-error` cannot say no. A `bool`
+  field is a switch to clap, and a switch's default is the value it has when absent, so
+  `default_value = "true"` makes a flag that is true whether or not it is given. The same
+  is true of `--forward-key-repeat`, `--power-on` and `--clipboard-autosync`, and each has
+  a `--no-` counterpart that is the one doing the work.
+- `--flex-display` resizes the device's display to follow the window, which is a control
+  message (`RESIZE_DISPLAY`, id 21) rather than a server option — `flex_display=true` only
+  says the display may be resized. Slint reports no resize event, so the window size is
+  polled every 150 ms and sent once it stops changing; the device's answer arrives as a new
+  stream size, which resizes no window here, so there is no feedback loop. A quarter turn
+  of the client rotation swaps the size asked for, since the window shows the picture
+  rotated. It wants a virtual display to work on: with `--new-display`, `--flex-display`
+  makes it flexible. Under a tiling compositor the window size is not the user's to drag —
+  COSMIC ignores `set_size` entirely — so the display follows the tile instead, and changes
+  with it when another window opens beside the mirror. That also makes the two window-sizing
+  shortcuts, MOD+w and MOD+g, do nothing there.
+- `--render-fit` is three ways of filling the window: `letterbox` keeps the shape, which is
+  what this client always did, `stretched` gives it up, and `unscaled` draws one video pixel
+  per screen pixel and clips. The three are a Slint enum bound to the same rectangle the
+  pointer coordinates are normalised against, so a click lands in the right place under all
+  of them. Unset means `letterbox`, or `unscaled` alongside `--flex-display`, where the
+  display is the window's size already.
+- `--no-window` runs the session with nothing drawing it — for recording, or for publishing
+  the screen to `--v4l2-sink`. The frames are still decoded and thrown away rather than not
+  decoded at all: recording is fed from the demuxer, but the decoder sits behind the same
+  packet channel, so a decoder nobody reads from blocks the demuxer and stops the recording
+  with it. There is no Slint event loop either, so the interrupt and `--time-limit` are read
+  by the drain loop rather than by timers.
+- `--no-terminal-title` turns off the one thing this client writes to the terminal that is
+  not a log line: `ESC ]0;<title> BEL`, the same escape scrcpy writes, with the window's
+  title in it. It is written only when standard output is a terminal, and taken back when
+  the session ends.
 - `--adb-port` reaches both paths to the daemon: adb's own command line through
   `ANDROID_ADB_SERVER_PORT`, and `src/adb/protocol.rs`, which reads the same variable
   rather than the 5037 it used to hardcode.

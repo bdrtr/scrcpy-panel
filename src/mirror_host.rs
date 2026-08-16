@@ -17,9 +17,9 @@ use crate::control::controller::Controller;
 use crate::display::fps_counter::FpsCounter;
 use crate::display::v4l2_sink::V4l2Sink;
 use crate::input::slint_input::{SlintInput, WindowAction};
-use crate::options::Options;
+use crate::options::{rgb_from_hex, Options};
 use crate::session::{AudioStream, VideoStream};
-use crate::ui::{display_aspect, frame_to_image, Mirror, Orientation};
+use crate::ui::{display_aspect, frame_to_image, render_fit, Mirror, Orientation};
 
 /// How often the pump looks for a newly decoded frame.
 ///
@@ -32,8 +32,9 @@ pub enum MirrorUpdate {
     /// A newly decoded frame.
     Frame(slint::Image),
     /// The displayed aspect ratio and rotation changed — the device rotated, or
-    /// the client rotation shortcut was pressed.
-    Geometry { aspect: f32, rotation: f32 },
+    /// the client rotation shortcut was pressed. The frame's own size rides
+    /// along because --render-fit=unscaled draws at exactly that size.
+    Geometry { aspect: f32, rotation: f32, frame_width: u32, frame_height: u32 },
     /// True once the first frame has been drawn.
     Live(bool),
 }
@@ -106,9 +107,18 @@ pub fn attach(
         fps.borrow_mut().start();
     }
 
+    // --render-fit and --background-color are set once and belong to the view
+    // rather than the window, so both hosts get them from here.
+    mirror.set_render_fit(render_fit(opts.render_fit_mode()));
+    if let Some((r, g, b)) = opts.background_color.as_deref().and_then(rgb_from_hex) {
+        mirror.set_backdrop(slint::Color::from_rgb_u8(r, g, b));
+    }
+
     apply(MirrorUpdate::Geometry {
         aspect: display_aspect(video.info.width, video.info.height, orientation.get()),
         rotation: orientation.get().degrees(),
+        frame_width: video.info.width,
+        frame_height: video.info.height,
     });
     apply(MirrorUpdate::Live(false));
 
@@ -134,6 +144,8 @@ pub fn attach(
                         apply(MirrorUpdate::Geometry {
                             aspect: display_aspect(w, h, next),
                             rotation: next.degrees(),
+                            frame_width: w,
+                            frame_height: h,
                         });
                         log::info!("Client rotation: {:?}", next);
                     }
@@ -319,6 +331,8 @@ fn start_pump(
             apply(MirrorUpdate::Geometry {
                 aspect: display_aspect(latest.width, latest.height, orientation.get()),
                 rotation: orientation.get().degrees(),
+                frame_width: latest.width,
+                frame_height: latest.height,
             });
         }
 
@@ -381,6 +395,69 @@ pub fn start_audio(audio: AudioStream) -> Option<crate::audio::player::AudioPlay
     Some(player)
 }
 
+/// How often `--flex-display` looks at the window.
+///
+/// Slint has no resize event to hang this on, and a poll is what the frame pump
+/// does anyway; 150 ms is slow enough that a drag is one message rather than a
+/// hundred, and fast enough to look immediate when the drag stops.
+pub const FLEX_POLL_INTERVAL: Duration = Duration::from_millis(150);
+
+/// `--flex-display`: the size to ask the device to make its display, as the
+/// window changes.
+///
+/// A window being dragged reports a new size continuously and each one costs
+/// the device a display reconfiguration, so a size is only sent once it has
+/// stopped changing — the server debounces as well, but the control channel is
+/// shared with the input and there is no reason to fill it. Nothing comes back
+/// the other way: the device answers with a new stream size, and a stream size
+/// resizes no window here, so there is no loop to break.
+pub struct FlexDisplay {
+    /// The last size seen, which may still be moving.
+    seen: (u32, u32),
+    /// The last size the device was told about.
+    sent: (u32, u32),
+}
+
+impl FlexDisplay {
+    pub fn new() -> Self {
+        Self { seen: (0, 0), sent: (0, 0) }
+    }
+
+    /// The size to send now, or `None` while the window is still moving or is
+    /// already the size the device was last told.
+    pub fn poll(&mut self, window: (u32, u32), orientation: Orientation) -> Option<(u16, u16)> {
+        if window.0 == 0 || window.1 == 0 {
+            return None;
+        }
+
+        // The window shows the picture rotated, so a quarter turn means asking
+        // the device for a display the other way round. Comparing what the
+        // device would be told, rather than the window size, is also what makes
+        // a rotation on its own reach the device.
+        let wanted = if orientation.swaps_dimensions() {
+            (window.1, window.0)
+        } else {
+            window
+        };
+
+        if wanted != self.seen {
+            self.seen = wanted;
+            return None;
+        }
+        if wanted == self.sent {
+            return None;
+        }
+        self.sent = wanted;
+        Some((wanted.0.min(u16::MAX as u32) as u16, wanted.1.min(u16::MAX as u32) as u16))
+    }
+}
+
+impl Default for FlexDisplay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Window size that shows the whole frame without exceeding a common desktop,
 /// keeping the aspect ratio. Ported from the SDL screen this replaced.
 pub fn optimal_window_size(frame_w: u32, frame_h: u32, orientation: Orientation) -> (u32, u32) {
@@ -407,4 +484,52 @@ pub fn optimal_window_size(frame_w: u32, frame_h: u32, orientation: Orientation)
         h = max_h;
     }
     (w.max(1), h.max(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A drag is a stream of sizes; only the one it stops on is worth sending.
+    #[test]
+    fn a_size_is_sent_once_it_stops_changing() {
+        let mut flex = FlexDisplay::new();
+        assert_eq!(flex.poll((800, 600), Orientation::Normal), None, "first sighting");
+        assert_eq!(flex.poll((820, 600), Orientation::Normal), None, "still moving");
+        assert_eq!(flex.poll((820, 600), Orientation::Normal), Some((820, 600)));
+        assert_eq!(flex.poll((820, 600), Orientation::Normal), None, "the device knows");
+    }
+
+    /// The window shows the picture rotated, so the display behind it is the
+    /// other way round — and a rotation alone is a change worth sending.
+    #[test]
+    fn a_quarter_turn_swaps_the_size_and_is_worth_sending() {
+        let mut flex = FlexDisplay::new();
+        flex.poll((800, 600), Orientation::Normal);
+        assert_eq!(flex.poll((800, 600), Orientation::Normal), Some((800, 600)));
+
+        flex.poll((800, 600), Orientation::Rot90);
+        assert_eq!(flex.poll((800, 600), Orientation::Rot90), Some((600, 800)));
+    }
+
+    /// A half turn leaves the size alone, so nothing needs saying.
+    #[test]
+    fn a_half_turn_asks_for_nothing() {
+        let mut flex = FlexDisplay::new();
+        flex.poll((800, 600), Orientation::Normal);
+        assert_eq!(flex.poll((800, 600), Orientation::Normal), Some((800, 600)));
+
+        flex.poll((800, 600), Orientation::Rot180);
+        assert_eq!(flex.poll((800, 600), Orientation::Rot180), None);
+    }
+
+    /// A minimised window reports zero, and a display of zero is not a display.
+    #[test]
+    fn a_window_with_no_size_is_not_asked_for() {
+        let mut flex = FlexDisplay::new();
+        assert_eq!(flex.poll((0, 600), Orientation::Normal), None);
+        assert_eq!(flex.poll((0, 600), Orientation::Normal), None);
+        assert_eq!(flex.poll((800, 0), Orientation::Normal), None);
+        assert_eq!(flex.poll((800, 0), Orientation::Normal), None);
+    }
 }

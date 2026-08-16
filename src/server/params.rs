@@ -137,6 +137,11 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_forward: bool) -> Vec
         }
     }
 
+    // A flex display is a virtual display the client may resize while it runs.
+    if opts.flex_display {
+        args.push("flex_display=true".to_string());
+    }
+
     // Audio dup (play on both device and client)
     if opts.audio_dup {
         args.push("audio_dup=true".to_string());
@@ -147,9 +152,24 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_forward: bool) -> Vec
         args.push(format!("angle={}", angle));
     }
 
-    // Downsize on error
-    if !opts.downsize_on_error {
+    // Downsize on error. The positive switch cannot carry a false — clap gives
+    // a bool field no value to take — so the negative one is what turns it off.
+    if !opts.downsize_on_error || opts.no_downsize_on_error {
         args.push("downsize_on_error=false".to_string());
+    }
+
+    // What the encoder is allowed to be asked for.
+    if let Some(alignment) = opts.min_size_alignment {
+        args.push(format!("min_size_alignment={}", alignment));
+    }
+    if opts.ignore_video_encoder_constraints {
+        args.push("ignore_video_encoder_constraints=true".to_string());
+    }
+
+    // Poke the activity timer rather than hold a wake lock, which is what
+    // --stay-awake does and needs charging for.
+    if opts.keep_active {
+        args.push("keep_active=true".to_string());
     }
 
     // Codec options
@@ -214,5 +234,61 @@ mod tests {
         let args = args_for(&[]);
         assert!(!args.iter().any(|a| a.starts_with("camera_torch")), "{args:?}");
         assert!(!args.iter().any(|a| a.starts_with("camera_zoom")), "{args:?}");
+    }
+
+    /// What the encoder may be asked for, and what the device does about the
+    /// screen: all four are the server's business, so all four must travel.
+    #[test]
+    fn the_encoder_and_activity_options_reach_the_server() {
+        let args = args_for(&[
+            "--min-size-alignment", "8",
+            "--ignore-video-encoder-constraints",
+            "--keep-active",
+            "--no-downsize-on-error",
+        ]);
+        assert!(args.contains(&"min_size_alignment=8".to_string()), "{args:?}");
+        assert!(args.contains(&"ignore_video_encoder_constraints=true".to_string()), "{args:?}");
+        assert!(args.contains(&"keep_active=true".to_string()), "{args:?}");
+        assert!(args.contains(&"downsize_on_error=false".to_string()), "{args:?}");
+    }
+
+    /// Downsizing on error is the server's default, so silence is what asks for
+    /// it; the flag that turns it off is the only one that has to be sent.
+    #[test]
+    fn downsizing_is_only_mentioned_when_it_is_refused() {
+        assert!(!args_for(&[]).iter().any(|a| a.starts_with("downsize_on_error")));
+        assert!(
+            !args_for(&["--downsize-on-error"])
+                .iter()
+                .any(|a| a.starts_with("downsize_on_error"))
+        );
+    }
+
+    /// A flex display is one the client resizes while it runs, and the server
+    /// refuses the resize unless it was told to make one.
+    #[test]
+    fn a_flex_display_is_asked_for_at_startup() {
+        let args = args_for(&["--new-display=800x600", "--flex-display"]);
+        assert!(args.contains(&"new_display=800x600".to_string()), "{args:?}");
+        assert!(args.contains(&"flex_display=true".to_string()), "{args:?}");
+        assert!(!args_for(&[]).iter().any(|a| a.starts_with("flex_display")));
+    }
+
+    /// An alignment the server would round away is refused here rather than
+    /// accepted and ignored.
+    #[test]
+    fn an_alignment_that_is_not_a_power_of_two_is_refused() {
+        for value in ["3", "0", "32", "eight"] {
+            assert!(
+                Options::try_parse_from(["scrcpy-slint", "--min-size-alignment", value]).is_err(),
+                "--min-size-alignment={value} should not have parsed"
+            );
+        }
+        for value in ["1", "2", "4", "8", "16"] {
+            assert!(
+                Options::try_parse_from(["scrcpy-slint", "--min-size-alignment", value]).is_ok(),
+                "--min-size-alignment={value} should have parsed"
+            );
+        }
     }
 }

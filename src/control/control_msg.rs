@@ -26,6 +26,10 @@ pub const MSG_UHID_DESTROY: u8 = 14;
 pub const MSG_OPEN_HARD_KB_SETTINGS: u8 = 15;
 pub const MSG_START_APP: u8 = 16;
 pub const MSG_RESET_VIDEO: u8 = 17;
+// 18, 19 and 20 are the camera controls — set torch, zoom in, zoom out — which
+// this client sets at startup as server options instead of sending while it
+// runs, and 22 is scan file. Skipping them is what puts the resize at 21.
+pub const MSG_RESIZE_DISPLAY: u8 = 21;
 
 /// Android motion event: hover
 pub const AMOTION_ACTION_HOVER_MOVE: u8 = 7;
@@ -112,6 +116,11 @@ pub enum ControlMsg {
     },
     ResetVideo,
     OpenHardKeyboardSettings,
+    /// --flex-display: ask the device to make its virtual display this size.
+    ResizeDisplay {
+        width: u16,
+        height: u16,
+    },
 }
 
 impl ControlMsg {
@@ -241,6 +250,11 @@ impl ControlMsg {
             ControlMsg::OpenHardKeyboardSettings => {
                 buf.write_u8(MSG_OPEN_HARD_KB_SETTINGS)?;
             }
+            ControlMsg::ResizeDisplay { width, height } => {
+                buf.write_u8(MSG_RESIZE_DISPLAY)?;
+                buf.write_u16::<BigEndian>(*width)?;
+                buf.write_u16::<BigEndian>(*height)?;
+            }
         }
         Ok(buf)
     }
@@ -253,9 +267,40 @@ mod tests {
     /// The wire ids, taken from scrcpy's ControlMessage.java. Three of these
     /// were wrong and the failure was invisible: the device did something
     /// plausible-looking for another message instead of what was asked.
+    ///
+    /// The order is the whole of scrcpy 4.1's, including the four messages this
+    /// client does not send, because an id is a position in that list: leaving
+    /// the camera controls out of the count is how a resize would have been
+    /// numbered 18 and read as a torch.
     #[test]
     fn the_message_ids_match_scrcpy() {
-        let expected: [(&str, u8); 18] = [
+        let scrcpy = [
+            "INJECT_KEYCODE",
+            "INJECT_TEXT",
+            "INJECT_TOUCH_EVENT",
+            "INJECT_SCROLL_EVENT",
+            "BACK_OR_SCREEN_ON",
+            "EXPAND_NOTIFICATION_PANEL",
+            "EXPAND_SETTINGS_PANEL",
+            "COLLAPSE_PANELS",
+            "GET_CLIPBOARD",
+            "SET_CLIPBOARD",
+            "SET_DISPLAY_POWER",
+            "ROTATE_DEVICE",
+            "UHID_CREATE",
+            "UHID_INPUT",
+            "UHID_DESTROY",
+            "OPEN_HARD_KEYBOARD_SETTINGS",
+            "START_APP",
+            "RESET_VIDEO",
+            "CAMERA_SET_TORCH",
+            "CAMERA_ZOOM_IN",
+            "CAMERA_ZOOM_OUT",
+            "RESIZE_DISPLAY",
+            "SCAN_FILE",
+        ];
+
+        let ours = [
             ("INJECT_KEYCODE", MSG_INJECT_KEYCODE),
             ("INJECT_TEXT", MSG_INJECT_TEXT),
             ("INJECT_TOUCH_EVENT", MSG_INJECT_TOUCH_EVENT),
@@ -274,14 +319,29 @@ mod tests {
             ("OPEN_HARD_KEYBOARD_SETTINGS", MSG_OPEN_HARD_KB_SETTINGS),
             ("START_APP", MSG_START_APP),
             ("RESET_VIDEO", MSG_RESET_VIDEO),
+            ("RESIZE_DISPLAY", MSG_RESIZE_DISPLAY),
         ];
 
-        for (index, (name, id)) in expected.iter().enumerate() {
+        for (name, id) in ours {
+            let index = scrcpy
+                .iter()
+                .position(|upstream| *upstream == name)
+                .unwrap_or_else(|| panic!("{name} is not a message scrcpy 4.1 has"));
             assert_eq!(
-                *id as usize, index,
+                id as usize, index,
                 "{name} must be {index}; scrcpy numbers them in this order"
             );
         }
+    }
+
+    /// Five bytes, and the size big-endian: a byte too many or too few would be
+    /// read as the next message's type and desynchronise the control stream.
+    #[test]
+    fn a_resize_is_the_type_and_two_big_endian_sizes() {
+        let buf = ControlMsg::ResizeDisplay { width: 1280, height: 720 }
+            .serialize()
+            .expect("serialize");
+        assert_eq!(buf, vec![MSG_RESIZE_DISPLAY, 0x05, 0x00, 0x02, 0xD0]);
     }
 
     /// A message with no payload is exactly one byte, so the next message's type

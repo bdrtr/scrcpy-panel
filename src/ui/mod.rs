@@ -82,6 +82,18 @@ impl Orientation {
     }
 }
 
+/// `--render-fit` by the name scrcpy gives it on the command line.
+///
+/// Anything else is the default, since the argument parser is what refuses a
+/// name that is not one of the three.
+pub fn render_fit(name: &str) -> RenderFit {
+    match name {
+        "stretched" => RenderFit::Stretched,
+        "unscaled" => RenderFit::Unscaled,
+        _ => RenderFit::Letterbox,
+    }
+}
+
 /// Aspect ratio (width / height) of a frame as displayed under `orientation`.
 pub fn display_aspect(frame_width: u32, frame_height: u32, orientation: Orientation) -> f32 {
     let (w, h) = if orientation.swaps_dimensions() {
