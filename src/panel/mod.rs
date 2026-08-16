@@ -169,16 +169,12 @@ pub fn run(opts: &Options) -> Result<()> {
     refresh_command(&window);
     panel.info("Panel hazır.");
 
-    // adb's command line honours the port, so everything the panel runs uses it
-    // — but a session reaches the adb daemon through src/adb, which connects to
-    // 127.0.0.1:5037 whatever this setting says. Better said out loud than
-    // discovered as a device list that mirrors nothing.
+    // Both paths to the daemon honour the setting now: adb's own command line
+    // through the environment, and src/adb/protocol.rs by reading the same
+    // variable. Saying which port is in use is still worth a line.
     let port = adb_snapshot().port;
     if !port.is_empty() && port != "5037" {
-        panel.warn(&format!(
-            "adb sunucu portu {port}: panelin adb komutları bunu kullanıyor, \
-             ama oturumlar adb sunucusuna 5037 üzerinden bağlanıyor."
-        ));
+        panel.info(&format!("adb sunucu portu {port} kullanılıyor."));
     }
 
     // "Başlangıçta scrcpy-server sürümünü denetle". Looking for it is a handful
@@ -416,6 +412,10 @@ fn export_adb_env() {
     let port = stored.adb_port.trim();
     if !port.is_empty() && port != "5037" {
         std::env::set_var("ANDROID_ADB_SERVER_PORT", port);
+    } else {
+        // Back to the default has to clear it, or a port set earlier in this
+        // process would outlive the setting that asked for it.
+        std::env::remove_var("ANDROID_ADB_SERVER_PORT");
     }
     if let Some(dirs) = path_with_adb_first(stored.adb_path.trim()) {
         std::env::set_var("PATH", dirs);

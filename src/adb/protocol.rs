@@ -1,13 +1,27 @@
 //! Low-level ADB protocol implementation.
-//! Communicates with the ADB daemon over TCP on localhost:5037.
+//! Communicates with the ADB daemon over TCP on localhost.
 
 use anyhow::{Context, Result, bail};
 use std::io::{Read, Write, BufReader, BufRead};
 use std::net::TcpStream;
 use std::time::Duration;
 
-/// Default ADB daemon port
-const ADB_PORT: u16 = 5037;
+/// The port the ADB daemon listens on unless told otherwise.
+const DEFAULT_ADB_PORT: u16 = 5037;
+
+/// The port to reach the daemon on.
+///
+/// adb itself reads `ANDROID_ADB_SERVER_PORT`, and so does every adb command
+/// the panel runs — the panel exports the setting into this process for exactly
+/// that reason. Ignoring it here is what used to make a session talk to a
+/// different daemon than the device list it was started from.
+fn adb_port() -> u16 {
+    std::env::var("ANDROID_ADB_SERVER_PORT")
+        .ok()
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .filter(|port| *port != 0)
+        .unwrap_or(DEFAULT_ADB_PORT)
+}
 
 /// Connection timeout
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -21,9 +35,9 @@ pub struct AdbConnection {
 }
 
 impl AdbConnection {
-    /// Connect to the ADB daemon on localhost:5037
+    /// Connect to the ADB daemon on localhost.
     pub fn connect() -> Result<Self> {
-        let addr = format!("127.0.0.1:{}", ADB_PORT);
+        let addr = format!("127.0.0.1:{}", adb_port());
         let stream = TcpStream::connect_timeout(
             &addr.parse().unwrap(),
             CONNECT_TIMEOUT,
@@ -226,4 +240,40 @@ pub fn shell(serial: &str, command: &str) -> Result<TcpStream> {
     // Set longer timeout for shell commands
     stream.set_read_timeout(Some(Duration::from_secs(300))).ok();
     Ok(stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The tests share a process, and so share its environment; they are one
+    /// test so that a port set by one cannot be read by another.
+    #[test]
+    fn the_port_follows_adbs_own_environment_variable() {
+        // Safety: single-threaded within this test, and the variable is
+        // restored before it ends.
+        let before = std::env::var("ANDROID_ADB_SERVER_PORT").ok();
+
+        std::env::remove_var("ANDROID_ADB_SERVER_PORT");
+        assert_eq!(adb_port(), 5037, "unset means adb's own default");
+
+        std::env::set_var("ANDROID_ADB_SERVER_PORT", "5038");
+        assert_eq!(adb_port(), 5038);
+
+        std::env::set_var("ANDROID_ADB_SERVER_PORT", " 5039 ");
+        assert_eq!(adb_port(), 5039, "adb tolerates surrounding space");
+
+        // Nonsense falls back rather than failing to connect to port 0.
+        std::env::set_var("ANDROID_ADB_SERVER_PORT", "0");
+        assert_eq!(adb_port(), 5037);
+        std::env::set_var("ANDROID_ADB_SERVER_PORT", "elma");
+        assert_eq!(adb_port(), 5037);
+        std::env::set_var("ANDROID_ADB_SERVER_PORT", "70000");
+        assert_eq!(adb_port(), 5037, "past a u16 is not a port");
+
+        match before {
+            Some(value) => std::env::set_var("ANDROID_ADB_SERVER_PORT", value),
+            None => std::env::remove_var("ANDROID_ADB_SERVER_PORT"),
+        }
+    }
 }

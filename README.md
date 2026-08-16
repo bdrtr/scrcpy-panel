@@ -103,9 +103,9 @@ with the opening session header, which every run exercises.
   `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
 - Every flag the form can produce — all 79 — now reaches the device; nothing is dropped
   between the command bar and the session.
-- **`--adb-port` applies to the panel's adb commands but not to a session.**
-  `src/adb/protocol.rs` speaks the daemon protocol on a hardcoded 5037. The panel warns at
-  startup when the setting differs rather than leaving the two out of step silently.
+- `--adb-port` reaches both paths to the daemon: adb's own command line through
+  `ANDROID_ADB_SERVER_PORT`, and `src/adb/protocol.rs`, which reads the same variable
+  rather than the 5037 it used to hardcode.
 - **Interface language is disabled**, with a label saying so: it needs a translation layer.
 - Minimize-to-tray works, with two workarounds around Slint 1.17.1: the generated
   `show()`/`hide()` on a tray-rooted component panic, because `visible` is frozen as
