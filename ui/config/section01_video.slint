@@ -5,8 +5,8 @@
 // straight into Cfg and then calls Cfg.changed() so the command bar recomputes.
 
 import { Theme } from "../theme.slint";
-import { Cfg } from "../state.slint";
-import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Seg, Chk } from "../components.slint";
+import { App, Cfg } from "../state.slint";
+import { SectionHead, Hr, Fld, Grp, ChkGrp, Inp, Seg, Chk, Btn } from "../components.slint";
 
 export component SectionVideo inherits VerticalLayout {
     spacing: Theme.s4;
@@ -45,6 +45,15 @@ export component SectionVideo inherits VerticalLayout {
                     placeholder: "c2.android.avc.encoder";
                     mono: true;
                     edited => { Cfg.changed(); }
+                }
+            }
+            Fld {
+                label: "Kodlayıcı listesi";
+                Btn {
+                    text: "Cihazdan seç · --list-encoders";
+                    height: 36px;
+                    block: true;
+                    clicked => { App.list-encoders(); }
                 }
             }
         }

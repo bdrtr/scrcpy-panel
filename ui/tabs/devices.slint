@@ -44,7 +44,7 @@ export component TabDevices inherits VerticalLayout {
     SectionHead {
         kicker: "Bağlı donanım";
         title: "Cihazlar";
-        desc: "USB ve kablosuz cihazlar adb devices -l ile listelenir. Birden fazla cihaz seçilebilir; aynı yapılandırma hepsinde aynı anda başlatılır ve alt şeritteki komut bir döngüye dönüşür.";
+        desc: "USB ve kablosuz cihazlar adb devices -l ile listelenir. Bir seferde tek cihaz seçilir; yapılandırma o cihazda çalışır. Aynı anda birden fazla cihazda başlatma henüz yok.";
     }
 
     Hr {}
@@ -111,15 +111,15 @@ export component TabDevices inherits VerticalLayout {
 
                         Rectangle {
                             width: 34px;
+                            // One device at a time: the box reflects which
+                            // serial the configuration is pointed at, rather
+                            // than a per-row flag nothing ever sets.
                             Chk {
                                 y: (parent.height - self.height) / 2;
-                                checked: d.selected;
-                                // Rust owns the selection; it flips the row in
-                                // App.devices and pushes the model back. The
-                                // re-read keeps the box honest if it refuses.
+                                checked: d.serial == Cfg.serial;
                                 toggled => {
                                     App.select-device(d.serial);
-                                    self.checked = d.selected;
+                                    self.checked = d.serial == Cfg.serial;
                                 }
                             }
                         }

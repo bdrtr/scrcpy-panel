@@ -73,6 +73,7 @@ pub fn attach(
         video.info.height,
         &opts.shortcut_mod,
         &opts.key_inject_mode,
+        opts.legacy_paste,
         orientation.get(),
     )));
     let fps = Rc::new(RefCell::new(FpsCounter::new()));

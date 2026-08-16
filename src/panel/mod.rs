@@ -456,6 +456,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
         app.on_mirror_device(move |serial| {
             if let Some(window) = weak.upgrade() {
                 window.global::<Cfg>().set_serial(serial.clone());
+                window.global::<App>().set_selection_label(serial.clone());
                 refresh_command(&window);
                 start_session(&window, &panel);
             }
@@ -542,15 +543,29 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
     }
 
     {
+        let weak = window.as_weak();
         let panel = panel.clone();
         app.on_copy_log(move || {
+            // Copy what the user is looking at. Copying every row while a
+            // filter is on hands back something they did not ask for.
+            let filter = weak
+                .upgrade()
+                .map(|window| window.global::<App>().get_log_filter().to_string())
+                .unwrap_or_else(|| "all".to_string());
+
             let text: Vec<String> = panel
                 .log
                 .iter()
+                .filter(|row| filter == "all" || row.level.to_lowercase() == filter)
                 .map(|row| format!("{} {} {}", row.time, row.level, row.message))
                 .collect();
+
             set_clipboard(&text.join("\n"));
-            panel.info("Günlük panoya kopyalandı.");
+            panel.info(&format!(
+                "{} satır panoya kopyalandı{}.",
+                text.len(),
+                if filter == "all" { String::new() } else { format!(" ({filter} süzgeci)") }
+            ));
         });
     }
 
@@ -582,6 +597,18 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                     return;
                 }
                 let addr = if addr.contains(':') { addr } else { format!("{addr}:5555") };
+
+                // The caption under this button promises `adb tcpip 5555` runs
+                // first so a USB device can switch over; it never did.
+                let usb_serial = window.global::<Cfg>().get_serial().to_string();
+                let mut switch = Command::new("adb");
+                if !usb_serial.is_empty() && !usb_serial.contains(':') {
+                    switch.args(["-s", &usb_serial]);
+                }
+                if switch.args(["tcpip", "5555"]).status().is_ok() {
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+
                 match Command::new("adb").args(["connect", &addr]).output() {
                     Ok(out) => {
                         panel.info(&String::from_utf8_lossy(&out.stdout).trim().to_string());
@@ -647,8 +674,12 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
             if !serial.is_empty() {
                 cmd.args(["-s", &serial]);
             }
-            match cmd.args(["shell", "input", "keyevent", keycode]).status() {
-                Ok(_) => panel.info(&format!("{keycode} gönderildi.")),
+            match cmd.args(["shell", "input", "keyevent", keycode]).output() {
+                Ok(out) if out.status.success() => panel.info(&format!("{keycode} gönderildi.")),
+                Ok(out) => panel.warn(&format!(
+                    "{keycode} gönderilemedi: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                )),
                 Err(e) => panel.warn(&format!("Tuş gönderilemedi: {e}")),
             }
         });
@@ -685,10 +716,19 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 let on = !cfg.get_record_enabled();
                 cfg.set_record_enabled(on);
                 refresh_command(&window);
+                let running = panel.is_running();
                 if on && cfg.get_record_path().is_empty() {
                     panel.warn("Kayıt açıldı ama dosya yolu boş — Kayıt bölümünden doldurun.");
+                } else if running {
+                    // The recorder is wired up when a session starts, so this
+                    // only takes effect on the next one. Say so rather than
+                    // letting the label imply the current session is recording.
+                    panel.warn(&format!(
+                        "Kayıt {} — ama çalışan oturumu etkilemez, sonraki oturumda geçerli olacak.",
+                        if on { "açıldı" } else { "kapatıldı" }
+                    ));
                 } else if on {
-                    panel.info("Kayıt açıldı; sonraki oturumda dosyaya yazılacak.");
+                    panel.info("Kayıt açıldı; oturum başlayınca dosyaya yazılacak.");
                 } else {
                     panel.info("Kayıt kapatıldı.");
                 }

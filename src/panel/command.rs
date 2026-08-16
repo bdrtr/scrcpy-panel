@@ -221,12 +221,14 @@ impl Default for PanelConfig {
     }
 }
 
-/// The flags this client's own command line understands.
+/// The flags this client's own command line understands *and acts on*.
 ///
 /// Anything outside this set is shown in the command preview — it is still a
 /// real scrcpy flag — but is left out of the argument list at launch, and the
-/// panel reports it as dropped. `every_supported_flag_parses` keeps the list
-/// honest as the CLI grows.
+/// panel says so. Parsing a flag is not enough to be in here: several were
+/// accepted by the argument parser and then read by nobody, which is worse than
+/// rejecting them, because the panel had nothing to warn about.
+/// `every_supported_flag_parses` keeps the list honest as the CLI grows.
 const SUPPORTED: &[&str] = &[
     "--video-source",
     "--video-codec",
@@ -239,14 +241,11 @@ const SUPPORTED: &[&str] = &[
     "--video-buffer",
     "--no-video",
     "--print-fps",
-    "--no-video-playback",
-    "--v4l2-sink",
     "--audio-codec",
     "--audio-source",
     "--audio-encoder",
     "--audio-bit-rate",
     "--audio-buffer",
-    "--audio-output-buffer",
     "--no-audio",
     "--audio-dup",
     "--require-audio",
@@ -258,7 +257,6 @@ const SUPPORTED: &[&str] = &[
     "--shortcut-mod",
     "--no-control",
     "--legacy-paste",
-    "--mouse-bind",
     "--new-display",
     "--start-app",
     "--camera-id",
@@ -462,21 +460,37 @@ impl PanelConfig {
                 out.push(format!("--new-display={}", self.new_display));
             }
         }
-        if self.tcpip_enabled {
-            if self.tcpip_addr.is_empty() {
-                out.push("--tcpip".to_string());
-            } else {
-                out.push(format!("--tcpip={}", self.tcpip_addr));
-            }
+        // Without an address there is nothing to connect to, and a bare
+        // --tcpip would just be a flag the client ignores.
+        if self.tcpip_enabled && !self.tcpip_addr.is_empty() {
+            out.push(format!("--tcpip={}", self.tcpip_addr));
         }
         if self.record_enabled && !self.record_path.is_empty() {
-            out.push(format!("--record={}", self.record_path));
-            if self.record_format != PanelConfig::default().record_format {
+            out.push(format!("--record={}", self.effective_record_path()));
+            if self.record_format != d.record_format {
                 out.push(format!("--record-format={}", self.record_format));
             }
         }
 
         out
+    }
+
+    /// The recording path with a timestamp folded in, when the form asks for one.
+    ///
+    /// The checkbox used to be decorative: the flag was copied into the config
+    /// and then read by nobody.
+    pub fn effective_record_path(&self) -> String {
+        if !self.record_timestamp || self.record_path.is_empty() {
+            return self.record_path.clone();
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        match self.record_path.rsplit_once('.') {
+            Some((stem, extension)) => format!("{stem}-{stamp}.{extension}"),
+            None => format!("{}-{stamp}", self.record_path),
+        }
     }
 
     /// The command as one line, for the bar at the bottom and for the clipboard.
@@ -565,8 +579,12 @@ mod tests {
         cfg.record_enabled = true;
         cfg.new_display_enabled = true;
         let flags = cfg.to_flags();
-        assert!(flags.contains(&"--record=/tmp/out.mp4".to_string()));
         assert!(flags.contains(&"--new-display=800x600".to_string()));
+        // The timestamp checkbox is on by default, so the path carries one.
+        assert!(
+            flags.iter().any(|f| f.starts_with("--record=/tmp/out-") && f.ends_with(".mp4")),
+            "expected a timestamped recording path, got {flags:?}"
+        );
     }
 
     #[test]
@@ -580,6 +598,37 @@ mod tests {
         assert_eq!(accepted, vec!["--max-size=800".to_string()]);
         assert!(dropped.contains(&"--otg".to_string()));
         assert!(dropped.contains(&"--verbosity=debug".to_string()));
+    }
+
+    #[test]
+    fn the_timestamp_checkbox_reaches_the_filename() {
+        let mut cfg = PanelConfig::default();
+        cfg.record_enabled = true;
+        cfg.record_path = "/tmp/session.mp4".into();
+
+        let stamped = cfg.effective_record_path();
+        assert!(stamped.starts_with("/tmp/session-"), "got {stamped}");
+        assert!(stamped.ends_with(".mp4"), "got {stamped}");
+
+        cfg.record_timestamp = false;
+        assert_eq!(cfg.effective_record_path(), "/tmp/session.mp4");
+    }
+
+    #[test]
+    fn an_extensionless_recording_path_still_takes_a_timestamp() {
+        let mut cfg = PanelConfig::default();
+        cfg.record_path = "/tmp/capture".into();
+        assert!(cfg.effective_record_path().starts_with("/tmp/capture-"));
+    }
+
+    #[test]
+    fn tcpip_needs_an_address_to_mean_anything() {
+        let mut cfg = PanelConfig::default();
+        cfg.tcpip_enabled = true;
+        assert!(cfg.to_flags().is_empty(), "a bare --tcpip has nothing to connect to");
+
+        cfg.tcpip_addr = "192.168.1.5:5555".into();
+        assert!(cfg.to_flags().contains(&"--tcpip=192.168.1.5:5555".to_string()));
     }
 
     #[test]
@@ -602,6 +651,26 @@ mod tests {
         assert_eq!(expand_bit_rate("2M"), "2000000");
         assert_eq!(expand_bit_rate("128K"), "128000");
         assert_eq!(expand_bit_rate("nonsense"), "nonsense");
+    }
+
+    /// Flags the argument parser accepts but no code reads must stay OUT of
+    /// SUPPORTED, so the panel warns instead of pretending.
+    ///
+    /// Each of these was in the list once: the flag parsed, the panel stayed
+    /// quiet, and nothing happened. Adding one back means implementing it.
+    #[test]
+    fn flags_with_no_implementation_are_not_offered() {
+        for flag in [
+            "--v4l2-sink",           // display/v4l2_sink.rs is a stub, never constructed
+            "--no-video-playback",   // nothing reads it
+            "--audio-output-buffer", // nothing reads it
+            "--mouse-bind",          // mouse buttons are hard-coded in slint_input
+        ] {
+            assert!(
+                !SUPPORTED.contains(&flag),
+                "{flag} is offered to the launcher but nothing implements it"
+            );
+        }
     }
 
     /// Every flag the panel is willing to launch with must actually parse, so

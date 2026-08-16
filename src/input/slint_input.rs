@@ -110,6 +110,9 @@ pub struct SlintInput {
     shortcut_mod: ShortcutMod,
     /// "mixed" (default), "text" or "raw"
     key_inject_mode: String,
+    /// --legacy-paste: type the clipboard as text instead of setting the
+    /// device clipboard and asking it to paste.
+    legacy_paste: bool,
     clipboard_sequence: u64,
     /// A second finger is down, mirrored across the screen centre (pinch zoom)
     vfinger_down: bool,
@@ -123,6 +126,7 @@ impl SlintInput {
         frame_height: u32,
         shortcut_mod: &str,
         key_inject_mode: &str,
+        legacy_paste: bool,
         orientation: Orientation,
     ) -> Self {
         Self {
@@ -131,6 +135,7 @@ impl SlintInput {
             orientation,
             shortcut_mod: ShortcutMod::parse(shortcut_mod),
             key_inject_mode: key_inject_mode.to_string(),
+            legacy_paste,
             clipboard_sequence: 0,
             vfinger_down: false,
             alt_held: false,
@@ -296,6 +301,8 @@ impl SlintInput {
         // Ctrl+V without the shortcut modifier pastes the host clipboard as
         // text, matching upstream.
         if control && !shortcut_active && (c == 'v' || c == 'V') && !repeat {
+            // Ctrl+V always types the text, which is what --legacy-paste asks
+            // the shortcut to do as well.
             let text = get_clipboard_text();
             if !text.is_empty() {
                 controller.push_msg(ControlMsg::InjectText { text });
@@ -436,7 +443,15 @@ impl SlintInput {
             }
             ShortcutAction::PasteFromPC => {
                 let text = get_clipboard_text();
-                if !text.is_empty() {
+                if text.is_empty() {
+                    return WindowAction::None;
+                }
+                if self.legacy_paste {
+                    // Type it instead of setting the device clipboard, for
+                    // apps that ignore a paste they did not ask for.
+                    controller.push_msg(ControlMsg::InjectText { text });
+                    log::info!("Clipboard: host → device (legacy paste)");
+                } else {
                     self.clipboard_sequence += 1;
                     controller.push_msg(ControlMsg::SetClipboard {
                         sequence: self.clipboard_sequence,

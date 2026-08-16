@@ -74,6 +74,13 @@ impl Session {
     ///
     /// Blocks for as long as adb takes; run it off the UI thread.
     pub fn start(opts: &Options) -> Result<Session> {
+        // scrcpy rejects this pair too: with audio off there is nothing for
+        // --require-audio to require, and silently ignoring one of the two
+        // would leave the user guessing which won.
+        if opts.require_audio && !opts.audio_enabled() {
+            anyhow::bail!("--require-audio and --no-audio contradict each other");
+        }
+
         connect_tcpip_if_requested(opts)?;
 
         let serial = adb::commands::select_device(opts.serial.as_deref())
@@ -205,8 +212,16 @@ impl Session {
                 height: info.height as i32,
             });
             let path = opts.record.as_ref().expect("recorder implies --record").clone();
-            let _ = rec.spawn(path.clone(), opts.video_enabled(), opts.audio_enabled());
-            log::info!("Recording to: {}", path);
+            let _ = rec.spawn(
+                path.clone(),
+                opts.record_format.clone(),
+                opts.video_enabled(),
+                opts.audio_enabled(),
+            );
+            match opts.record_format {
+                Some(ref format) => log::info!("Recording to: {} ({})", path, format),
+                None => log::info!("Recording to: {}", path),
+            }
         }
 
         self.video_socket = header_socket.try_clone().ok();
@@ -395,6 +410,15 @@ fn start_audio(
     let mut header_socket = socket;
     let info = match demuxer::read_audio_header(&mut header_socket) {
         Ok(Some(info)) => info,
+        // --require-audio means the session is pointless without sound, so a
+        // missing audio stream is an error rather than a downgrade. Until now
+        // the flag parsed and nothing read it.
+        Ok(None) if opts.require_audio => {
+            anyhow::bail!("Audio was disabled by the device and --require-audio was given")
+        }
+        Err(e) if opts.require_audio => {
+            return Err(e.context("Audio failed and --require-audio was given"));
+        }
         Ok(None) => {
             log::info!("Audio stream disabled by server");
             return Ok(None);

@@ -282,7 +282,10 @@ pub struct Options {
     pub v4l2_sink: Option<String>,
 
     /// Create a virtual display (e.g. 1920x1080/420, or just /420 for default size)
-    #[arg(long)]
+    ///
+    /// The value is optional, as in scrcpy: `--new-display` on its own asks the
+    /// device to pick the size.
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
     pub new_display: Option<String>,
 
     /// Capture video for recording but don't display it

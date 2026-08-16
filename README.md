@@ -37,23 +37,31 @@ their claims with care: the upstream commit message says "100% feature parity", 
 
 Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 
-| Stage | Result |
+| What | Result |
 | --- | --- |
 | `adb push` + reverse tunnel | works |
 | Server handshake, device metadata | works |
-| H.264 demux | works |
-| Hardware decode | works (CUDA negotiated automatically) |
-| Slint window render | works — 30–61 fps sustained at 720p |
+| H.264 demux, hardware decode | works — CUDA negotiated automatically |
+| Slint window render | works — 25–61 fps at 720p |
 | Mirror embedded in the panel | works — live at 1080x2400, correct letterbox |
 | Control panel | works — adb detection, device list, command preview, profiles |
-| Opus audio decode and playback | works |
-| MP4 recording | works — valid file, 128 frames in 7.2 s |
-| `--list-encoders` | works |
-| `--time-limit` | works — enforced client side |
-| Ctrl-C / SIGTERM shutdown | works — pipeline unwinds, no crash |
-| scrcpy 4.1 server handshake | works, no unknown-option warnings |
-| Audio through cpal | works — 48 kHz stereo, no SDL |
+| Audio through cpal | works — 48 kHz stereo Opus, no SDL |
 | Session metrics | works — resolution, frame rate, codec, rotation, elapsed |
+| `--record` | works — 287 frames over 9.72 s from a 30 fps camera source |
+| `--new-display` virtual display | works — `New display: 1600x900/240 (id=2)` |
+| `--video-source=camera` | works — 1600x1200 at a steady 30 fps |
+| `--crop` | works — 1080x2400 cropped to 1080x1200 |
+| `--record-format` | works — `mkv` overrides a `.mp4` filename |
+| `--new-display` with no value | works — device picks the size |
+| Contradictory `--no-audio --require-audio` | rejected with a message |
+| `--max-size`, `--max-fps`, `--time-limit` | work |
+| `--list-encoders/-displays/-cameras/-apps` | work |
+| scrcpy 4.1 server handshake | works, no unknown-option warnings |
+| Ctrl-C / SIGTERM shutdown | works — pipeline unwinds, no crash |
+
+Recording a mostly static screen produces a file shorter than the session, which
+is correct rather than a bug: scrcpy's encoder only emits a frame when the
+surface changes, so the last timestamp is the last thing that moved.
 
 The mid-stream session header — the one that arrives when the device rotates or the
 mirrored app resizes — is covered by unit tests (`cargo test`) but has not been seen
@@ -70,9 +78,21 @@ with the opening session header, which every run exercises.
   `--capture-orientation`, which takes degrees with an optional `@` to lock.
 - The upstream README understates the code: it lists far fewer flags than `--help` actually
   accepts, and marks recording as "Phase 2" although it works.
-- **UHID and AOA input are unreachable.** Those modes need hardware scancodes and Slint
-  reports keys as text, so `--keyboard=uhid`, `--mouse=uhid` and OTG fall back to SDK
-  injection with a warning. The HID modules are still in the tree, just unwired.
+- **UHID and AOA input are unreachable.** Those modes need the physical key position, and
+  Slint reports keys as text. Deriving a position from a character would double-apply the
+  layout, which is exactly what UHID exists to avoid, so `--keyboard=uhid`, `--mouse=uhid`
+  and OTG fall back to SDK injection with a warning. The HID report descriptors are still
+  in the tree, waiting on a scancode source.
+- **Several flags are accepted by the command line but not implemented.** The panel does
+  not pass those to a session; it lists them as dropped instead. An adversarial audit of
+  every panel control found four flags that used to be passed and then read by nobody —
+  `--v4l2-sink`, `--no-video-playback`, `--audio-output-buffer` and `--mouse-bind` — which
+  is the worst case, because nothing warned. A test now keeps them out of the supported
+  list until something implements them.
+- **One device at a time.** The mockup promises simultaneous mirroring on several devices;
+  the panel selects one. The tab copy says so rather than implying otherwise.
+- Drag-and-drop file transfer is not possible yet: Slint 1.17's `DataTransfer` exposes
+  plain text and images, not dropped file paths.
 - `--always-on-top` and `--borderless` do nothing: Slint 1.17 exposes no window API for
   either.
 - `--render-driver` was an SDL renderer hint and is now ignored; pick a Slint backend with

@@ -113,12 +113,23 @@ impl Recorder {
     }
 
     /// Spawn background recorder thread. Call join() on the handle at shutdown.
-    pub fn spawn(&self, filename: String, has_video: bool, has_audio: bool) -> thread::JoinHandle<()> {
+    ///
+    /// `format` is `--record-format`; when it is None the container is inferred
+    /// from the file extension, as scrcpy does.
+    pub fn spawn(
+        &self,
+        filename: String,
+        format: Option<String>,
+        has_video: bool,
+        has_audio: bool,
+    ) -> thread::JoinHandle<()> {
         let state = Arc::clone(&self.state);
         thread::Builder::new()
             .name("scrcpy-recorder".into())
             .spawn(move || {
-                if let Err(e) = run_recorder(state, &filename, has_video, has_audio) {
+                if let Err(e) =
+                    run_recorder(state, &filename, format.as_deref(), has_video, has_audio)
+                {
                     log::error!("Recorder failed: {}", e);
                 }
             })
@@ -133,6 +144,7 @@ impl Recorder {
 fn run_recorder(
     state: Arc<(Mutex<RecorderState>, Condvar)>,
     filename: &str,
+    format: Option<&str>,
     has_video: bool,
     has_audio: bool,
 ) -> Result<()> {
@@ -152,7 +164,7 @@ fn run_recorder(
     };
 
     // 2. Open output context using FFmpeg raw API
-    let result = unsafe { open_and_record(lock, cvar, filename, has_video, has_audio, &video_info, audio_codec_id, audio_expects_config) };
+    let result = unsafe { open_and_record(lock, cvar, filename, format, has_video, has_audio, &video_info, audio_codec_id, audio_expects_config) };
     if let Err(ref e) = result {
         log::error!("Recording error: {}", e);
     } else {
@@ -165,6 +177,7 @@ unsafe fn open_and_record(
     lock: &Mutex<RecorderState>,
     cvar: &Condvar,
     filename: &str,
+    format: Option<&str>,
     has_video: bool,
     has_audio: bool,
     vi: &Option<VideoCodecInfo>,
@@ -173,10 +186,17 @@ unsafe fn open_and_record(
 ) -> Result<()> {
     ffi::av_log_set_level(ffi::AV_LOG_WARNING);
 
-    // Determine format from extension (matches C's sc_recorder_get_format_name)
-    let fmt_name = match std::path::Path::new(filename)
-        .extension().and_then(|e| e.to_str()).unwrap_or("mp4")
-    {
+    // --record-format wins; otherwise infer from the extension, which is what
+    // C's sc_recorder_get_format_name does. The flag used to parse and then be
+    // read by nobody, so a .mp4 name always produced an mp4 whatever was asked.
+    let selector = match format {
+        Some(explicit) if !explicit.is_empty() && explicit != "auto" => explicit,
+        _ => std::path::Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("mp4"),
+    };
+    let fmt_name = match selector {
         "mkv" | "mka" => "matroska",
         "m4a"         => "mp4",
         "opus"        => "opus",

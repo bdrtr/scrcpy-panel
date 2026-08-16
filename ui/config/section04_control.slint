@@ -59,22 +59,24 @@ export component SectionControl inherits VerticalLayout {
                     changed => { Cfg.changed(); }
                 }
             }
+            // Both of these are disabled rather than removed: the mockup has
+            // them, but nothing reads them yet. An enabled control that does
+            // nothing is worse than one that says it does nothing.
             Fld {
-                label: "Klavye düzeni (UHID, uygulama ayarı)";
+                label: "Klavye düzeni — UHID gelince";
                 Inp {
                     text <=> Cfg.key-layout;
-                    placeholder: "tr";
+                    placeholder: "UHID henüz yok";
                     mono: true;
-                    edited => { Cfg.changed(); }
+                    enabled: false;
                 }
             }
             Fld {
-                label: "Pano yönü";
+                label: "Pano yönü — henüz yok";
                 Sel {
                     labels: ["İki yönlü", "Yalnızca cihaza", "Yalnızca bilgisayara"];
                     values: ["both", "toDevice", "toPc"];
                     value <=> Cfg.clipboard-direction;
-                    changed => { Cfg.changed(); }
                 }
             }
         }
