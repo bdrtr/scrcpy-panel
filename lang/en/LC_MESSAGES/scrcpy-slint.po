@@ -3,6 +3,10 @@
 # The source language is Turkish, so msgid is the Turkish string. Anything not
 # listed here falls back to it, which is what technical values (h264, 8M,
 # /dev/video0) and the program's own name want anyway.
+#
+# Both halves of the program read this file: slint-build bundles it for the
+# @tr() strings in ui/, and build.rs turns it into a table for the messages
+# built in Rust.
 msgid ""
 msgstr ""
 "Project-Id-Version: scrcpy-slint\n"
@@ -11,6 +15,8 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language: en\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# ── ui ──────────────────────────────────────────────
 
 msgid "Bölüm 01"
 msgstr "Section 01"
@@ -773,3 +779,356 @@ msgstr "Start a session"
 
 msgid "Çık"
 msgstr "Quit"
+
+# ── rust ──────────────────────────────────────────────
+
+msgid "bilinmeyen çıkış"
+msgstr "unknown output"
+
+msgid "Ekran görüntüsü kaydedildi: {}"
+msgstr "Screenshot saved: {}"
+
+msgid "Panel hazır."
+msgstr "Panel ready."
+
+msgid "adb sunucu portu {} kullanılıyor."
+msgstr "Using adb server port {}."
+
+msgid "Yapılandırma varsayılanlara döndürüldü."
+msgstr "Configuration reset to defaults."
+
+msgid "Komut panoya kopyalandı ({} karakter)."
+msgstr "Command copied to the clipboard ({} characters)."
+
+msgid "seçildi"
+msgstr "selected"
+
+msgid "seçimden çıkarıldı"
+msgstr "deselected"
+
+msgid "Profil güncellendi: {}"
+msgstr "Profile updated: {}"
+
+msgid "Profil uygulandı."
+msgstr "Profile applied."
+
+msgid "{} satır panoya kopyalandı{}."
+msgstr "{} lines copied to the clipboard{}."
+
+msgid " ({} süzgeci)"
+msgstr " ({} filter)"
+
+msgid "Bağlanmak için bir adres girin."
+msgstr "Enter an address to connect to."
+
+msgid "adb connect başarısız: {}"
+msgstr "adb connect failed: {}"
+
+msgid "Eşleştirme için adres ve kod gerekli."
+msgstr "Pairing needs both an address and a code."
+
+msgid "adb pair başarısız: {}"
+msgstr "adb pair failed: {}"
+
+msgid "Ekranı döndürme ayna penceresinden yapılıyor: MOD+r."
+msgstr "Rotating the screen is done from the mirror window: MOD+r."
+
+msgid "Bilinmeyen tuş: {}"
+msgstr "Unknown key: {}"
+
+msgid "{} gönderildi."
+msgstr "{} sent."
+
+msgid "{} gönderilemedi: {}"
+msgstr "{} could not be sent: {}"
+
+msgid "Tuş gönderilemedi: {}"
+msgstr "The key could not be sent: {}"
+
+msgid "\"{}\" düzenleniyor — kaydedince üzerine yazılacak."
+msgstr "Editing \"{}\" — saving will overwrite it."
+
+msgid "Kayıt başladı: {}"
+msgstr "Recording started: {}"
+
+msgid "Kayıt başlatılamadı: {}"
+msgstr "Recording could not be started: {}"
+
+msgid "Kayıt durduruldu, dosya kapatıldı."
+msgstr "Recording stopped, the file is closed."
+
+msgid "Kayıt kapatıldı."
+msgstr "Recording turned off."
+
+msgid "Kayıt açıldı; oturum başlayınca dosyaya yazılacak."
+msgstr "Recording turned on; it will write to the file once a session starts."
+
+msgid "Ayna penceresini öne getirme henüz yok — pencereyi kendiniz seçin."
+msgstr "Bringing the mirror window to the front is not available yet — pick the window yourself."
+
+msgid "Ekran görüntüsü alınamadı: {}"
+msgstr "The screenshot failed: {}"
+
+msgid "Cihaza gönderilecek dosyalar"
+msgstr "Files to send to the device"
+
+msgid "Dosya seçilmedi."
+msgstr "No file chosen."
+
+msgid "{} dosya gönderiliyor…"
+msgstr "Sending {} files…"
+
+msgid "Pano boş."
+msgstr "The clipboard is empty."
+
+msgid "Pano cihaza gönderildi."
+msgstr "The clipboard was sent to the device."
+
+msgid "Bu bayraklar istemcide henüz yok, atlandı: {}"
+msgstr "These flags do not exist in the client yet and were skipped: {}"
+
+msgid "Argümanlar geçersiz: {}"
+msgstr "The arguments are invalid: {}"
+
+msgid "Zaten çalışan bir oturum var."
+msgstr "A session is already running."
+
+msgid "Başlatılıyor: {}"
+msgstr "Starting: {}"
+
+msgid "{} cihaz seçili — her biri ayrı pencerede açılıyor."
+msgstr "{} devices are selected — each opens in a window of its own."
+
+msgid "Cihaza bağlanılıyor…"
+msgstr "Connecting to the device…"
+
+msgid "Oturum başlatılamadı: {}"
+msgstr "The session could not be started: {}"
+
+msgid "Video kapalı; gömülecek görüntü yok."
+msgstr "Video is off, so there is no picture to embed."
+
+msgid "Görüntü akışı sona erdi."
+msgstr "The video stream ended."
+
+msgid "{} · gömülü"
+msgstr "{} · embedded"
+
+msgid "Oturum başladı."
+msgstr "The session started."
+
+msgid "Kendi yolunu bulamadı: {}"
+msgstr "Could not find its own path: {}"
+
+msgid "{} · ayrı pencere{}"
+msgstr "{} · separate window{}"
+
+msgid "Bir pencere kapandı, {} sürüyor."
+msgstr "A window closed; {} still running."
+
+msgid "{} cihaz seçildi"
+msgstr "{} devices selected"
+
+msgid "Çözünürlük"
+msgstr "Resolution"
+
+msgid "Kare hızı"
+msgstr "Frame rate"
+
+msgid "Döndürme"
+msgstr "Rotation"
+
+msgid "Süre"
+msgstr "Elapsed"
+
+msgid "scrcpy-server bulunamadı, sürüm denetlenemedi (istemci v{} bekliyor): {}"
+msgstr "scrcpy-server was not found, so its version could not be checked (the client expects v{}): {}"
+
+msgid "scrcpy-server sürümü uyuşmuyor: {} v{}, istemci v{} bekliyor."
+msgstr "The scrcpy-server version does not match: {} is v{}, the client expects v{}."
+
+msgid "scrcpy-server v{} hazır: {}"
+msgstr "scrcpy-server v{} is ready: {}"
+
+msgid "scrcpy-server bulundu: {} (istemci v{} bekliyor)."
+msgstr "scrcpy-server found: {} (the client expects v{})."
+
+msgid "Çalışan bir oturum yok."
+msgstr "No session is running."
+
+msgid "Sistem tepsisi kullanılamıyor: {}"
+msgstr "The system tray is not available: {}"
+
+msgid "Sistem tepsisi bu masaüstünde kullanılamıyor."
+msgstr "The system tray is not available on this desktop."
+
+msgid "Sistem tepsisi simgesi eklendi"
+msgstr "System tray icon added"
+
+msgid "adb sunucusu yeniden başlatılıyor…"
+msgstr "Restarting the adb server…"
+
+msgid "adb sunucusu yeniden başlatıldı."
+msgstr "The adb server was restarted."
+
+msgid "adb sunucusu yeniden başlatılamadı."
+msgstr "The adb server could not be restarted."
+
+msgid "adb çalıştırılabilir dosyasını seçin"
+msgstr "Choose the adb executable"
+
+msgid "Arayüz dili: {}"
+msgstr "Interface language: {}"
+
+msgid "Arayüz dili {} seçilemedi: {}"
+msgstr "The interface language {} could not be selected: {}"
+
+msgid "adb çalıştırılamadı: {}"
+msgstr "adb could not be run: {}"
+
+msgid "Kurulamadı"
+msgstr "Could not be installed"
+
+msgid "Gönderilemedi"
+msgstr "Could not be sent"
+
+msgid "Gönderildi: {} → {}"
+msgstr "Sent: {} → {}"
+
+msgid "{} çalıştırılamadı: {}"
+msgstr "{} could not be run: {}"
+
+msgid "{} bağlı: \"{}\" profili otomatik başlatılıyor."
+msgstr "{} connected: starting the \"{}\" profile automatically."
+
+msgid "adb {} · hazır"
+msgstr "adb {} · ready"
+
+msgid "adb {} · :{} · hazır"
+msgstr "adb {} · :{} · ready"
+
+msgid "adb bulunamadı"
+msgstr "adb was not found"
+
+msgid "adb bulunamadı: {}"
+msgstr "adb was not found: {}"
+
+msgid "Profiller yazılamadı: {}"
+msgstr "The profiles could not be written: {}"
+
+msgid "Profiller serileştirilemedi: {}"
+msgstr "The profiles could not be serialised: {}"
+
+msgid "PROFİL"
+msgstr "PROFILE"
+
+msgid "Ekran yansıtılıyor"
+msgstr "Mirroring the screen"
+
+msgid "Hata · cihaz"
+msgstr "Error · device"
+
+msgid "Cihaz bulunamadı"
+msgstr "No device found"
+
+msgid "USB kablosunu takın ve cihazdaki USB hata ayıklama istemini onaylayın. Kablosuz bir cihazı Cihazlar sekmesindeki TCP/IP alanından bağlayın."
+msgstr "Plug the USB cable in and confirm the USB debugging prompt on the device. Connect a wireless device from the TCP/IP field in the Devices tab."
+
+msgid "Birden fazla cihaz bağlı"
+msgstr "More than one device is connected"
+
+msgid "Hangisinin yansıtılacağı belirsiz. Cihazlar sekmesinden birini işaretleyin."
+msgstr "It is not clear which one to mirror. Tick one in the Devices tab."
+
+msgid "Hata · yetki"
+msgstr "Error · authorisation"
+
+msgid "Cihaz yetkilendirilmemiş"
+msgstr "The device is not authorised"
+
+msgid "Cihaz ekranındaki \"Bu bilgisayara izin ver\" istemini onaylayın. İstem çıkmıyorsa USB hata ayıklamayı kapatıp açın."
+msgstr "Confirm the \"Allow this computer\" prompt on the device. If no prompt appears, turn USB debugging off and on again."
+
+msgid "Hata · bağlantı"
+msgstr "Error · connection"
+
+msgid "Cihaz çevrimdışı"
+msgstr "The device is offline"
+
+msgid "Bağlantı koptu. Kabloyu ve USB kipini denetleyin; kablosuz bir cihazda yeniden bağlanmak gerekebilir."
+msgstr "The connection dropped. Check the cable and the USB mode; a wireless device may need connecting again."
+
+msgid "Hata · sürüm"
+msgstr "Error · version"
+
+msgid "scrcpy sürümü uyumsuz"
+msgstr "The scrcpy versions do not match"
+
+msgid "Cihazdaki sunucu ile istemci aynı sürüm olmalı. Ayarlar'dan bu istemcinin beklediği sürümde bir scrcpy-server seçin."
+msgstr "The server on the device and the client must be the same version. Choose a scrcpy-server of the version this client expects, from Settings."
+
+msgid "Hata · kodlayıcı"
+msgstr "Error · encoder"
+
+msgid "Kodlayıcı bulunamadı"
+msgstr "The encoder was not found"
+
+msgid "Seçilen kodlayıcı bu cihazda yok. Cihazın listesinden birini seçin ya da kodlayıcı alanını boş bırakın."
+msgstr "The chosen encoder does not exist on this device. Pick one from the device's own list, or leave the encoder field empty."
+
+msgid "Uyarı · ses"
+msgstr "Warning · audio"
+
+msgid "Ses aktarılamıyor"
+msgstr "Audio cannot be forwarded"
+
+msgid "Ses aktarımı Android 11 ve üstünü gerektirir, ve bazı cihazlar yakalamayı engeller. Sesi kapatıp yansıtmayı sürdürebilirsiniz."
+msgstr "Audio forwarding needs Android 11 or newer, and some devices block capture outright. You can turn audio off and carry on mirroring."
+
+msgid "Hata · kayıt"
+msgstr "Error · recording"
+
+msgid "Dosya yazılamıyor"
+msgstr "The file cannot be written"
+
+msgid "Hedef klasör yazılabilir olmalı. Ayarlar'daki kayıt klasörünü değiştirin ya da izinleri düzeltin."
+msgstr "The target folder has to be writable. Change the recording folder in Settings, or fix its permissions."
+
+msgid "Hata · port"
+msgstr "Error · port"
+
+msgid "Port kullanımda"
+msgstr "The port is in use"
+
+msgid "Bu aralıktaki portlar başka bir program tarafından tutuluyor. Başka bir scrcpy açıksa kapatın ya da port aralığını değiştirin."
+msgstr "The ports in this range are held by another program. Close any other scrcpy, or change the port range."
+
+msgid "Hata · adb"
+msgstr "Error · adb"
+
+msgid "adb sunucusu çalışmıyor"
+msgstr "The adb server is not running"
+
+msgid "Cihazlara adb sunucusu üzerinden ulaşılıyor ve şu an cevap vermiyor."
+msgstr "Devices are reached through the adb server, and it is not answering."
+
+msgid "adb çalıştırılamadı. Ayarlar'dan tam yolunu verin ya da platform-tools paketini kurun."
+msgstr "adb could not be run. Give its full path in Settings, or install the platform-tools package."
+
+msgid "İşlem başarısız"
+msgstr "The operation failed"
+
+msgid "Ayrıntı aşağıdaki çıktıda. Günlük sekmesinde daha fazlası olabilir."
+msgstr "The detail is in the output below. The Log tab may have more."
+
+msgid "adb sunucusunu yeniden başlat"
+msgstr "Restart the adb server"
+
+msgid "adb yolunu seç"
+msgstr "Choose the adb path"
+
+msgid "Kodlayıcıları listele"
+msgstr "List the encoders"
+
+msgid "Ayarları aç"
+msgstr "Open Settings"

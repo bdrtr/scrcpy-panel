@@ -101,7 +101,7 @@ pub struct Session {
 /// A desktop without the service is a missing convenience, not a reason to
 /// refuse to mirror.
 fn inhibit_screensaver() -> Option<crate::display::screensaver::ScreensaverInhibitor> {
-    match crate::display::screensaver::ScreensaverInhibitor::inhibit("Ekran yansıtılıyor") {
+    match crate::display::screensaver::ScreensaverInhibitor::inhibit(&crate::tr!("Ekran yansıtılıyor")) {
         Ok(guard) => Some(guard),
         Err(e) => {
             log::warn!("--disable-screensaver: {e:#}");

@@ -36,7 +36,7 @@ impl AudioPlayer {
         let name = device
             .description()
             .map(|d| d.name().to_string())
-            .unwrap_or_else(|_| "bilinmeyen çıkış".into());
+            .unwrap_or_else(|_| crate::tr!("bilinmeyen çıkış"));
         let mut config = output_config(&device)?;
         if output_buffer_ms > 0 {
             // cpal counts frames, not milliseconds, and one frame is one sample

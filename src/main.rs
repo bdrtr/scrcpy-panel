@@ -2,6 +2,7 @@ mod adb;
 mod audio;
 mod control;
 mod display;
+mod i18n;
 mod input;
 mod media;
 mod mirror_host;

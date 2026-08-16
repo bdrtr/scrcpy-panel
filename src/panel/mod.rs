@@ -25,6 +25,7 @@ use std::time::Duration;
 mod failure;
 
 use crate::control::control_msg::ControlMsg;
+use crate::tr;
 use crate::mirror_host::{attach, start_audio, Attachment, MirrorUpdate};
 use crate::options::Options;
 use crate::session::{self, Session};
@@ -170,14 +171,14 @@ pub fn run(opts: &Options) -> Result<()> {
     wire(&window, &panel);
     sync_tray_presence(&window, &panel);
     refresh_command(&window);
-    panel.info("Panel hazır.");
+    panel.info(&tr!("Panel hazır."));
 
     // Both paths to the daemon honour the setting now: adb's own command line
     // through the environment, and src/adb/protocol.rs by reading the same
     // variable. Saying which port is in use is still worth a line.
     let port = adb_snapshot().port;
     if !port.is_empty() && port != "5037" {
-        panel.info(&format!("adb sunucu portu {port} kullanılıyor."));
+        panel.info(&tr!("adb sunucu portu {} kullanılıyor.", port));
     }
 
     // "Başlangıçta scrcpy-server sürümünü denetle". Looking for it is a handful
@@ -682,7 +683,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 write_config(&window, &PanelConfig::default());
                 refresh_command(&window);
                 panel.editing_profile.set(None);
-                panel.info("Yapılandırma varsayılanlara döndürüldü.");
+                panel.info(&tr!("Yapılandırma varsayılanlara döndürüldü."));
             }
         });
     }
@@ -694,7 +695,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
             if let Some(window) = weak.upgrade() {
                 let command = read_config(&window).to_command_line();
                 set_clipboard(&command);
-                panel.info(&format!("Komut panoya kopyalandı ({} karakter).", command.len()));
+                panel.info(&tr!("Komut panoya kopyalandı ({} karakter).", command.len()));
             }
         });
     }
@@ -729,7 +730,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 panel.info(&format!(
                     "{} {}",
                     serial,
-                    if added { "seçildi" } else { "seçimden çıkarıldı" }
+                    if added { tr!("seçildi") } else { tr!("seçimden çıkarıldı") }
                 ));
             }
         });
@@ -786,7 +787,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                         let profile = &mut profiles[index];
                         profile.description = description;
                         profile.config = config;
-                        format!("Profil güncellendi: {}", profile.name)
+                        tr!("Profil güncellendi: {}", profile.name)
                     }
                     _ => {
                         let name = format!("Profil {}", panel.profiles.borrow().len() + 1);
@@ -818,7 +819,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                     refresh_command(&window);
                     // Applying is not editing: a later save makes a new profile.
                     panel.editing_profile.set(None);
-                    panel.info("Profil uygulandı.");
+                    panel.info(&tr!("Profil uygulandı."));
                 }
             }
         });
@@ -868,11 +869,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 .collect();
 
             set_clipboard(&text.join("\n"));
-            panel.info(&format!(
-                "{} satır panoya kopyalandı{}.",
-                text.len(),
-                if filter == "all" { String::new() } else { format!(" ({filter} süzgeci)") }
-            ));
+            panel.info(&tr!("{} satır panoya kopyalandı{}.", text.len(), if filter == "all" { String::new() } else { tr!(" ({} süzgeci)", filter) }));
         });
     }
 
@@ -900,7 +897,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
             if let Some(window) = weak.upgrade() {
                 let addr = window.global::<Cfg>().get_tcpip_addr().to_string();
                 if addr.is_empty() {
-                    panel.warn("Bağlanmak için bir adres girin.");
+                    panel.warn(&tr!("Bağlanmak için bir adres girin."));
                     return;
                 }
                 let addr = if addr.contains(':') { addr } else { format!("{addr}:5555") };
@@ -921,7 +918,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                         panel.info(&String::from_utf8_lossy(&out.stdout).trim().to_string());
                         spawn_device_scan(&panel);
                     }
-                    Err(e) => panel.warn(&format!("adb connect başarısız: {e}")),
+                    Err(e) => panel.warn(&tr!("adb connect başarısız: {}", e)),
                 }
             }
         });
@@ -936,7 +933,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 let addr = app.get_pair_addr().to_string();
                 let code = app.get_pair_code().to_string();
                 if addr.is_empty() || code.is_empty() {
-                    panel.warn("Eşleştirme için adres ve kod gerekli.");
+                    panel.warn(&tr!("Eşleştirme için adres ve kod gerekli."));
                     return;
                 }
                 match adb().args(["pair", &addr, &code]).output() {
@@ -944,7 +941,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                         panel.info(&String::from_utf8_lossy(&out.stdout).trim().to_string());
                         spawn_device_scan(&panel);
                     }
-                    Err(e) => panel.warn(&format!("adb pair başarısız: {e}")),
+                    Err(e) => panel.warn(&tr!("adb pair başarısız: {}", e)),
                 }
             }
         });
@@ -965,11 +962,11 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 // Rotation is a scrcpy control message, not a key event, so it
                 // needs the running session's control channel rather than adb.
                 "rotate" => {
-                    panel.warn("Ekranı döndürme ayna penceresinden yapılıyor: MOD+r.");
+                    panel.warn(&tr!("Ekranı döndürme ayna penceresinden yapılıyor: MOD+r."));
                     return;
                 }
                 _ => {
-                    panel.warn(&format!("Bilinmeyen tuş: {key}"));
+                    panel.warn(&tr!("Bilinmeyen tuş: {}", key));
                     return;
                 }
             };
@@ -982,12 +979,13 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 cmd.args(["-s", &serial]);
             }
             match cmd.args(["shell", "input", "keyevent", keycode]).output() {
-                Ok(out) if out.status.success() => panel.info(&format!("{keycode} gönderildi.")),
-                Ok(out) => panel.warn(&format!(
-                    "{keycode} gönderilemedi: {}",
+                Ok(out) if out.status.success() => panel.info(&tr!("{} gönderildi.", keycode)),
+                Ok(out) => panel.warn(&tr!(
+                    "{} gönderilemedi: {}",
+                    keycode,
                     String::from_utf8_lossy(&out.stderr).trim()
                 )),
-                Err(e) => panel.warn(&format!("Tuş gönderilemedi: {e}")),
+                Err(e) => panel.warn(&tr!("Tuş gönderilemedi: {}", e)),
             }
         });
     }
@@ -1016,9 +1014,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                         .get(index as usize)
                         .map(|p| p.name.clone())
                         .unwrap_or_default();
-                    panel.info(&format!(
-                        "\"{name}\" düzenleniyor — kaydedince üzerine yazılacak."
-                    ));
+                    panel.info(&tr!("\"{}\" düzenleniyor — kaydedince üzerine yazılacak.", name));
                 }
             }
         });
@@ -1061,24 +1057,21 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                             format.as_deref(),
                             controller.as_deref(),
                         ) {
-                            Ok(()) => panel.info(&format!(
-                                "Kayıt başladı: {}",
-                                config.effective_record_path()
-                            )),
-                            Err(e) => panel.warn(&format!("Kayıt başlatılamadı: {e:#}")),
+                            Ok(()) => panel.info(&tr!("Kayıt başladı: {}", config.effective_record_path())),
+                            Err(e) => panel.warn(&tr!("Kayıt başlatılamadı: {}", format!("{e:#}"))),
                         }
                     }
                     Some(session) => {
                         if session.stop_recording() {
-                            panel.info("Kayıt durduruldu, dosya kapatıldı.");
+                            panel.info(&tr!("Kayıt durduruldu, dosya kapatıldı."));
                         } else {
-                            panel.info("Kayıt kapatıldı.");
+                            panel.info(&tr!("Kayıt kapatıldı."));
                         }
                     }
                     None if on => {
-                        panel.info("Kayıt açıldı; oturum başlayınca dosyaya yazılacak.")
+                        panel.info(&tr!("Kayıt açıldı; oturum başlayınca dosyaya yazılacak."))
                     }
-                    None => panel.info("Kayıt kapatıldı."),
+                    None => panel.info(&tr!("Kayıt kapatıldı.")),
                 }
             }
         });
@@ -1089,7 +1082,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
         app.on_raise_session(move || {
             // The session is a separate process with its own window; bringing
             // it forward needs a compositor protocol this panel does not speak.
-            panel.warn("Ayna penceresini öne getirme henüz yok — pencereyi kendiniz seçin.");
+            panel.warn(&tr!("Ayna penceresini öne getirme henüz yok — pencereyi kendiniz seçin."));
         });
     }
 
@@ -1110,8 +1103,8 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 })
                 .unwrap_or_default();
             match take_screenshot(&serial, &directory) {
-                Ok(path) => panel.info(&format!("Ekran görüntüsü kaydedildi: {path}")),
-                Err(e) => panel.warn(&format!("Ekran görüntüsü alınamadı: {e:#}")),
+                Ok(path) => panel.info(&tr!("Ekran görüntüsü kaydedildi: {}", path)),
+                Err(e) => panel.warn(&tr!("Ekran görüntüsü alınamadı: {}", format!("{e:#}"))),
             }
         });
     }
@@ -1137,15 +1130,15 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
             // the cable take, which on the event loop would freeze the panel.
             std::thread::spawn(move || {
                 let Some(paths) = rfd::FileDialog::new()
-                    .set_title("Cihaza gönderilecek dosyalar")
+                    .set_title(tr!("Cihaza gönderilecek dosyalar"))
                     .pick_files()
                 else {
-                    report(&weak, Transfer::done("Dosya seçilmedi.".to_string()));
+                    report(&weak, Transfer::done(tr!("Dosya seçilmedi.")));
                     return;
                 };
                 report(
                     &weak,
-                    Transfer::done(format!("{} dosya gönderiliyor…", paths.len())),
+                    Transfer::done(tr!("{} dosya gönderiliyor…", paths.len())),
                 );
                 for path in paths {
                     let transfer = transfer_file(&serial, &path);
@@ -1159,7 +1152,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
         app.on_send_clipboard(move || {
             let text = crate::input::slint_input::get_clipboard_text();
             if text.is_empty() {
-                panel.warn("Pano boş.");
+                panel.warn(&tr!("Pano boş."));
                 return;
             }
             let controller = panel.controller.borrow().clone();
@@ -1170,7 +1163,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                         paste: false,
                         text,
                     });
-                    panel.info("Pano cihaza gönderildi.");
+                    panel.info(&tr!("Pano cihaza gönderildi."));
                 }
                 None => panel.warn(
                     "Panoyu göndermek için gömülü bir oturum gerekiyor \
@@ -1208,7 +1201,7 @@ fn refresh_command_for(window: &PanelWindow, serials: &[String]) {
     } else {
         format!("{} + {}", config.video_codec, config.audio_codec)
     };
-    let device = if serial.is_empty() { "cihaz seçilmedi".to_string() } else { serial };
+    let device = if serial.is_empty() { tr!("cihaz seçilmedi") } else { serial };
     app.set_status_line(format!("{} · {} bayrak · {}", device, config.flag_count(), codecs).into());
 }
 
@@ -1255,10 +1248,7 @@ fn session_options(window: &PanelWindow, panel: &Rc<Panel>) -> Option<Options> {
     let config = launch_config(window);
     let (args, dropped) = config.to_client_args();
     if !dropped.is_empty() {
-        panel.warn(&format!(
-            "Bu bayraklar istemcide henüz yok, atlandı: {}",
-            dropped.join(" ")
-        ));
+        panel.warn(&tr!("Bu bayraklar istemcide henüz yok, atlandı: {}", dropped.join(" ")));
     }
 
     let mut argv = vec!["scrcpy-slint".to_string()];
@@ -1266,7 +1256,7 @@ fn session_options(window: &PanelWindow, panel: &Rc<Panel>) -> Option<Options> {
     match Options::try_parse_from(&argv) {
         Ok(opts) => Some(opts),
         Err(e) => {
-            panel.warn(&format!("Argümanlar geçersiz: {}", e));
+            panel.warn(&tr!("Argümanlar geçersiz: {}", e));
             None
         }
     }
@@ -1274,7 +1264,7 @@ fn session_options(window: &PanelWindow, panel: &Rc<Panel>) -> Option<Options> {
 
 fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
     if panel.is_running() {
-        panel.warn("Zaten çalışan bir oturum var.");
+        panel.warn(&tr!("Zaten çalışan bir oturum var."));
         return;
     }
     let Some(opts) = session_options(window, panel) else {
@@ -1283,10 +1273,7 @@ fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
 
     let config = launch_config(window);
     let serials = selected_serials(panel);
-    panel.info(&format!(
-        "Başlatılıyor: {}",
-        config.to_command_line_for(&serials)
-    ));
+    panel.info(&tr!("Başlatılıyor: {}", config.to_command_line_for(&serials)));
 
     let embedded_wanted = window.global::<Settings>().get_mirror_mode() == "embedded";
     match serials.len() {
@@ -1297,7 +1284,7 @@ fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
             // An embedded mirror has one place to draw, so several devices are
             // always separate windows.
             if embedded_wanted {
-                panel.info(&format!("{n} cihaz seçili — her biri ayrı pencerede açılıyor."));
+                panel.info(&tr!("{} cihaz seçili — her biri ayrı pencerede açılıyor.", n));
             }
             for serial in &serials {
                 start_windowed(window, panel, &config, Some(serial));
@@ -1325,7 +1312,7 @@ fn start_embedded(window: &PanelWindow, panel: &Rc<Panel>, opts: Options) {
     // a session that is already on its way up.
     sync_tray(true);
     window.global::<App>().set_tab("session".into());
-    panel.info("Cihaza bağlanılıyor…");
+    panel.info(&tr!("Cihaza bağlanılıyor…"));
 
     let timer = slint::Timer::default();
     timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), {
@@ -1364,7 +1351,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
     let mut session = match result {
         Ok(session) => session,
         Err(e) => {
-            panel.warn(&format!("Oturum başlatılamadı: {:#}", e));
+            panel.warn(&tr!("Oturum başlatılamadı: {}", format!("{e:#}")));
             show_failure(&window, &format!("{e:#}"));
             window.global::<App>().set_session_running(false);
             sync_tray(false);
@@ -1378,7 +1365,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
         .and_then(start_audio);
 
     match session.video.take() {
-        None => panel.warn("Video kapalı; gömülecek görüntü yok."),
+        None => panel.warn(&tr!("Video kapalı; gömülecek görüntü yok.")),
         Some(video) => {
             let apply: Rc<dyn Fn(MirrorUpdate)> = {
                 let weak = panel.window.clone();
@@ -1413,7 +1400,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
                 |_action, _size, _orientation| {},
                 move || {
                     if let Some(panel) = weak_panel.upgrade() {
-                        panel.info("Görüntü akışı sona erdi.");
+                        panel.info(&tr!("Görüntü akışı sona erdi."));
                         stop_session(&panel);
                     }
                 },
@@ -1426,21 +1413,18 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
     let app = window.global::<App>();
     app.set_session_title(session.device_name.as_str().into());
     app.set_session_meta(
-        format!(
-            "{} · gömülü",
-            if opts.serial.is_some() {
+        tr!("{} · gömülü", if opts.serial.is_some() {
                 opts.serial.clone().unwrap_or_default()
             } else {
                 session.device_name.clone()
-            }
-        )
+            })
         .into(),
     );
     app.set_session_running(true);
     sync_tray(true);
 
     *panel.embedded.borrow_mut() = Some(session);
-    panel.info("Oturum başladı.");
+    panel.info(&tr!("Oturum başladı."));
 }
 
 /// Run the session as a second copy of this binary, in its own window.
@@ -1461,7 +1445,7 @@ fn start_windowed(
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(e) => {
-            panel.warn(&format!("Kendi yolunu bulamadı: {e}"));
+            panel.warn(&tr!("Kendi yolunu bulamadı: {}", e));
             return;
         }
     };
@@ -1475,7 +1459,7 @@ fn start_windowed(
     let mut child = match child {
         Ok(child) => child,
         Err(e) => {
-            panel.warn(&format!("Oturum başlatılamadı: {e}"));
+            panel.warn(&tr!("Oturum başlatılamadı: {}", e));
             show_failure(window, &format!("{e}"));
             return;
         }
@@ -1512,14 +1496,10 @@ fn start_windowed(
     sync_tray(true);
     app.set_session_title(serial.unwrap_or(config.serial.as_str()).into());
     app.set_session_meta(
-        format!(
-            "{} · ayrı pencere{}",
-            config.video_codec,
-            match panel.process.borrow().len() {
+        tr!("{} · ayrı pencere{}", config.video_codec, match panel.process.borrow().len() {
                 n if n > 1 => format!(" ×{n}"),
                 _ => String::new(),
-            }
-        )
+            })
         .into(),
     );
 
@@ -1543,7 +1523,7 @@ fn start_windowed(
                 }
                 panel_watch.info("Oturum sona erdi.");
             } else if after < before {
-                panel_watch.info(&format!("Bir pencere kapandı, {after} sürüyor."));
+                panel_watch.info(&tr!("Bir pencere kapandı, {} sürüyor.", after));
             }
         },
     );
@@ -1584,7 +1564,7 @@ fn apply_selection(window: &PanelWindow, panel: &Rc<Panel>) {
         match selected.len() {
             0 => "cihaz seçilmedi".to_string(),
             1 => selected[0].clone(),
-            n => format!("{n} cihaz seçildi"),
+            n => tr!("{} cihaz seçildi", n),
         }
         .as_str()
         .into(),
@@ -1622,11 +1602,11 @@ fn start_metrics(panel: &Rc<Panel>, attachment: &Attachment) {
         let elapsed = started_at.get().map(|t| t.elapsed().as_secs()).unwrap_or(0);
         let rows = vec![
             MetricRow {
-                key: "Çözünürlük".into(),
+                key: tr!("Çözünürlük").as_str().into(),
                 value: format!("{} × {}", width, height).as_str().into(),
             },
             MetricRow {
-                key: "Kare hızı".into(),
+                key: tr!("Kare hızı").as_str().into(),
                 value: format!("{:.1} fps", fps.borrow().rate()).as_str().into(),
             },
             MetricRow {
@@ -1640,11 +1620,11 @@ fn start_metrics(panel: &Rc<Panel>, attachment: &Attachment) {
                 },
             },
             MetricRow {
-                key: "Döndürme".into(),
+                key: tr!("Döndürme").as_str().into(),
                 value: format!("{}°", orientation.get().degrees() as i32).as_str().into(),
             },
             MetricRow {
-                key: "Süre".into(),
+                key: tr!("Süre").as_str().into(),
                 value: format!("{:02}:{:02}", elapsed / 60, elapsed % 60).as_str().into(),
             },
         ];
@@ -1716,8 +1696,9 @@ fn check_server_version(panel: &Rc<Panel>, opts: &Options) {
     let path = match session::resolve_server_path(opts) {
         Ok(path) => path,
         Err(e) => {
-            panel.warn(&format!(
-                "scrcpy-server bulunamadı, sürüm denetlenemedi (istemci v{required} bekliyor): {}",
+            panel.warn(&tr!(
+                "scrcpy-server bulunamadı, sürüm denetlenemedi (istemci v{} bekliyor): {}",
+                required,
                 e.to_string().lines().next().unwrap_or_default()
             ));
             return;
@@ -1733,15 +1714,15 @@ fn check_server_version(panel: &Rc<Panel>, opts: &Options) {
     }
 
     match found {
-        Some(version) if version != required => panel.warn(&format!(
-            "scrcpy-server sürümü uyuşmuyor: {path} v{version}, istemci v{required} bekliyor."
-        )),
-        Some(version) => panel.info(&format!("scrcpy-server v{version} hazır: {path}")),
+        Some(version) if version != required => panel.warn(&tr!("scrcpy-server sürümü uyuşmuyor: {} v{}, istemci v{} bekliyor.", path, version, required)),
+        Some(version) => panel.info(&tr!("scrcpy-server v{} hazır: {}", version, path)),
         // A jar carries its version inside a compressed entry, so a file simply
         // called scrcpy-server cannot be read without unzipping it. Say where it
         // is and what is expected rather than guessing.
-        None => panel.info(&format!(
-            "scrcpy-server bulundu: {path} (istemci v{required} bekliyor)."
+        None => panel.info(&tr!(
+            "scrcpy-server bulundu: {} (istemci v{} bekliyor).",
+            path,
+            required
         )),
     }
 }
@@ -1792,7 +1773,7 @@ fn stop_session(panel: &Rc<Panel>) {
     if stopped {
         panel.info("Oturum durduruldu.");
     } else {
-        panel.warn("Çalışan bir oturum yok.");
+        panel.warn(&tr!("Çalışan bir oturum yok."));
     }
 }
 
@@ -1818,8 +1799,8 @@ fn sync_tray_presence(window: &PanelWindow, panel: &Rc<Panel>) {
         Ok(tray) => tray,
         Err(e) => {
             // No tray is a missing convenience, not a broken panel.
-            log::warn!("Sistem tepsisi kullanılamıyor: {e}");
-            panel.warn("Sistem tepsisi bu masaüstünde kullanılamıyor.");
+            log::warn!("{}", tr!("Sistem tepsisi kullanılamıyor: {}", e));
+            panel.warn(&tr!("Sistem tepsisi bu masaüstünde kullanılamıyor."));
             return;
         }
     };
@@ -1853,7 +1834,7 @@ fn sync_tray_presence(window: &PanelWindow, panel: &Rc<Panel>) {
 
     tray.set_session_running(panel.is_running());
     *panel.tray.borrow_mut() = Some(tray);
-    log::info!("Sistem tepsisi simgesi eklendi");
+    log::info!("{}", tr!("Sistem tepsisi simgesi eklendi"));
 }
 
 /// Mirror the session state into the tray menu.
@@ -1892,11 +1873,20 @@ fn show_failure(window: &PanelWindow, text: &str) {
         return;
     }
 
+    // The card's words are source-language constants; they become the
+    // interface language here, where they meet the interface.
     let card = failure::classify(text);
-    app.set_device_error_tag(card.tag.into());
-    app.set_device_error_title(card.title.into());
-    app.set_device_error_detail(card.detail.into());
-    app.set_device_error_action(card.remedy.label().unwrap_or("").into());
+    app.set_device_error_tag(tr!(card.tag).as_str().into());
+    app.set_device_error_title(tr!(card.title).as_str().into());
+    app.set_device_error_detail(tr!(card.detail).as_str().into());
+    app.set_device_error_action(
+        card.remedy
+            .label()
+            .map(|label| tr!(label))
+            .unwrap_or_default()
+            .as_str()
+            .into(),
+    );
     REMEDY.with(|slot| slot.set(card.remedy));
 }
 
@@ -1910,15 +1900,15 @@ fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
     match REMEDY.with(|slot| slot.get()) {
         failure::Remedy::None => {}
         failure::Remedy::RestartAdb => {
-            panel.info("adb sunucusu yeniden başlatılıyor…");
+            panel.info(&tr!("adb sunucusu yeniden başlatılıyor…"));
             let killed = adb().arg("kill-server").output();
             let started = adb().arg("start-server").output();
             match (killed, started) {
                 (Ok(_), Ok(out)) if out.status.success() => {
-                    panel.info("adb sunucusu yeniden başlatıldı.");
+                    panel.info(&tr!("adb sunucusu yeniden başlatıldı."));
                     spawn_device_scan(panel);
                 }
-                _ => panel.warn("adb sunucusu yeniden başlatılamadı."),
+                _ => panel.warn(&tr!("adb sunucusu yeniden başlatılamadı.")),
             }
         }
         failure::Remedy::PickAdbPath => {
@@ -1926,7 +1916,7 @@ fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
             let weak = window.as_weak();
             std::thread::spawn(move || {
                 let Some(path) = rfd::FileDialog::new()
-                    .set_title("adb çalıştırılabilir dosyasını seçin")
+                    .set_title(tr!("adb çalıştırılabilir dosyasını seçin"))
                     .pick_file()
                 else {
                     return;
@@ -1949,6 +1939,9 @@ fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
     }
 }
 
+/// The language the strings in ui/ and src/ are written in.
+const SOURCE_LANGUAGE: &str = "tr";
+
 /// Switch the interface to the language the settings name.
 ///
 /// The strings are bundled into the binary at build time, so this is a call
@@ -1956,10 +1949,23 @@ fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
 /// on the selected language.
 fn apply_language(window: &PanelWindow) {
     let language = window.global::<Settings>().get_language().to_string();
-    match slint::select_bundled_translation(&language) {
-        Ok(()) => log::info!("Arayüz dili: {language}"),
-        Err(e) => log::warn!("Arayüz dili {language} seçilemedi: {e}"),
+    // The Rust side has its own table; Slint's @tr bindings and this must agree
+    // about which language is showing.
+    crate::i18n::set_language(&language);
+
+    // The source language has no .po of its own — the strings in the files are
+    // already it — and Slint knows it as the empty name rather than as "tr".
+    let bundled = if language == SOURCE_LANGUAGE { "" } else { language.as_str() };
+    match slint::select_bundled_translation(bundled) {
+        Ok(()) => log::info!("{}", tr!("Arayüz dili: {}", language)),
+        Err(e) => log::warn!("{}", tr!("Arayüz dili {} seçilemedi: {}", language, e)),
     }
+
+    // Models built in Rust do not re-evaluate the way `@tr` bindings do, so the
+    // ones with fixed contents are rebuilt in the new language.
+    window
+        .global::<App>()
+        .set_shortcuts(ModelRc::from(Rc::new(VecModel::from(shortcut_rows()))));
 }
 
 /// Where a pushed file lands, matching scrcpy's own default.
@@ -1992,7 +1998,7 @@ fn transfer_file(serial: &str, path: &std::path::Path) -> Transfer {
 
     let output = match command.output() {
         Ok(output) => output,
-        Err(e) => return Transfer::failed(format!("adb çalıştırılamadı: {e}")),
+        Err(e) => return Transfer::failed(tr!("adb çalıştırılamadı: {}", e)),
     };
 
     // `adb install` reports a refused install on stdout and still exits 0, so
@@ -2014,12 +2020,12 @@ fn transfer_file(serial: &str, path: &std::path::Path) -> Transfer {
             .find(|line| !line.trim().is_empty())
             .unwrap_or("bilinmeyen hata")
             .trim();
-        let what = if is_apk { "Kurulamadı" } else { "Gönderilemedi" };
+        let what = if is_apk { tr!("Kurulamadı") } else { tr!("Gönderilemedi") };
         Transfer::failed(format!("{what}: {name} — {why}"))
     } else if is_apk {
         Transfer::done(format!("Kuruldu: {name}"))
     } else {
-        Transfer::done(format!("Gönderildi: {name} → {PUSH_TARGET}"))
+        Transfer::done(tr!("Gönderildi: {} → {}", name, PUSH_TARGET))
     }
 }
 
@@ -2097,7 +2103,7 @@ fn query_device(weak: &slint::Weak<PanelWindow>, panel: &Rc<Panel>, flag: &str) 
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(e) => {
-            panel.warn(&format!("Kendi yolunu bulamadı: {e}"));
+            panel.warn(&tr!("Kendi yolunu bulamadı: {}", e));
             return;
         }
     };
@@ -2117,7 +2123,7 @@ fn query_device(weak: &slint::Weak<PanelWindow>, panel: &Rc<Panel>, flag: &str) 
                 }
             }
         }
-        Err(e) => panel.warn(&format!("{flag} çalıştırılamadı: {e}")),
+        Err(e) => panel.warn(&tr!("{} çalıştırılamadı: {}", flag, e)),
     }
 }
 
@@ -2154,7 +2160,7 @@ fn spawn_device_scan(panel: &Rc<Panel>) {
                 Vec::new(),
                 String::from_utf8_lossy(&out.stderr).trim().to_string(),
             ),
-            Err(e) => (Vec::new(), format!("adb çalıştırılamadı: {e}")),
+            Err(e) => (Vec::new(), tr!("adb çalıştırılamadı: {}", e)),
         };
         let status = adb_status();
         // Autostart hangs off a device being *usable*; anything unauthorised or
@@ -2239,7 +2245,7 @@ fn autostart_if_wanted(panel: &Rc<Panel>, window: &PanelWindow, ready: Option<&s
     window.global::<Cfg>().set_serial(serial.into());
     window.global::<App>().set_selection_label(serial.into());
     refresh_command(window);
-    panel.info(&format!("{serial} bağlı: \"{name}\" profili otomatik başlatılıyor."));
+    panel.info(&tr!("{} bağlı: \"{}\" profili otomatik başlatılıyor.", serial, name));
     start_session(window, panel);
 }
 
@@ -2321,11 +2327,11 @@ fn adb_status() -> String {
                 .unwrap_or("?");
             let port = adb_snapshot().port;
             if port.is_empty() || port == "5037" {
-                format!("adb {version} · hazır")
+                tr!("adb {} · hazır", version)
             } else {
                 // The port is worth showing: a wrong one is otherwise only
                 // visible as an empty device list.
-                format!("adb {version} · :{port} · hazır")
+                tr!("adb {} · :{} · hazır", version, port)
             }
         }
         // Naming the executable turns "nothing works" into something the user
@@ -2333,9 +2339,9 @@ fn adb_status() -> String {
         Err(_) => {
             let path = adb_snapshot().path;
             if path.is_empty() || path == "adb" {
-                "adb bulunamadı".to_string()
+                tr!("adb bulunamadı")
             } else {
-                format!("adb bulunamadı: {path}")
+                tr!("adb bulunamadı: {}", path)
             }
         }
     }
@@ -2368,10 +2374,10 @@ fn save_profiles(panel: &Rc<Panel>) {
     match serde_json::to_string_pretty(&*panel.profiles.borrow()) {
         Ok(text) => {
             if let Err(e) = std::fs::write(&path, text) {
-                panel.warn(&format!("Profiller yazılamadı: {e}"));
+                panel.warn(&tr!("Profiller yazılamadı: {}", e));
             }
         }
-        Err(e) => panel.warn(&format!("Profiller serileştirilemedi: {e}")),
+        Err(e) => panel.warn(&tr!("Profiller serileştirilemedi: {}", e)),
     }
 }
 
@@ -2381,7 +2387,7 @@ fn refresh_profile_cards(panel: &Rc<Panel>) {
         .borrow()
         .iter()
         .map(|profile| ProfileCard {
-            kicker: "PROFİL".into(),
+            kicker: tr!("PROFİL").as_str().into(),
             name: profile.name.as_str().into(),
             desc: profile.description.as_str().into(),
             flags: profile.config.to_command_line().as_str().into(),
@@ -2488,9 +2494,11 @@ fn shortcut_rows() -> Vec<ShortcutRow> {
         ("Orta tık", "Ana ekran"),
     ]
     .into_iter()
+    // Translated here rather than in the table, so the table stays a plain
+    // list of pairs and the rows can be rebuilt in another language.
     .map(|(combo, desc)| ShortcutRow {
-        combo: combo.into(),
-        desc: desc.into(),
+        combo: tr!(combo).as_str().into(),
+        desc: tr!(desc).as_str().into(),
     })
     .collect()
 }

@@ -104,7 +104,12 @@ with the opening session header, which every run exercises.
 - `--adb-port` reaches both paths to the daemon: adb's own command line through
   `ANDROID_ADB_SERVER_PORT`, and `src/adb/protocol.rs`, which reads the same variable
   rather than the 5037 it used to hardcode.
-- **Interface language is disabled**, with a label saying so: it needs a translation layer.
+- The interface has two languages. The strings in `ui/` go through Slint's `@tr`, and the
+  panel's own messages go through `tr!` in `src/i18n.rs`; both read the same
+  `lang/en/LC_MESSAGES/scrcpy-slint.po`, which slint-build bundles for the first and
+  build.rs turns into a sorted table for the second. Switching is a call rather than a
+  restart. Turkish is the source language, so anything absent from the .po falls back to
+  it — which is what codec names, example paths and the program's own name want.
 - Minimize-to-tray works, with two workarounds around Slint 1.17.1: the generated
   `show()`/`hide()` on a tray-rooted component panic, because `visible` is frozen as
   constant when no binding in the file writes it; and the platform handle is built from
