@@ -87,7 +87,9 @@ pub struct Session {
     video_config: Arc<Mutex<Option<Vec<u8>>>>,
     audio_config: Arc<Mutex<Option<Vec<u8>>>>,
     server_process: adb::commands::ShellHandle,
-    tunnel: adb::tunnel::AdbTunnel,
+    /// Held rather than read: closing it is what takes the forwarded port down,
+    /// and that happens when this is dropped.
+    _tunnel: adb::tunnel::AdbTunnel,
     no_cleanup: bool,
     kill_adb_on_close: bool,
     /// --record-orientation, for a recording started after the session is up.
@@ -230,7 +232,7 @@ impl Session {
             video_config: video_config.clone(),
             audio_config: audio_config.clone(),
             server_process,
-            tunnel,
+            _tunnel: tunnel,
             no_cleanup: opts.no_cleanup,
             kill_adb_on_close: opts.kill_adb_on_close,
             record_rotation: opts.record_rotation(),
@@ -761,6 +763,7 @@ fn run_audio_pipeline(
     recorder: Arc<RwLock<Option<Recorder>>>,
     config_seen: Arc<Mutex<Option<Vec<u8>>>>,
 ) {
+    let mut format_checked = false;
     let mut decoder = match AudioDecoder::new(codec_type) {
         Ok(decoder) => decoder,
         Err(e) => {
@@ -786,6 +789,22 @@ fn run_audio_pipeline(
                 }
                 match decoder.decode(&packet) {
                     Ok(Some(audio)) => {
+                        // The player and the regulator are built for 48 kHz
+                        // stereo, which is what the server encodes. Anything
+                        // else would play at the wrong speed rather than fail,
+                        // so it is worth one line.
+                        if !format_checked {
+                            format_checked = true;
+                            if audio.sample_rate != 48_000 || audio.channels != 2 {
+                                log::warn!(
+                                    "The device is sending {} Hz, {} channels; the player is \
+                                     built for 48000 Hz stereo and will play it at the wrong \
+                                     speed",
+                                    audio.sample_rate,
+                                    audio.channels
+                                );
+                            }
+                        }
                         if samples_tx.send(audio.samples).is_err() {
                             log::debug!("Audio player disconnected");
                             return;

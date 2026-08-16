@@ -14,8 +14,6 @@ pub struct DecodedAudio {
 pub struct AudioDecoder {
     decoder: ffmpeg_next::decoder::Audio,
     resampler: Option<ffmpeg_next::software::resampling::Context>,
-    config_data: Vec<u8>,
-    merge_buf: Vec<u8>,
     av_frame: ffmpeg_next::frame::Audio,
     sample_rate: u32,
     channels: u16,
@@ -63,8 +61,6 @@ impl AudioDecoder {
         Ok(Self {
             decoder,
             resampler: None,
-            config_data: Vec::new(),
-            merge_buf: Vec::with_capacity(16 * 1024),
             av_frame: ffmpeg_next::frame::Audio::empty(),
             sample_rate: 0,
             channels: 0,

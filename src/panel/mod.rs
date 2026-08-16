@@ -13,7 +13,7 @@ pub use command::PanelConfig;
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver};
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};

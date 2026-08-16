@@ -19,15 +19,6 @@ const NUM_KEYS: usize = 0x66;
 /// HID report size: 1 modifier + 1 reserved + 6 keys
 const REPORT_SIZE: usize = 2 + MAX_KEYS;
 
-// HID modifier bit flags
-const MOD_LEFT_CTRL: u8   = 1 << 0;
-const MOD_LEFT_SHIFT: u8  = 1 << 1;
-const MOD_LEFT_ALT: u8    = 1 << 2;
-const MOD_LEFT_GUI: u8    = 1 << 3;
-const MOD_RIGHT_CTRL: u8  = 1 << 4;
-const MOD_RIGHT_SHIFT: u8 = 1 << 5;
-const MOD_RIGHT_ALT: u8   = 1 << 6;
-const MOD_RIGHT_GUI: u8   = 1 << 7;
 
 /// USB HID Keyboard Report Descriptor (standard boot protocol keyboard)
 /// Matches scrcpy's SC_HID_KEYBOARD_REPORT_DESC exactly.
@@ -145,7 +136,6 @@ impl HidKeyboard {
                     for j in 2..REPORT_SIZE {
                         report[j] = 0x01; // Error Roll Over
                     }
-                    count = MAX_KEYS;
                     break;
                 }
                 report[2 + count] = i as u8;

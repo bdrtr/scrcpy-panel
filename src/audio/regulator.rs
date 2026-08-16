@@ -76,20 +76,6 @@ impl AudioBuffer {
         self.count -= to_skip;
         to_skip
     }
-
-    /// Write silence into the buffer
-    pub fn write_silence(&mut self, count: usize) -> usize {
-        let available = self.capacity - self.count;
-        let to_write = count.min(available);
-
-        for _ in 0..to_write {
-            self.data[self.write_pos] = 0.0;
-            self.write_pos = (self.write_pos + 1) % self.capacity;
-        }
-        self.count += to_write;
-        to_write
-    }
-
     /// Number of samples available to read
     pub fn can_read(&self) -> usize {
         self.count
@@ -127,13 +113,6 @@ impl MovingAverage {
 
     fn get(&self) -> f32 {
         if self.count == 0 { 0.0 } else { self.sum / self.count as f32 }
-    }
-
-    fn set(&mut self, value: f32) {
-        self.sum = value * self.count as f32;
-        for v in self.values.iter_mut() {
-            *v = value;
-        }
     }
 }
 

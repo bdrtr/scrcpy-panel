@@ -1,7 +1,6 @@
 
 /// Android keycodes (subset used by scrcpy shortcuts)
 pub const AKEYCODE_HOME: u32 = 3;
-pub const AKEYCODE_BACK: u32 = 4;
 pub const AKEYCODE_POWER: u32 = 26;
 pub const AKEYCODE_VOLUME_UP: u32 = 24;
 pub const AKEYCODE_VOLUME_DOWN: u32 = 25;
@@ -23,7 +22,6 @@ pub enum ShortcutAction {
     PixelPerfect,
     ToggleFps,
     ExpandNotifications,
-    ExpandSettings,
     CollapsePanels,
     RotateDevice,
     RotateCW,

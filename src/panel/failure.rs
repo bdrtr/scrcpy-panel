@@ -31,27 +31,6 @@ impl Remedy {
             Remedy::OpenSettings => Some("Ayarları aç"),
         }
     }
-
-    /// The key handed to the UI and back, so the click knows what to run.
-    pub fn key(self) -> &'static str {
-        match self {
-            Remedy::None => "",
-            Remedy::RestartAdb => "restart-adb",
-            Remedy::PickAdbPath => "pick-adb",
-            Remedy::ListEncoders => "list-encoders",
-            Remedy::OpenSettings => "settings",
-        }
-    }
-
-    pub fn from_key(key: &str) -> Self {
-        match key {
-            "restart-adb" => Remedy::RestartAdb,
-            "pick-adb" => Remedy::PickAdbPath,
-            "list-encoders" => Remedy::ListEncoders,
-            "settings" => Remedy::OpenSettings,
-            _ => Remedy::None,
-        }
-    }
 }
 
 /// One error card.
@@ -268,17 +247,4 @@ mod tests {
         assert_eq!(failure.remedy.label(), None, "no button with nothing to do");
     }
 
-    /// The key travels to the UI as a string and comes back on the click.
-    #[test]
-    fn every_remedy_survives_the_round_trip_through_its_key() {
-        for remedy in [
-            Remedy::None,
-            Remedy::RestartAdb,
-            Remedy::PickAdbPath,
-            Remedy::ListEncoders,
-            Remedy::OpenSettings,
-        ] {
-            assert_eq!(Remedy::from_key(remedy.key()), remedy);
-        }
-    }
 }

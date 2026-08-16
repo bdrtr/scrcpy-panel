@@ -147,22 +147,3 @@ impl HidMouse {
         });
     }
 }
-
-/// HID button mask for one button, using the ids `ui/mirror_view.slint` reports:
-/// 1 left, 2 right, 3 middle.
-///
-/// HID orders them left, right, middle — not the order SDL used, which is why
-/// the translation existed at all.
-pub fn button_to_hid_mask(button: i32, pressed: bool) -> u8 {
-    let bit: u8 = match button {
-        1 => 1 << 0,
-        2 => 1 << 1,
-        3 => 1 << 2,
-        _ => 0,
-    };
-    if pressed {
-        bit
-    } else {
-        0
-    }
-}

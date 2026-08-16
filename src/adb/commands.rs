@@ -50,12 +50,6 @@ pub fn get_devices() -> Result<Vec<String>> {
         .collect();
     Ok(serials)
 }
-
-/// Select a device — uses serial if provided, otherwise picks the only connected device
-pub fn select_device(serial: Option<&str>) -> Result<String> {
-    select_device_filtered(serial, DeviceFilter::Any)
-}
-
 /// Which connections `--select-usb` and `--select-tcpip` narrow the search to.
 ///
 /// A wireless device's serial is `host:port`; a USB one's never is, which is

@@ -320,14 +320,4 @@ impl VideoDecoder {
         output.height = height;
         Ok(())
     }
-
-    /// Flush remaining frames from the decoder
-    pub fn flush_into(&mut self, output: &mut DecodedFrame) -> Result<bool> {
-        self.decoder.send_eof().ok();
-        if self.decoder.receive_frame(&mut self.av_frame).is_ok() {
-            self.process_frame(output)?;
-            return Ok(true);
-        }
-        Ok(false)
-    }
 }

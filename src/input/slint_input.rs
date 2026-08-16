@@ -321,11 +321,6 @@ impl SlintInput {
     pub fn set_orientation(&mut self, orientation: Orientation) {
         self.orientation = orientation;
     }
-
-    pub fn orientation(&self) -> Orientation {
-        self.orientation
-    }
-
     /// Map a point given in displayed, normalised coordinates to a device pixel.
     fn to_frame(&self, u: f32, v: f32) -> (u32, u32) {
         let (fu, fv) = self.orientation.unrotate(u, v);
@@ -680,9 +675,6 @@ impl SlintInput {
             ShortcutAction::ExpandNotifications => {
                 controller.push_msg(ControlMsg::ExpandNotificationPanel);
             }
-            ShortcutAction::ExpandSettings => {
-                controller.push_msg(ControlMsg::ExpandSettingsPanel);
-            }
             ShortcutAction::CollapsePanels => {
                 controller.push_msg(ControlMsg::CollapsePanels);
             }
@@ -953,12 +945,12 @@ fn metastate(alt: bool, control: bool, shift: bool, meta: bool) -> u32 {
     state
 }
 
-/// The host clipboard.
-///
-/// Kept alive between calls rather than opened per call: on X11 the process
-/// that sets the selection has to stay around to serve it, so a Clipboard that
-/// is dropped immediately hands back an empty selection. All calls come from
-/// the event loop thread, so one instance per thread is enough.
+// The host clipboard.
+//
+// Kept alive between calls rather than opened per call: on X11 the process
+// that sets the selection has to stay around to serve it, so a Clipboard that
+// is dropped immediately hands back an empty selection. All calls come from
+// the event loop thread, so one instance per thread is enough.
 thread_local! {
     static CLIPBOARD: std::cell::RefCell<Option<arboard::Clipboard>> =
         const { std::cell::RefCell::new(None) };

@@ -84,6 +84,10 @@ pub enum ControlMsg {
         action: u8,
     },
     ExpandNotificationPanel,
+    /// The protocol has it and scrcpy 4.1 no longer offers a shortcut for it,
+    /// so nothing here sends it — but a message list with a hole in it is a
+    /// message list whose numbering cannot be checked.
+    #[allow(dead_code)]
     ExpandSettingsPanel,
     CollapsePanels,
     GetClipboard {

@@ -70,15 +70,6 @@ pub enum CodecType {
     Raw,
 }
 
-impl CodecType {
-    pub fn is_video(&self) -> bool {
-        matches!(
-            self,
-            CodecType::H264 | CodecType::H265 | CodecType::AV1 | CodecType::Vp8 | CodecType::Vp9
-        )
-    }
-}
-
 /// A raw packet from the demuxer
 #[derive(Debug)]
 pub struct DemuxPacket {

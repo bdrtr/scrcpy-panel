@@ -249,6 +249,13 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
 - `--disable-screensaver` went with SDL and came back over D-Bus: the session holds an
   `org.freedesktop.ScreenSaver` inhibition, which GNOME, KDE and COSMIC all answer, for as
   long as it runs. A desktop without that service logs a warning and mirrors anyway.
+- The build has no warnings, which is a choice rather than a coincidence: the ones that had
+  collected — 84 of them — were hiding the next real one. Most were dead helpers left over
+  from the port and are gone; the gamepad and AOA ports stay, behind a module-level allow
+  that says what they are waiting for. Two turned out to be worth more than a deletion: the
+  audio decoder was carrying two buffers nothing wrote to, and the sample rate and channel
+  count it reports were read by nobody — the session checks them against the 48 kHz stereo
+  the player is built for now, and says so if a device ever disagrees.
 - Each frame is copied twice on the way to the screen (swscale output → packed buffer →
   Slint pixel buffer). Fine at 1080p60, but a GPU texture path would remove both.
 
@@ -380,9 +387,9 @@ src/
 ├── media/           # demuxer, decoder, recorder, delay buffer
 ├── display/         # FPS counter, V4L2 sink
 ├── control/         # control message serialisation
-├── input/           # Slint events → control messages; UHID/AOA (unwired)
+├── input/           # Slint events → control messages; UHID keyboard and mouse
 ├── audio/           # playback and regulation
-└── util/            # binary and network helpers
+└── util/            # the terminal's title
 ```
 
 ## License

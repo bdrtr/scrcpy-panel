@@ -4,6 +4,10 @@
 //! Manages up to 4 simultaneous gamepads, each identified by SDL joystick ID.
 //! Generates 15-byte HID input reports with sticks, triggers, buttons, and D-pad.
 
+//! Nothing constructs this yet: a gamepad needs a source, and winit reports
+//! none. The port is kept whole so that adding one — gilrs, or a raw evdev
+//! reader — is a matter of feeding it, as it was for the keyboard.
+#![allow(dead_code)]
 use crate::control::controller::Controller;
 use crate::control::control_msg::ControlMsg;
 

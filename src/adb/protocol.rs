@@ -2,7 +2,7 @@
 //! Communicates with the ADB daemon over TCP on localhost.
 
 use anyhow::{Context, Result, bail};
-use std::io::{Read, Write, BufReader, BufRead};
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
@@ -104,43 +104,10 @@ impl AdbConnection {
         Ok(String::from_utf8_lossy(&data).to_string())
     }
 
-    /// Read all remaining data until EOF
-    pub fn read_all(&mut self) -> Result<Vec<u8>> {
-        let mut data = Vec::new();
-        self.stream.read_to_end(&mut data).ok(); // EOF is expected
-        Ok(data)
-    }
-
-    /// Read all remaining data as string until EOF
-    pub fn read_all_string(&mut self) -> Result<String> {
-        let data = self.read_all()?;
-        Ok(String::from_utf8_lossy(&data).to_string())
-    }
-
-    /// Read lines from the connection (for shell output)
-    pub fn read_lines(&mut self) -> impl Iterator<Item = String> + '_ {
-        let reader = BufReader::new(&mut self.stream);
-        reader.lines().filter_map(|l| l.ok())
-    }
-
-    /// Send a host command (doesn't switch transport)
-    pub fn host_command(&mut self, command: &str) -> Result<String> {
-        self.send_command(command)?;
-        self.read_status()?;
-        self.read_length_prefixed_string()
-    }
-
     /// Switch to a device transport
     pub fn switch_transport(&mut self, serial: &str) -> Result<()> {
         let cmd = format!("host:transport:{}", serial);
         self.send_command(&cmd)?;
-        self.read_status()
-    }
-
-    /// Send a command after switching to device transport
-    pub fn device_command(&mut self, serial: &str, command: &str) -> Result<()> {
-        self.switch_transport(serial)?;
-        self.send_command(command)?;
         self.read_status()
     }
 
@@ -236,7 +203,7 @@ pub fn shell(serial: &str, command: &str) -> Result<TcpStream> {
     conn.read_status()?;
 
     // Return the raw stream — caller reads shell output from it
-    let mut stream = conn.into_stream();
+    let stream = conn.into_stream();
     // Set longer timeout for shell commands
     stream.set_read_timeout(Some(Duration::from_secs(300))).ok();
     Ok(stream)

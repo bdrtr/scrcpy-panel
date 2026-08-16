@@ -41,12 +41,6 @@ fn accept_with_timeout(listener: &TcpListener, timeout: Duration) -> Result<TcpS
         }
     }
 }
-
-/// Connect to the server in forward mode (we connect to device)
-pub fn connect_to_server(port: u16, attempts: u32) -> Result<TcpStream> {
-    connect_to_server_at("127.0.0.1", port, attempts)
-}
-
 /// The same, against a chosen host — `--tunnel-host` points this at another
 /// machine's adb, which is why forward mode is the only one that can work there.
 pub fn connect_to_server_at(host: &str, port: u16, attempts: u32) -> Result<TcpStream> {

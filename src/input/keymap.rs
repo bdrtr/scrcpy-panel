@@ -126,7 +126,11 @@ pub mod akeycode {
     pub const BREAK: u32 = 121;
 }
 
-/// Android metastate flags
+/// Android metastate flags.
+///
+/// Transcribed whole from Android's `KeyEvent`, because half a table is
+/// harder to check against the source than all of it.
+#[allow(dead_code)]
 pub mod ameta {
     pub const SHIFT_LEFT_ON: u32 = 0x40;
     pub const SHIFT_RIGHT_ON: u32 = 0x80;

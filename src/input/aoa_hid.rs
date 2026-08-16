@@ -10,6 +10,10 @@
 //!
 //! This module provides the interface; full implementation requires the `rusb` crate.
 
+//! Nothing constructs this yet: AOA is a USB protocol, and this client
+//! reaches the device over a socket. The port is kept for the day a USB
+//! dependency is worth taking on — which is also what --otg needs.
+#![allow(dead_code)]
 /// AOA HID device handle
 pub struct AoaHid {
     /// USB vendor ID of the Android device

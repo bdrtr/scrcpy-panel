@@ -33,11 +33,6 @@ impl FpsCounter {
         self.started = false;
         log::info!("FPS counter stopped");
     }
-
-    pub fn is_started(&self) -> bool {
-        self.started
-    }
-
     pub fn toggle(&mut self) {
         if self.started { self.stop() } else { self.start() }
     }

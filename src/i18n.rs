@@ -15,7 +15,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// `&[(msgid, msgstr)]`, sorted by msgid so a lookup is a binary search.
+// `&[(msgid, msgstr)]`, sorted by msgid so a lookup is a binary search.
 include!(concat!(env!("OUT_DIR"), "/translations.rs"));
 
 /// Whether to translate at all. Turkish is the source language, so the default
