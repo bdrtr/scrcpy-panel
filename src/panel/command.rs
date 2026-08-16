@@ -247,6 +247,12 @@ const SUPPORTED: &[&str] = &[
     "--audio-bit-rate",
     "--audio-buffer",
     "--no-audio",
+    "--v4l2-sink",
+    "--no-audio-playback",
+    "--no-video-playback",
+    "--no-playback",
+    "--audio-output-buffer",
+    "--mouse-bind",
     "--audio-dup",
     "--require-audio",
     "--record",
@@ -661,10 +667,10 @@ mod tests {
     #[test]
     fn flags_with_no_implementation_are_not_offered() {
         for flag in [
-            "--v4l2-sink",           // display/v4l2_sink.rs is a stub, never constructed
-            "--no-video-playback",   // nothing reads it
-            "--audio-output-buffer", // nothing reads it
-            "--mouse-bind",          // mouse buttons are hard-coded in slint_input
+            // Nothing is unimplemented-but-offered right now. The list is kept
+            // so the next flag added without an implementation lands here.
+            "--gamepad",  // no gamepad source on the Slint side
+            "--otg",      // needs USB/AOA, which needs scancodes
         ] {
             assert!(
                 !SUPPORTED.contains(&flag),

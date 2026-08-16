@@ -25,7 +25,9 @@ pub struct AudioPlayer {
 
 impl AudioPlayer {
     /// Open the default output and feed it from the regulator.
-    pub fn new_regulated(consumer: AudioRegulatorConsumer) -> Result<Self> {
+    /// `output_buffer_ms` is `--audio-output-buffer`: how much the sound card
+    /// itself holds. Larger is safer under load, smaller is closer to live.
+    pub fn new_regulated(consumer: AudioRegulatorConsumer, output_buffer_ms: u32) -> Result<Self> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -35,7 +37,13 @@ impl AudioPlayer {
             .description()
             .map(|d| d.name().to_string())
             .unwrap_or_else(|_| "bilinmeyen çıkış".into());
-        let config = output_config(&device)?;
+        let mut config = output_config(&device)?;
+        if output_buffer_ms > 0 {
+            // cpal counts frames, not milliseconds, and one frame is one sample
+            // per channel.
+            let frames = SAMPLE_RATE / 1000 * output_buffer_ms;
+            config.buffer_size = cpal::BufferSize::Fixed(frames);
+        }
 
         let stream = device
             .build_output_stream(

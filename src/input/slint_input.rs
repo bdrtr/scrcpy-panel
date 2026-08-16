@@ -22,6 +22,107 @@ const BUTTON_LEFT: i32 = 1;
 const BUTTON_RIGHT: i32 = 2;
 const BUTTON_MIDDLE: i32 = 3;
 
+/// What a secondary click does, from `--mouse-bind`.
+///
+/// scrcpy takes one or two four-character sequences — right, middle, 4th, 5th —
+/// where the second applies while Shift is held. The default for SDK injection
+/// is `bhsn:++++`, which is what this client always did in hard-coded form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SecondaryClick {
+    Forward,
+    Ignore,
+    Back,
+    Home,
+    AppSwitch,
+    Notifications,
+}
+
+impl SecondaryClick {
+    fn parse(c: char) -> Option<Self> {
+        Some(match c {
+            '+' => SecondaryClick::Forward,
+            '-' => SecondaryClick::Ignore,
+            'b' => SecondaryClick::Back,
+            'h' => SecondaryClick::Home,
+            's' => SecondaryClick::AppSwitch,
+            'n' => SecondaryClick::Notifications,
+            _ => return None,
+        })
+    }
+}
+
+/// The four secondary buttons, with and without Shift.
+#[derive(Debug, Clone, Copy)]
+pub struct MouseBindings {
+    primary: [SecondaryClick; 4],
+    shifted: [SecondaryClick; 4],
+}
+
+impl Default for MouseBindings {
+    fn default() -> Self {
+        // scrcpy's SDK default: bhsn:++++
+        Self {
+            primary: [
+                SecondaryClick::Back,
+                SecondaryClick::Home,
+                SecondaryClick::AppSwitch,
+                SecondaryClick::Notifications,
+            ],
+            shifted: [SecondaryClick::Forward; 4],
+        }
+    }
+}
+
+impl MouseBindings {
+    /// Parse `xxxx` or `xxxx:xxxx`; anything malformed keeps the default and
+    /// says so, rather than silently mirroring with the wrong buttons.
+    pub fn parse(spec: &str) -> Self {
+        let mut bindings = MouseBindings::default();
+        if spec.is_empty() {
+            return bindings;
+        }
+
+        let (first, second) = match spec.split_once(':') {
+            Some((a, b)) => (a, b),
+            None => (spec, spec),
+        };
+
+        let sequence = |text: &str| -> Option<[SecondaryClick; 4]> {
+            let parsed: Vec<SecondaryClick> =
+                text.chars().filter_map(SecondaryClick::parse).collect();
+            (parsed.len() == 4 && text.chars().count() == 4)
+                .then(|| [parsed[0], parsed[1], parsed[2], parsed[3]])
+        };
+
+        match (sequence(first), sequence(second)) {
+            (Some(primary), Some(shifted)) => {
+                bindings.primary = primary;
+                bindings.shifted = shifted;
+            }
+            _ => log::warn!(
+                "--mouse-bind={spec} is not two 4-character sequences of +-bhsn; \
+                 keeping the default"
+            ),
+        }
+        bindings
+    }
+
+    fn for_button(&self, button: i32, shift: bool) -> Option<SecondaryClick> {
+        let index = match button {
+            BUTTON_RIGHT => 0,
+            BUTTON_MIDDLE => 1,
+            4 => 2,
+            5 => 3,
+            _ => return None,
+        };
+        Some(if shift {
+            self.shifted[index]
+        } else {
+            self.primary[index]
+        })
+    }
+}
+
 /// Slint encodes non-printable keys as characters in a private unicode range.
 /// See `key_codes.rs` in `i-slint-common`.
 mod key {
@@ -113,6 +214,8 @@ pub struct SlintInput {
     /// --legacy-paste: type the clipboard as text instead of setting the
     /// device clipboard and asking it to paste.
     legacy_paste: bool,
+    /// --mouse-bind: what the secondary buttons do.
+    mouse_bindings: MouseBindings,
     clipboard_sequence: u64,
     /// A second finger is down, mirrored across the screen centre (pinch zoom)
     vfinger_down: bool,
@@ -127,6 +230,7 @@ impl SlintInput {
         shortcut_mod: &str,
         key_inject_mode: &str,
         legacy_paste: bool,
+        mouse_bind: Option<&str>,
         orientation: Orientation,
     ) -> Self {
         Self {
@@ -136,6 +240,7 @@ impl SlintInput {
             shortcut_mod: ShortcutMod::parse(shortcut_mod),
             key_inject_mode: key_inject_mode.to_string(),
             legacy_paste,
+            mouse_bindings: mouse_bind.map(MouseBindings::parse).unwrap_or_default(),
             clipboard_sequence: 0,
             vfinger_down: false,
             alt_held: false,
@@ -191,9 +296,25 @@ impl SlintInput {
     // Pointer
     // -----------------------------------------------------------------
 
-    pub fn pointer_down(&mut self, u: f32, v: f32, button: i32, alt: bool, controller: &Controller) {
+    pub fn pointer_down(
+        &mut self,
+        u: f32,
+        v: f32,
+        button: i32,
+        alt: bool,
+        shift: bool,
+        controller: &Controller,
+    ) {
         self.alt_held = alt;
         let (x, y) = self.to_frame(u, v);
+
+        if button != BUTTON_LEFT {
+            // Every button but the left one goes through --mouse-bind.
+            if let Some(action) = self.mouse_bindings.for_button(button, shift) {
+                self.run_secondary_click(action, x, y, controller);
+            }
+            return;
+        }
 
         match button {
             BUTTON_LEFT => {
@@ -210,14 +331,38 @@ impl SlintInput {
                     AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, 0xFFFF, 1, 1,
                 ));
             }
-            BUTTON_RIGHT => {
+            _ => {}
+        }
+    }
+
+    /// Carry out whatever `--mouse-bind` says a secondary button does.
+    fn run_secondary_click(
+        &self,
+        action: SecondaryClick,
+        x: u32,
+        y: u32,
+        controller: &Controller,
+    ) {
+        match action {
+            SecondaryClick::Ignore => {}
+            SecondaryClick::Forward => {
+                // Forwarding a secondary button means a real click at that spot.
+                controller.push_msg(self.touch(
+                    AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, 0xFFFF, 1, 1,
+                ));
+                controller.push_msg(self.touch(
+                    AMOTION_ACTION_UP, POINTER_ID_MOUSE, x, y, 0, 1, 0,
+                ));
+            }
+            SecondaryClick::Back => {
                 controller.push_msg(ControlMsg::BackOrScreenOn { action: AKEY_ACTION_DOWN });
                 controller.push_msg(ControlMsg::BackOrScreenOn { action: AKEY_ACTION_UP });
             }
-            BUTTON_MIDDLE => {
-                send_key(controller, AKEYCODE_HOME);
+            SecondaryClick::Home => send_key(controller, AKEYCODE_HOME),
+            SecondaryClick::AppSwitch => send_key(controller, AKEYCODE_APP_SWITCH),
+            SecondaryClick::Notifications => {
+                controller.push_msg(ControlMsg::ExpandNotificationPanel);
             }
-            _ => {}
         }
     }
 
@@ -636,4 +781,58 @@ pub fn get_clipboard_text() -> String {
 pub fn set_clipboard_text(text: &str) {
     let text = text.to_string();
     with_clipboard(move |clipboard| clipboard.set_text(text));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_bindings_are_what_this_client_always_did() {
+        let bindings = MouseBindings::default();
+        assert_eq!(bindings.for_button(BUTTON_RIGHT, false), Some(SecondaryClick::Back));
+        assert_eq!(bindings.for_button(BUTTON_MIDDLE, false), Some(SecondaryClick::Home));
+        assert_eq!(bindings.for_button(4, false), Some(SecondaryClick::AppSwitch));
+        assert_eq!(bindings.for_button(5, false), Some(SecondaryClick::Notifications));
+    }
+
+    #[test]
+    fn shift_uses_the_second_sequence() {
+        let bindings = MouseBindings::parse("bhsn:++++");
+        assert_eq!(bindings.for_button(BUTTON_RIGHT, false), Some(SecondaryClick::Back));
+        assert_eq!(bindings.for_button(BUTTON_RIGHT, true), Some(SecondaryClick::Forward));
+    }
+
+    #[test]
+    fn one_sequence_applies_to_both() {
+        let bindings = MouseBindings::parse("++++");
+        assert_eq!(bindings.for_button(BUTTON_MIDDLE, false), Some(SecondaryClick::Forward));
+        assert_eq!(bindings.for_button(BUTTON_MIDDLE, true), Some(SecondaryClick::Forward));
+    }
+
+    #[test]
+    fn the_left_button_is_never_a_secondary_click() {
+        assert_eq!(MouseBindings::default().for_button(BUTTON_LEFT, false), None);
+    }
+
+    /// A wrong length or an unknown character must not silently remap the mouse.
+    #[test]
+    fn a_malformed_binding_keeps_the_default() {
+        for spec in ["bhs", "bhsnx", "bqsn", "", "::::"] {
+            let bindings = MouseBindings::parse(spec);
+            assert_eq!(
+                bindings.for_button(BUTTON_RIGHT, false),
+                Some(SecondaryClick::Back),
+                "{spec} should have been rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn every_documented_character_parses() {
+        let bindings = MouseBindings::parse("-bhs:n+-b");
+        assert_eq!(bindings.for_button(BUTTON_RIGHT, false), Some(SecondaryClick::Ignore));
+        assert_eq!(bindings.for_button(5, false), Some(SecondaryClick::AppSwitch));
+        assert_eq!(bindings.for_button(BUTTON_RIGHT, true), Some(SecondaryClick::Notifications));
+    }
 }

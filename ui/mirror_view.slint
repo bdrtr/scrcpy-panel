@@ -23,7 +23,7 @@ export global Mirror {
     // `alt` rides along on press because that is where the decision to place a
     // second, mirrored finger (pinch to zoom) is made. TouchArea's `moved` has
     // no event argument, so Rust caches the modifier state from here.
-    callback pointer-down(u: float, v: float, button: int, alt: bool);
+    callback pointer-down(u: float, v: float, button: int, alt: bool, shift: bool);
     callback pointer-up(u: float, v: float, button: int);
     callback pointer-moved(u: float, v: float, pressed: bool);
     callback pointer-scroll(u: float, v: float, dx: float, dy: float);
@@ -60,6 +60,8 @@ export component MirrorView inherits Rectangle {
         return b == PointerEventButton.left ? 1
             : b == PointerEventButton.right ? 2
             : b == PointerEventButton.middle ? 3
+            : b == PointerEventButton.back ? 4
+            : b == PointerEventButton.forward ? 5
             : 0;
     }
 
@@ -112,7 +114,8 @@ export component MirrorView inherits Rectangle {
                 if (event.kind == PointerEventKind.down) {
                     keys.focus();
                     Mirror.pointer-down(root.pointer-u, root.pointer-v,
-                                        root.button-id(event.button), event.modifiers.alt);
+                                        root.button-id(event.button),
+                                        event.modifiers.alt, event.modifiers.shift);
                 } else if (event.kind == PointerEventKind.up) {
                     Mirror.pointer-up(root.pointer-u, root.pointer-v, root.button-id(event.button));
                 }

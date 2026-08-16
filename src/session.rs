@@ -33,6 +33,9 @@ use crate::SCRCPY_SERVER_VERSION;
 /// The decoded video side of a session.
 pub struct VideoStream {
     pub info: VideoInfo,
+    /// False under --no-video-playback or --no-playback: frames are still
+    /// decoded and recycled, they are just never drawn.
+    pub playback: bool,
     /// Frames ready to draw, newest last.
     pub frames: Receiver<DecodedFrame>,
     /// Where a drawn frame goes so the decoder can fill it again.
@@ -45,7 +48,13 @@ pub struct VideoStream {
 /// handle has to cross a thread boundary to reach the window.
 pub struct AudioStream {
     pub samples: Receiver<Vec<f32>>,
+    /// --audio-buffer: how much the regulator holds before playing.
     pub buffer_ms: u32,
+    /// --audio-output-buffer: how much the sound card itself holds.
+    pub output_buffer_ms: u32,
+    /// False under --no-audio-playback or --no-playback: the stream is still
+    /// decoded, so a recording still gets it, but nothing reaches the speakers.
+    pub playback: bool,
 }
 
 /// A running session. Dropping it is not enough — call [`Session::shutdown`],
@@ -266,6 +275,7 @@ impl Session {
 
         self.video = Some(VideoStream {
             info,
+            playback: !(opts.no_playback || opts.no_video_playback),
             frames,
             recycle: recycle_tx,
         });
@@ -452,6 +462,8 @@ fn start_audio(
     Ok(Some(AudioStream {
         samples: samples_rx,
         buffer_ms: opts.audio_buffer,
+        output_buffer_ms: opts.audio_output_buffer,
+        playback: !(opts.no_playback || opts.no_audio_playback),
     }))
 }
 

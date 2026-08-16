@@ -43,7 +43,7 @@ export component TabSettings inherits VerticalLayout {
                         }
                     }
                     Fld {
-                        label: "Sürüm";
+                        label: "Sunucu sürümü";
                         // Disabled in the mockup too: this only reports the
                         // server version that was detected, it is not a setting.
                         Inp {
@@ -71,14 +71,25 @@ export component TabSettings inherits VerticalLayout {
             Grp {
                 Row {
                     Fld {
-                        label: "Arayüz dili";
-                        // No alignment wrapper: the mockup draws this seg at
-                        // width 100%, so it fills the field.
-                        Seg {
-                            labels: ["Türkçe", "English"];
-                            values: ["tr", "en"];
-                            value <=> Settings.language;
-                            changed => { Settings.changed(); }
+                        // Disabled rather than removed, like the UHID field in
+                        // the control section: the panel has no translation
+                        // layer, so switching to English would change nothing.
+                        label: "Arayüz dili — yalnızca Türkçe";
+                        lang := Rectangle {
+                            height: 34px;
+                            opacity: 0.5;
+                            // No alignment wrapper: the mockup draws this seg at
+                            // width 100%, so it fills the field.
+                            Seg {
+                                labels: ["Türkçe", "English"];
+                                values: ["tr", "en"];
+                                value: Settings.language;
+                            }
+                            // Seg has no enabled property, so the clicks are
+                            // swallowed here instead.
+                            TouchArea {
+                                mouse-cursor: MouseCursor.not-allowed;
+                            }
                         }
                     }
                     Fld {
@@ -121,24 +132,28 @@ export component TabSettings inherits VerticalLayout {
             ChkGrp {
                 Row {
                     Chk {
-                        text: "Cihaz bağlandığında öntanımlı profili başlat";
+                        // "İlk profil", not "öntanımlı profil": profiles have no
+                        // default flag, so the autostart takes the first one.
+                        text: "Cihaz bulunduğunda ilk profili başlat";
                         checked <=> Settings.autostart-profile;
                         toggled => { Settings.changed(); }
                     }
                     Chk {
-                        text: "Kapatınca sistem tepsisine küçült";
+                        // Slint can draw a tray icon, but a tray icon with a menu
+                        // and a window that hides into it is a feature of its own.
+                        text: "Kapatınca sistem tepsisine küçült — henüz yok";
                         checked <=> Settings.minimize-to-tray;
-                        toggled => { Settings.changed(); }
+                        enabled: false;
                     }
                 }
                 Row {
                     Chk {
-                        text: "Başlangıçta scrcpy sürümünü denetle";
+                        text: "Başlangıçta scrcpy-server sürümünü denetle";
                         checked <=> Settings.check-version;
                         toggled => { Settings.changed(); }
                     }
                     Chk {
-                        text: "Günlüğü diske yaz";
+                        text: "Günlüğü diske yaz (~/.config/scrcpy-slint/panel.log)";
                         checked <=> Settings.log-to-disk;
                         toggled => { Settings.changed(); }
                     }

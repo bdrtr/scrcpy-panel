@@ -14,10 +14,11 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use crossbeam_channel::{bounded, Receiver};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
-use std::cell::RefCell;
-use std::io::{BufRead, BufReader};
+use std::cell::{Cell, RefCell};
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
+use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
 use crate::control::control_msg::ControlMsg;
@@ -75,10 +76,38 @@ struct Panel {
     /// here; a timer on the event loop picks it up.
     pending: RefCell<Option<Receiver<Result<Session>>>>,
     pending_timer: RefCell<Option<slint::Timer>>,
+
+    /// "Günlüğü diske yaz": the open panel.log, kept rather than reopened once
+    /// per line, and a flag so a directory we cannot write to is reported once.
+    log_file: RefCell<Option<std::fs::File>>,
+    log_disk_failed: Cell<bool>,
+    /// "Cihaz bulunduğunda ilk profili başlat": the serial the autostart has
+    /// already fired for, so a second scan of the same device does not relaunch.
+    autostarted: RefCell<Option<String>>,
+}
+
+thread_local! {
+    /// The live panel, for event-loop closures that had to cross a thread to get
+    /// here and so could not capture an `Rc<Panel>`, which is not `Send`.
+    /// The device scan is the one that needs it: noticing a device is what
+    /// autostart hangs off, and that decision needs the profiles and the log.
+    static CURRENT_PANEL: RefCell<std::rc::Weak<Panel>> =
+        RefCell::new(std::rc::Weak::new());
+}
+
+/// Run `f` with the panel, if there still is one.
+fn with_panel(f: impl FnOnce(&Rc<Panel>)) {
+    let panel = CURRENT_PANEL.with(|slot| slot.borrow().upgrade());
+    if let Some(panel) = panel {
+        f(&panel);
+    }
 }
 
 /// Open the panel and run until its window closes.
 pub fn run(opts: &Options) -> Result<()> {
+    // Before the window, and before any thread: see `export_adb_env`.
+    export_adb_env();
+
     let window = PanelWindow::new().context("Failed to create the panel window")?;
 
     let panel = Rc::new(Panel {
@@ -97,7 +126,11 @@ pub fn run(opts: &Options) -> Result<()> {
         started_at: std::cell::Cell::new(None),
         pending: RefCell::new(None),
         pending_timer: RefCell::new(None),
+        log_file: RefCell::new(None),
+        log_disk_failed: Cell::new(false),
+        autostarted: RefCell::new(None),
     });
+    CURRENT_PANEL.with(|slot| *slot.borrow_mut() = Rc::downgrade(&panel));
 
     {
         let app = window.global::<App>();
@@ -105,14 +138,44 @@ pub fn run(opts: &Options) -> Result<()> {
         app.set_devices(ModelRc::from(panel.devices.clone()));
         app.set_profiles(ModelRc::from(panel.profile_cards.clone()));
         app.set_shortcuts(ModelRc::from(Rc::new(VecModel::from(shortcut_rows()))));
-        app.set_adb_status(adb_status().into());
     }
 
+    // The stored adb path and port have to be in hand before anything runs adb,
+    // and `adb_status` is the first thing that does.
     load_settings(&window);
+    refresh_adb_settings(&window);
+    window.global::<App>().set_adb_status(adb_status().into());
+
     refresh_profile_cards(&panel);
     wire(&window, &panel);
     refresh_command(&window);
     panel.info("Panel hazır.");
+
+    // adb's command line honours the port, so everything the panel runs uses it
+    // — but a session reaches the adb daemon through src/adb, which connects to
+    // 127.0.0.1:5037 whatever this setting says. Better said out loud than
+    // discovered as a device list that mirrors nothing.
+    let port = adb_snapshot().port;
+    if !port.is_empty() && port != "5037" {
+        panel.warn(&format!(
+            "adb sunucu portu {port}: panelin adb komutları bunu kullanıyor, \
+             ama oturumlar adb sunucusuna 5037 üzerinden bağlanıyor."
+        ));
+    }
+
+    // "Başlangıçta scrcpy-server sürümünü denetle". Looking for it is a handful
+    // of stat() calls, but it happens after the window is up rather than in the
+    // middle of building it.
+    let version_check = slint::Timer::default();
+    if window.global::<Settings>().get_check_version() {
+        let panel_for_check = panel.clone();
+        let opts_for_check = opts.clone();
+        version_check.start(
+            slint::TimerMode::SingleShot,
+            Duration::from_millis(200),
+            move || check_server_version(&panel_for_check, &opts_for_check),
+        );
+    }
 
     // Populate the device list without making the window wait for adb.
     spawn_device_scan(&panel);
@@ -151,6 +214,7 @@ pub fn run(opts: &Options) -> Result<()> {
 
     // Leave nothing running behind the window.
     drop(autostart);
+    drop(version_check);
     stop_session(&panel);
     Ok(())
 }
@@ -182,16 +246,179 @@ impl Panel {
             .unwrap_or_default();
 
         self.log.push(LogRow {
-            time: stamp.into(),
+            time: stamp.as_str().into(),
             level: level.into(),
             message: message.into(),
         });
 
-        // Keep the log bounded; a long mirroring session is chatty.
+        // Keep the log bounded; a long mirroring session is chatty. The copy on
+        // disk is not trimmed — that is the point of keeping one.
         while self.log.row_count() > 500 {
             self.log.remove(0);
         }
+
+        self.append_to_disk(&stamp, level, message);
     }
+
+    /// "Günlüğü diske yaz": mirror the line into ~/.config/scrcpy-slint/panel.log.
+    ///
+    /// The handle is opened on the first line and held, so a chatty session is
+    /// not five hundred open/close pairs.
+    fn append_to_disk(&self, stamp: &str, level: &str, message: &str) {
+        let enabled = self
+            .window
+            .upgrade()
+            .is_some_and(|window| window.global::<Settings>().get_log_to_disk());
+        if !enabled {
+            // Turning the setting off closes the file; turning it back on opens
+            // a fresh handle, which is also how a failed open gets another try.
+            self.log_file.borrow_mut().take();
+            self.log_disk_failed.set(false);
+            return;
+        }
+        if self.log_disk_failed.get() {
+            return;
+        }
+
+        let mut slot = self.log_file.borrow_mut();
+        if slot.is_none() {
+            let Some(path) = config_dir().map(|dir| dir.join("panel.log")) else {
+                self.log_disk_failed.set(true);
+                return;
+            };
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                Ok(file) => *slot = Some(file),
+                Err(e) => {
+                    // Not `self.warn`: that would come straight back into here.
+                    log::warn!("Cannot open {}: {e}", path.display());
+                    self.log_disk_failed.set(true);
+                    return;
+                }
+            }
+        }
+        if let Some(file) = slot.as_mut() {
+            let _ = writeln!(file, "{stamp} {level:<5} {message}");
+        }
+    }
+}
+
+// =====================================================================
+// adb
+// =====================================================================
+
+/// `Settings.adb-path` and `Settings.adb-port`, as plain Rust.
+///
+/// The device scan and its follow-up queries run on worker threads, where Slint
+/// globals cannot be touched at all, so the values are read once on the event
+/// loop and kept here for everyone to use.
+#[derive(Clone, Default)]
+struct AdbSettings {
+    path: String,
+    port: String,
+}
+
+fn adb_settings() -> &'static RwLock<AdbSettings> {
+    static CACHE: OnceLock<RwLock<AdbSettings>> = OnceLock::new();
+    CACHE.get_or_init(RwLock::default)
+}
+
+fn adb_snapshot() -> AdbSettings {
+    adb_settings()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// Copy the adb preferences out of the UI. Called at startup and whenever the
+/// Ayarlar tab writes.
+fn refresh_adb_settings(window: &PanelWindow) {
+    let s = window.global::<Settings>();
+    let next = AdbSettings {
+        path: s.get_adb_path().trim().to_string(),
+        port: s.get_adb_port().trim().to_string(),
+    };
+    *adb_settings().write().unwrap_or_else(|e| e.into_inner()) = next;
+}
+
+/// Every adb the panel runs starts here.
+///
+/// An empty path falls back to `adb` on PATH, which is what the field's
+/// placeholder promises; a port that is neither empty nor the default one is
+/// passed the way adb itself expects it.
+fn adb() -> Command {
+    let settings = adb_snapshot();
+    let program = if settings.path.is_empty() { "adb" } else { settings.path.as_str() };
+    let mut command = Command::new(program);
+    apply_adb_port(&mut command, &settings.port);
+    command
+}
+
+fn apply_adb_port(command: &mut Command, port: &str) {
+    // 5037 is adb's own default; setting it changes nothing and only makes the
+    // environment of every child noisier.
+    if !port.is_empty() && port != "5037" {
+        command.env("ANDROID_ADB_SERVER_PORT", port);
+    }
+}
+
+/// Put the stored adb preferences into this process's own environment.
+///
+/// `adb()` covers everything the panel runs itself, but a session runs `adb` of
+/// its own — src/session.rs shells out for the wireless connect and for the
+/// kill-server on close — through code that knows nothing about the panel. The
+/// environment is the one channel the two share: the server port through adb's
+/// own variable, the executable by putting its directory first on PATH.
+///
+/// It does not reach everything. The session's device work goes through
+/// src/adb, which speaks the daemon's protocol on 127.0.0.1:5037 directly and
+/// so ignores both settings; `run` says as much in the log when the port is not
+/// the default one.
+///
+/// Called at the very top of `run`, before the window and before any thread
+/// exists, because that is the only point where writing to the environment is
+/// unambiguously safe. A path or port edited later applies to what the panel
+/// runs straight away, and to child processes from the next launch.
+fn export_adb_env() {
+    let Some(stored) = load_stored_settings() else {
+        return;
+    };
+    let port = stored.adb_port.trim();
+    if !port.is_empty() && port != "5037" {
+        std::env::set_var("ANDROID_ADB_SERVER_PORT", port);
+    }
+    if let Some(dirs) = path_with_adb_first(stored.adb_path.trim()) {
+        std::env::set_var("PATH", dirs);
+    }
+}
+
+/// PATH with the chosen adb's own directory in front of it, when the setting
+/// names one. `adb` on its own has no directory and needs no help.
+fn path_with_adb_first(adb_path: &str) -> Option<std::ffi::OsString> {
+    let dir = std::path::Path::new(adb_path)
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())?;
+    let mut dirs = vec![dir.to_path_buf()];
+    dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+    std::env::join_paths(dirs).ok()
+}
+
+/// A command for another copy of this binary — a session in its own window, or
+/// a `--list-…` query.
+///
+/// Those copies call adb themselves and cannot read the panel's settings, so
+/// the settings travel with them: the port through adb's own environment
+/// variable, the executable by putting its directory first on PATH.
+fn client_command(exe: &std::path::Path) -> Command {
+    let mut command = Command::new(exe);
+    let settings = adb_snapshot();
+    apply_adb_port(&mut command, &settings.port);
+    if let Some(dirs) = path_with_adb_first(&settings.path) {
+        command.env("PATH", dirs);
+    }
+    command
 }
 // 87 fields
 /// Copy the form state out of the UI.
@@ -402,6 +629,14 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
         settings.on_changed(move || {
             if let Some(window) = weak.upgrade() {
                 save_settings(&window);
+                // A new adb path or port applies to the next command the panel
+                // runs, not only to the next launch of the panel.
+                refresh_adb_settings(&window);
+                // And to this process's own environment, which is what
+                // src/session.rs resolves its bare `adb` calls through — without
+                // this, an edited path reached the panel's commands but not an
+                // embedded session's until a restart.
+                export_adb_env();
             }
         });
     }
@@ -601,7 +836,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 // The caption under this button promises `adb tcpip 5555` runs
                 // first so a USB device can switch over; it never did.
                 let usb_serial = window.global::<Cfg>().get_serial().to_string();
-                let mut switch = Command::new("adb");
+                let mut switch = adb();
                 if !usb_serial.is_empty() && !usb_serial.contains(':') {
                     switch.args(["-s", &usb_serial]);
                 }
@@ -609,7 +844,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                     std::thread::sleep(Duration::from_secs(2));
                 }
 
-                match Command::new("adb").args(["connect", &addr]).output() {
+                match adb().args(["connect", &addr]).output() {
                     Ok(out) => {
                         panel.info(&String::from_utf8_lossy(&out.stdout).trim().to_string());
                         spawn_device_scan(&panel);
@@ -632,7 +867,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                     panel.warn("Eşleştirme için adres ve kod gerekli.");
                     return;
                 }
-                match Command::new("adb").args(["pair", &addr, &code]).output() {
+                match adb().args(["pair", &addr, &code]).output() {
                     Ok(out) => {
                         panel.info(&String::from_utf8_lossy(&out.stdout).trim().to_string());
                         spawn_device_scan(&panel);
@@ -670,7 +905,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 .upgrade()
                 .map(|w| w.global::<Cfg>().get_serial().to_string())
                 .unwrap_or_default();
-            let mut cmd = Command::new("adb");
+            let mut cmd = adb();
             if !serial.is_empty() {
                 cmd.args(["-s", &serial]);
             }
@@ -754,7 +989,10 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 .map(|window| {
                     (
                         window.global::<Cfg>().get_serial().to_string(),
-                        window.global::<Settings>().get_screenshot_dir().to_string(),
+                        // The field's own placeholder suggests ~/Pictures/scrcpy,
+                        // so a literal tilde has to expand here as it does for
+                        // the recording directory.
+                        expand_home(window.global::<Settings>().get_screenshot_dir().trim()),
                     )
                 })
                 .unwrap_or_default();
@@ -815,9 +1053,43 @@ fn refresh_command(window: &PanelWindow) {
 // Session
 // =====================================================================
 
+/// The form state with the panel's own preferences folded in.
+///
+/// `Settings.record-dir` is one of them. A bare filename in the Kayıt section
+/// means "in the recording folder"; a path with a separator in it is the user
+/// being specific, and is left exactly as typed. What the form shows is never
+/// rewritten — only what the session is launched with.
+fn launch_config(window: &PanelWindow) -> PanelConfig {
+    let mut config = read_config(window);
+
+    let directory = expand_home(window.global::<Settings>().get_record_dir().trim());
+    if config.record_enabled
+        && !directory.is_empty()
+        && !config.record_path.is_empty()
+        && !config.record_path.contains('/')
+    {
+        // The recorder cannot create the folder for itself, and a session that
+        // dies on a missing directory is a poor way to find that out.
+        let _ = std::fs::create_dir_all(&directory);
+        config.record_path = format!("{}/{}", directory.trim_end_matches('/'), config.record_path);
+    }
+    config
+}
+
+/// `~/Videos/scrcpy` is a shell convenience, not a path any file API knows.
+fn expand_home(path: &str) -> String {
+    match path.strip_prefix("~/") {
+        Some(rest) => match std::env::var("HOME") {
+            Ok(home) => format!("{}/{}", home.trim_end_matches('/'), rest),
+            Err(_) => path.to_string(),
+        },
+        None => path.to_string(),
+    }
+}
+
 /// Turn the form state into a command line this client can be launched with.
 fn session_options(window: &PanelWindow, panel: &Rc<Panel>) -> Option<Options> {
-    let config = read_config(window);
+    let config = launch_config(window);
     let (args, dropped) = config.to_client_args();
     if !dropped.is_empty() {
         panel.warn(&format!(
@@ -846,7 +1118,7 @@ fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
         return;
     };
 
-    let config = read_config(window);
+    let config = launch_config(window);
     panel.info(&format!("Başlatılıyor: {}", config.to_command_line()));
 
     if window.global::<Settings>().get_mirror_mode() == "embedded" {
@@ -999,7 +1271,7 @@ fn start_windowed(window: &PanelWindow, panel: &Rc<Panel>, config: &PanelConfig)
         }
     };
 
-    let child = Command::new(&exe)
+    let child = client_command(&exe)
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1155,7 +1427,7 @@ fn take_screenshot(serial: &str, directory: &str) -> Result<String> {
         .unwrap_or(0);
     let path = format!("{directory}/scrcpy-{stamp}.png");
 
-    let mut command = Command::new("adb");
+    let mut command = adb();
     if !serial.is_empty() {
         command.args(["-s", serial]);
     }
@@ -1172,6 +1444,64 @@ fn take_screenshot(serial: &str, directory: &str) -> Result<String> {
     }
     std::fs::write(&path, &output.stdout).with_context(|| format!("Cannot write {path}"))?;
     Ok(path)
+}
+
+// =====================================================================
+// Sürüm denetimi
+// =====================================================================
+
+/// "Başlangıçta scrcpy-server sürümünü denetle".
+///
+/// The check is about the server jar this client would push: the server refuses
+/// to start unless its version matches [`crate::SCRCPY_SERVER_VERSION`], and
+/// finding that out at launch, with the path in hand, beats finding it out as a
+/// failed session later. Either outcome ends up in the log — a silent check is
+/// no better than the decorative checkbox it replaced.
+fn check_server_version(panel: &Rc<Panel>, opts: &Options) {
+    let required = crate::SCRCPY_SERVER_VERSION;
+
+    let path = match session::resolve_server_path(opts) {
+        Ok(path) => path,
+        Err(e) => {
+            panel.warn(&format!(
+                "scrcpy-server bulunamadı, sürüm denetlenemedi (istemci v{required} bekliyor): {}",
+                e.to_string().lines().next().unwrap_or_default()
+            ));
+            return;
+        }
+    };
+
+    let found = server_version_from_path(&path);
+    if let Some(window) = panel.window.upgrade() {
+        // The "Sunucu sürümü" box in Ayarlar claims to report what was detected.
+        window
+            .global::<Settings>()
+            .set_server_version(found.clone().unwrap_or_else(|| required.to_string()).as_str().into());
+    }
+
+    match found {
+        Some(version) if version != required => panel.warn(&format!(
+            "scrcpy-server sürümü uyuşmuyor: {path} v{version}, istemci v{required} bekliyor."
+        )),
+        Some(version) => panel.info(&format!("scrcpy-server v{version} hazır: {path}")),
+        // A jar carries its version inside a compressed entry, so a file simply
+        // called scrcpy-server cannot be read without unzipping it. Say where it
+        // is and what is expected rather than guessing.
+        None => panel.info(&format!(
+            "scrcpy-server bulundu: {path} (istemci v{required} bekliyor)."
+        )),
+    }
+}
+
+/// The version in a server filename, when it carries one — the releases are
+/// published as `scrcpy-server-v4.1`, which is what --server-path usually points
+/// at.
+fn server_version_from_path(path: &str) -> Option<String> {
+    let name = std::path::Path::new(path).file_name()?.to_string_lossy().to_string();
+    let rest = name.strip_prefix("scrcpy-server")?.trim_start_matches(['-', '_', 'v']);
+    let looks_like_a_version =
+        !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit() || c == '.');
+    looks_like_a_version.then(|| rest.to_string())
 }
 
 /// Stop whichever kind of session is running.
@@ -1248,7 +1578,7 @@ fn query_device(weak: &slint::Weak<PanelWindow>, panel: &Rc<Panel>, flag: &str) 
             return;
         }
     };
-    let mut cmd = Command::new(exe);
+    let mut cmd = client_command(&exe);
     cmd.arg(flag);
     if !serial.is_empty() {
         cmd.args(["--serial", &serial]);
@@ -1290,7 +1620,7 @@ fn spawn_device_scan(panel: &Rc<Panel>) {
     let weak = panel.window.clone();
 
     std::thread::spawn(move || {
-        let output = Command::new("adb").args(["devices", "-l"]).output();
+        let output = adb().args(["devices", "-l"]).output();
         let (rows, error) = match output {
             Ok(out) if out.status.success() => (
                 parse_devices(&String::from_utf8_lossy(&out.stdout)),
@@ -1303,6 +1633,12 @@ fn spawn_device_scan(panel: &Rc<Panel>) {
             Err(e) => (Vec::new(), format!("adb çalıştırılamadı: {e}")),
         };
         let status = adb_status();
+        // Autostart hangs off a device being *usable*; anything unauthorised or
+        // offline would only produce a failed session.
+        let ready = rows
+            .iter()
+            .find(|device| device.state == "device")
+            .map(|device| device.serial.clone());
 
         let _ = slint::invoke_from_event_loop(move || {
             let Some(window) = weak.upgrade() else { return };
@@ -1327,8 +1663,53 @@ fn spawn_device_scan(panel: &Rc<Panel>) {
             app.set_device_error(error.as_str().into());
             app.set_devices_loading(false);
             app.set_adb_status(status.as_str().into());
+
+            with_panel(|panel| autostart_if_wanted(panel, &window, ready.as_deref()));
         });
     });
+}
+
+/// "Cihaz bulunduğunda ilk profili başlat".
+///
+/// A scan is the only thing in the panel that notices a device, so this hangs
+/// off its result — and off the serial, so finding the same device again does
+/// not keep relaunching it.
+fn autostart_if_wanted(panel: &Rc<Panel>, window: &PanelWindow, ready: Option<&str>) {
+    let Some(serial) = ready else {
+        // Nothing usable is connected; whatever comes back next is new.
+        panel.autostarted.borrow_mut().take();
+        return;
+    };
+    if !window.global::<Settings>().get_autostart_profile() {
+        return;
+    }
+    if panel.autostarted.borrow().as_deref() == Some(serial) || panel.is_running() {
+        return;
+    }
+
+    let first = panel
+        .profiles
+        .borrow()
+        .first()
+        .map(|profile| (profile.name.clone(), profile.config.clone()));
+
+    // Remembered either way: without a profile there is nothing to start, and
+    // saying so once per device is enough.
+    *panel.autostarted.borrow_mut() = Some(serial.to_string());
+
+    let Some((name, config)) = first else {
+        panel.warn(
+            "Otomatik başlatma açık ama kayıtlı profil yok — Profiller sekmesinden bir profil kaydedin.",
+        );
+        return;
+    };
+
+    write_config(window, &config);
+    window.global::<Cfg>().set_serial(serial.into());
+    window.global::<App>().set_selection_label(serial.into());
+    refresh_command(window);
+    panel.info(&format!("{serial} bağlı: \"{name}\" profili otomatik başlatılıyor."));
+    start_session(window, panel);
 }
 
 fn parse_devices(stdout: &str) -> Vec<ScannedDevice> {
@@ -1376,7 +1757,7 @@ fn parse_devices(stdout: &str) -> Vec<ScannedDevice> {
 }
 
 fn device_property(serial: &str, property: &str) -> String {
-    Command::new("adb")
+    adb()
         .args(["-s", serial, "shell", "getprop", property])
         .output()
         .ok()
@@ -1385,7 +1766,7 @@ fn device_property(serial: &str, property: &str) -> String {
 }
 
 fn device_screen(serial: &str) -> String {
-    Command::new("adb")
+    adb()
         .args(["-s", serial, "shell", "wm", "size"])
         .output()
         .ok()
@@ -1399,7 +1780,7 @@ fn device_screen(serial: &str) -> String {
 }
 
 fn adb_status() -> String {
-    match Command::new("adb").arg("version").output() {
+    match adb().arg("version").output() {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
             let version = text
@@ -1407,9 +1788,25 @@ fn adb_status() -> String {
                 .next()
                 .and_then(|l| l.rsplit(' ').next())
                 .unwrap_or("?");
-            format!("adb {version} · hazır")
+            let port = adb_snapshot().port;
+            if port.is_empty() || port == "5037" {
+                format!("adb {version} · hazır")
+            } else {
+                // The port is worth showing: a wrong one is otherwise only
+                // visible as an empty device list.
+                format!("adb {version} · :{port} · hazır")
+            }
         }
-        Err(_) => "adb bulunamadı".to_string(),
+        // Naming the executable turns "nothing works" into something the user
+        // can act on, now that it is a setting they can get wrong.
+        Err(_) => {
+            let path = adb_snapshot().path;
+            if path.is_empty() || path == "adb" {
+                "adb bulunamadı".to_string()
+            } else {
+                format!("adb bulunamadı: {path}")
+            }
+        }
     }
 }
 
@@ -1476,11 +1873,16 @@ struct StoredSettings {
     log_to_disk: bool,
 }
 
-fn load_settings(window: &PanelWindow) {
-    let Some(stored) = settings_path()
+/// The configuration file, or nothing at all — a first run has no file, and the
+/// UI defaults stand.
+fn load_stored_settings() -> Option<StoredSettings> {
+    settings_path()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str::<StoredSettings>(&text).ok())
-    else {
+}
+
+fn load_settings(window: &PanelWindow) {
+    let Some(stored) = load_stored_settings() else {
         return;
     };
     let s = window.global::<Settings>();

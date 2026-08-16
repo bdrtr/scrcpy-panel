@@ -54,6 +54,10 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | `--record-format` | works — `mkv` overrides a `.mp4` filename |
 | `--new-display` with no value | works — device picks the size |
 | Contradictory `--no-audio --require-audio` | rejected with a message |
+| `--no-video-playback` | works — 170 frames recorded with nothing drawn |
+| `--mouse-bind` | works — parsed, with 6 tests; malformed input warns and keeps the default |
+| Ayarlar: adb path, adb port, record dir, screenshot dir | consulted at runtime |
+| Ayarlar: autostart profile, version check, log to disk | work |
 | `--max-size`, `--max-fps`, `--time-limit` | work |
 | `--list-encoders/-displays/-cameras/-apps` | work |
 | scrcpy 4.1 server handshake | works, no unknown-option warnings |
@@ -83,12 +87,19 @@ with the opening session header, which every run exercises.
   layout, which is exactly what UHID exists to avoid, so `--keyboard=uhid`, `--mouse=uhid`
   and OTG fall back to SDK injection with a warning. The HID report descriptors are still
   in the tree, waiting on a scancode source.
-- **Several flags are accepted by the command line but not implemented.** The panel does
-  not pass those to a session; it lists them as dropped instead. An adversarial audit of
-  every panel control found four flags that used to be passed and then read by nobody —
-  `--v4l2-sink`, `--no-video-playback`, `--audio-output-buffer` and `--mouse-bind` — which
-  is the worst case, because nothing warned. A test now keeps them out of the supported
-  list until something implements them.
+- **`--v4l2-sink` has not been seen working end to end.** The implementation is real —
+  `VIDIOC_S_FMT` then a write per frame — and its failure paths are verified: a missing
+  device explains how to load the module, and a device that is not an output rejects the
+  format. That last one is `EINVAL` rather than `ENOTTY`, which means the kernel parsed the
+  request and refused it on merit, so the ioctl number and struct layout are right. What is
+  untested is a successful publish, which needs
+  `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
+- **`--adb-port` applies to the panel's adb commands but not to a session.**
+  `src/adb/protocol.rs` speaks the daemon protocol on a hardcoded 5037. The panel warns at
+  startup when the setting differs rather than leaving the two out of step silently.
+- **Interface language and minimize-to-tray are disabled**, with labels saying so: one
+  needs a translation layer, the other a tray icon. Slint 1.17 does have `SystemTrayIcon`,
+  so the second is a question of time rather than possibility.
 - **One device at a time.** The mockup promises simultaneous mirroring on several devices;
   the panel selects one. The tab copy says so rather than implying otherwise.
 - Drag-and-drop file transfer is not possible yet: Slint 1.17's `DataTransfer` exposes

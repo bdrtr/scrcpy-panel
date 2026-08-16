@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use crate::control::controller::Controller;
 use crate::display::fps_counter::FpsCounter;
+use crate::display::v4l2_sink::V4l2Sink;
 use crate::input::slint_input::{SlintInput, WindowAction};
 use crate::options::Options;
 use crate::session::{AudioStream, VideoStream};
@@ -74,6 +75,7 @@ pub fn attach(
         &opts.shortcut_mod,
         &opts.key_inject_mode,
         opts.legacy_paste,
+        opts.mouse_bind.as_deref(),
         orientation.get(),
     )));
     let fps = Rc::new(RefCell::new(FpsCounter::new()));
@@ -120,6 +122,19 @@ pub fn attach(
         );
     }
 
+    // --v4l2-sink publishes the same decoded frames as a webcam. Opening it
+    // here rather than in the session keeps the file descriptor next to the
+    // frames it consumes.
+    let v4l2 = opts.v4l2_sink.as_deref().and_then(|device| {
+        match V4l2Sink::open(device, video.info.width, video.info.height) {
+            Ok(sink) => Some(sink),
+            Err(e) => {
+                log::warn!("V4L2 sink unavailable: {:#}", e);
+                None
+            }
+        }
+    });
+
     let timer = start_pump(
         video,
         input.clone(),
@@ -127,6 +142,7 @@ pub fn attach(
         frame_size.clone(),
         orientation.clone(),
         apply,
+        v4l2,
         on_end,
     );
 
@@ -153,8 +169,10 @@ fn wire_input(
     {
         let input = input.clone();
         let controller = controller.clone();
-        mirror.on_pointer_down(move |u, v, button, alt| {
-            input.borrow_mut().pointer_down(u, v, button, alt, &controller);
+        mirror.on_pointer_down(move |u, v, button, alt, shift| {
+            input
+                .borrow_mut()
+                .pointer_down(u, v, button, alt, shift, &controller);
         });
     }
     {
@@ -223,10 +241,14 @@ fn start_pump(
     frame_size: Rc<Cell<(u32, u32)>>,
     orientation: Rc<Cell<Orientation>>,
     apply: Rc<dyn Fn(MirrorUpdate)>,
+    v4l2: Option<V4l2Sink>,
     on_end: impl Fn() + 'static,
 ) -> slint::Timer {
     let VideoStream {
-        frames, recycle, ..
+        frames,
+        recycle,
+        playback,
+        ..
     } = video;
     let timer = slint::Timer::default();
     let live = Cell::new(false);
@@ -251,6 +273,19 @@ fn start_pump(
             latest = newer;
         }
 
+        // A loopback device is told its size once, so a rotation has to be
+        // reported rather than silently written at the wrong stride.
+        if let Some(ref sink) = v4l2 {
+            if sink.matches(latest.width, latest.height) {
+                sink.write_frame(&latest.data);
+            } else if (latest.width, latest.height) != frame_size.get() {
+                log::warn!(
+                    "V4L2 sink {} was opened at a different size; reopen the session to follow the rotation",
+                    sink.device()
+                );
+            }
+        }
+
         // The device rotating changes the stream size mid session.
         if (latest.width, latest.height) != frame_size.get() {
             frame_size.set((latest.width, latest.height));
@@ -261,10 +296,14 @@ fn start_pump(
             });
         }
 
-        apply(MirrorUpdate::Frame(frame_to_image(&latest)));
-        if !live.get() {
-            live.set(true);
-            apply(MirrorUpdate::Live(true));
+        // Under --no-video-playback the frame is still decoded and recycled —
+        // it is simply never turned into an image or drawn.
+        if playback {
+            apply(MirrorUpdate::Frame(frame_to_image(&latest)));
+            if !live.get() {
+                live.set(true);
+                apply(MirrorUpdate::Live(true));
+            }
         }
         fps.borrow_mut().add_frame();
         let _ = recycle.try_send(latest);
@@ -278,17 +317,27 @@ fn start_pump(
 /// Kept out of [`crate::session`] because a cpal stream is not `Send` and a
 /// session has to cross a thread boundary to reach the window.
 pub fn start_audio(audio: AudioStream) -> Option<crate::audio::player::AudioPlayer> {
+    if !audio.playback {
+        log::info!("Audio playback disabled; nothing will reach the speakers");
+        return None;
+    }
+
     let mut regulator =
         crate::audio::regulator::AudioRegulator::new(48000, 2, Some(audio.buffer_ms));
     let consumer = regulator.consumer_state();
 
-    let player = match crate::audio::player::AudioPlayer::new_regulated(consumer) {
+    let player = match crate::audio::player::AudioPlayer::new_regulated(consumer, audio.output_buffer_ms) {
         Ok(player) => player,
         Err(e) => {
             log::warn!("Audio playback unavailable: {:#}", e);
             return None;
         }
     };
+
+    if !audio.playback {
+        log::info!("Audio playback disabled; the stream is still decoded");
+        return None;
+    }
 
     let samples = audio.samples;
     if let Err(e) = std::thread::Builder::new()

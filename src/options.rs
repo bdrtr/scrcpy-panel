@@ -292,6 +292,14 @@ pub struct Options {
     #[arg(long, default_value = "false")]
     pub no_video_playback: bool,
 
+    /// Disable audio playback on the computer (still decoded for recording)
+    #[arg(long, default_value = "false")]
+    pub no_audio_playback: bool,
+
+    /// Disable both video and audio playback
+    #[arg(short = 'N', long, default_value = "false")]
+    pub no_playback: bool,
+
     /// Fail if audio capture is not available
     #[arg(long, default_value = "false")]
     pub require_audio: bool,
