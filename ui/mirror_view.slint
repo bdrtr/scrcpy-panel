@@ -1,0 +1,130 @@
+// The mirror itself: a letterboxed video rectangle that takes input.
+//
+// This is shared by the standalone mirror window and the panel's session tab,
+// so its state lives in a global rather than in properties threaded down from
+// whichever window is hosting it. Rust binds the `Mirror` global once and does
+// not care where the view is mounted.
+//
+// Pointer positions handed to Rust are normalised to the displayed rectangle
+// (0..1 on each axis). Rust undoes the rotation and scales to device pixels, so
+// this file never needs to know the device resolution.
+
+export global Mirror {
+    in property <image> frame;
+    /// Aspect ratio (width / height) of the video *as displayed*, i.e. with the
+    /// client rotation already applied.
+    in property <float> display-aspect: 0.5;
+    /// Client-side rotation in degrees, clockwise. One of 0, 90, 180, 270.
+    in property <float> rotation: 0;
+    /// False before the first frame arrives, so the view can say so.
+    in property <bool> live;
+    in property <string> placeholder: "Görüntü bekleniyor…";
+
+    // `alt` rides along on press because that is where the decision to place a
+    // second, mirrored finger (pinch to zoom) is made. TouchArea's `moved` has
+    // no event argument, so Rust caches the modifier state from here.
+    callback pointer-down(u: float, v: float, button: int, alt: bool);
+    callback pointer-up(u: float, v: float, button: int);
+    callback pointer-moved(u: float, v: float, pressed: bool);
+    callback pointer-scroll(u: float, v: float, dx: float, dy: float);
+    callback key-down(text: string, alt: bool, control: bool, shift: bool, meta: bool, repeat: bool);
+    callback key-up(text: string, alt: bool, control: bool, shift: bool, meta: bool);
+}
+
+export component MirrorView inherits Rectangle {
+    /// Set false where the host does its own keyboard handling.
+    in property <bool> keyboard-enabled: true;
+
+    background: #0d0b0a;
+    // Makes the view itself a valid focus target, so a host can say
+    // "forward-focus: view".
+    forward-focus: keys;
+
+    // The letterboxed rectangle the video occupies, in view coordinates.
+    property <float> view-aspect: root.height > 0px ? root.width / root.height : 1;
+    property <bool> quarter-turn: Mirror.rotation == 90 || Mirror.rotation == 270;
+    property <length> fit-w: root.view-aspect > Mirror.display-aspect
+        ? root.height * Mirror.display-aspect
+        : root.width;
+    property <length> fit-h: root.view-aspect > Mirror.display-aspect
+        ? root.height
+        : root.width / Mirror.display-aspect;
+    property <length> fit-x: (root.width - root.fit-w) / 2;
+    property <length> fit-y: (root.height - root.fit-h) / 2;
+
+    // Pointer position normalised to that rectangle.
+    property <float> pointer-u: root.fit-w > 0px ? touch.mouse-x / root.fit-w : 0;
+    property <float> pointer-v: root.fit-h > 0px ? touch.mouse-y / root.fit-h : 0;
+
+    pure function button-id(b: PointerEventButton) -> int {
+        return b == PointerEventButton.left ? 1
+            : b == PointerEventButton.right ? 2
+            : b == PointerEventButton.middle ? 3
+            : 0;
+    }
+
+    public function focus-keys() {
+        keys.focus();
+    }
+
+    keys := FocusScope {
+        enabled: root.keyboard-enabled;
+
+        key-pressed(event) => {
+            Mirror.key-down(event.text, event.modifiers.alt, event.modifiers.control,
+                            event.modifiers.shift, event.modifiers.meta, event.repeat);
+            return EventResult.accept;
+        }
+        key-released(event) => {
+            Mirror.key-up(event.text, event.modifiers.alt, event.modifiers.control,
+                          event.modifiers.shift, event.modifiers.meta);
+            return EventResult.accept;
+        }
+
+        // The image is laid out unrotated and then turned about its centre, so
+        // that a quarter turn still fills the letterboxed rectangle exactly.
+        Image {
+            x: root.quarter-turn ? root.fit-x + (root.fit-w - root.fit-h) / 2 : root.fit-x;
+            y: root.quarter-turn ? root.fit-y + (root.fit-h - root.fit-w) / 2 : root.fit-y;
+            width: root.quarter-turn ? root.fit-h : root.fit-w;
+            height: root.quarter-turn ? root.fit-w : root.fit-h;
+            source: Mirror.frame;
+            image-fit: fill;
+            image-rendering: smooth;
+            transform-rotation: Mirror.rotation * 1deg;
+        }
+
+        if !Mirror.live: Text {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            text: Mirror.placeholder;
+            color: #6f6a68;
+            font-size: 13px;
+        }
+
+        touch := TouchArea {
+            x: root.fit-x;
+            y: root.fit-y;
+            width: root.fit-w;
+            height: root.fit-h;
+
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    keys.focus();
+                    Mirror.pointer-down(root.pointer-u, root.pointer-v,
+                                        root.button-id(event.button), event.modifiers.alt);
+                } else if (event.kind == PointerEventKind.up) {
+                    Mirror.pointer-up(root.pointer-u, root.pointer-v, root.button-id(event.button));
+                }
+            }
+            moved => {
+                Mirror.pointer-moved(root.pointer-u, root.pointer-v, self.pressed);
+            }
+            scroll-event(event) => {
+                Mirror.pointer-scroll(root.pointer-u, root.pointer-v,
+                                      event.delta-x / 1px, event.delta-y / 1px);
+                return EventResult.accept;
+            }
+        }
+    }
+}

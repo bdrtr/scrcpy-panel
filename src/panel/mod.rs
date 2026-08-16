@@ -11,13 +11,21 @@ mod command;
 pub use command::PanelConfig;
 
 use anyhow::{Context, Result};
+use clap::Parser;
+use crossbeam_channel::{bounded, Receiver};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
+use std::time::Duration;
 
-use crate::ui::{App, Cfg, DeviceRow, LogRow, PanelWindow, ProfileCard, Settings, ShortcutRow};
+use crate::mirror_host::{attach, start_audio, Attachment, MirrorUpdate};
+use crate::options::Options;
+use crate::session::{self, Session};
+use crate::ui::{
+    App, Cfg, DeviceRow, LogRow, Mirror, PanelWindow, ProfileCard, Settings, ShortcutRow,
+};
 
 /// Where profiles and preferences live.
 fn config_dir() -> Option<std::path::PathBuf> {
@@ -42,15 +50,41 @@ struct Panel {
     devices: Rc<VecModel<DeviceRow>>,
     profiles: Rc<RefCell<Vec<Profile>>>,
     profile_cards: Rc<VecModel<ProfileCard>>,
-    session: Rc<RefCell<Option<Child>>>,
+
+    /// A session in "ayrı pencere" mode: a second copy of this binary.
+    process: Rc<RefCell<Option<Child>>>,
     /// A dropped Slint timer stops firing, so the watch that notices a session
     /// ending on its own has to be held somewhere that outlives start_session.
     session_watch: RefCell<Option<slint::Timer>>,
+
+    /// A session in "panele gömülü" mode, running in this process.
+    embedded: RefCell<Option<Session>>,
+    /// What drives the MirrorView while an embedded session runs. Dropping it
+    /// stops the frame pump, which is the first step of shutting one down.
+    attachment: RefCell<Option<Attachment>>,
+    audio: RefCell<Option<crate::audio::player::AudioPlayer>>,
+    /// Session setup blocks on adb, so it runs on a worker thread and arrives
+    /// here; a timer on the event loop picks it up.
+    pending: RefCell<Option<Receiver<Result<Session>>>>,
+    pending_timer: RefCell<Option<slint::Timer>>,
+    /// SDL is not the renderer any more, but the audio player is still built on
+    /// it, so the subsystem has to outlive every session the panel starts.
+    sdl_audio: sdl2::AudioSubsystem,
 }
 
 /// Open the panel and run until its window closes.
 pub fn run() -> Result<()> {
     let window = PanelWindow::new().context("Failed to create the panel window")?;
+
+    // Only the audio subsystem is used, but SDL insists on being initialised as
+    // a whole, and the clipboard helpers reach into its video side.
+    let sdl = sdl2::init().map_err(|e| anyhow::anyhow!("SDL init failed: {}", e))?;
+    let _sdl_video = sdl
+        .video()
+        .map_err(|e| anyhow::anyhow!("SDL video init failed: {}", e))?;
+    let sdl_audio = sdl
+        .audio()
+        .map_err(|e| anyhow::anyhow!("SDL audio init failed: {}", e))?;
 
     let panel = Rc::new(Panel {
         window: window.as_weak(),
@@ -58,8 +92,14 @@ pub fn run() -> Result<()> {
         devices: Rc::new(VecModel::default()),
         profiles: Rc::new(RefCell::new(load_profiles())),
         profile_cards: Rc::new(VecModel::default()),
-        session: Rc::new(RefCell::new(None)),
+        process: Rc::new(RefCell::new(None)),
         session_watch: RefCell::new(None),
+        embedded: RefCell::new(None),
+        attachment: RefCell::new(None),
+        audio: RefCell::new(None),
+        pending: RefCell::new(None),
+        pending_timer: RefCell::new(None),
+        sdl_audio,
     });
 
     {
@@ -98,14 +138,18 @@ pub fn run() -> Result<()> {
     drop(shutdown);
 
     // Leave nothing running behind the window.
-    if let Some(mut child) = panel.session.borrow_mut().take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
+    stop_session(&panel);
     Ok(())
 }
 
 impl Panel {
+    /// Is a session running, or on its way up?
+    fn is_running(&self) -> bool {
+        self.process.borrow().is_some()
+            || self.embedded.borrow().is_some()
+            || self.pending.borrow().is_some()
+    }
+
     fn info(&self, message: &str) {
         self.push_log("INFO", message);
     }
@@ -686,12 +730,8 @@ fn refresh_command(window: &PanelWindow) {
 // Session
 // =====================================================================
 
-fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
-    if panel.session.borrow().is_some() {
-        panel.warn("Zaten çalışan bir oturum var.");
-        return;
-    }
-
+/// Turn the form state into a command line this client can be launched with.
+fn session_options(window: &PanelWindow, panel: &Rc<Panel>) -> Option<Options> {
     let config = read_config(window);
     let (args, dropped) = config.to_client_args();
     if !dropped.is_empty() {
@@ -701,6 +741,167 @@ fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
         ));
     }
 
+    let mut argv = vec!["scrcpy-slint".to_string()];
+    argv.extend(args);
+    match Options::try_parse_from(&argv) {
+        Ok(opts) => Some(opts),
+        Err(e) => {
+            panel.warn(&format!("Argümanlar geçersiz: {}", e));
+            None
+        }
+    }
+}
+
+fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
+    if panel.is_running() {
+        panel.warn("Zaten çalışan bir oturum var.");
+        return;
+    }
+    let Some(opts) = session_options(window, panel) else {
+        return;
+    };
+
+    let config = read_config(window);
+    panel.info(&format!("Başlatılıyor: {}", config.to_command_line()));
+
+    if window.global::<Settings>().get_mirror_mode() == "embedded" {
+        start_embedded(window, panel, opts);
+    } else {
+        start_windowed(window, panel, &config);
+    }
+}
+
+/// Run the session inside this process and draw it in the session tab.
+///
+/// Setup blocks on adb for the better part of a second, so it happens on a
+/// worker thread; a timer on the event loop picks up the result. Everything
+/// after that — the frame pump, the input wiring — has to be on the event loop,
+/// which is also why the session cannot simply be handed over in a closure:
+/// `Rc<Panel>` is not `Send`.
+fn start_embedded(window: &PanelWindow, panel: &Rc<Panel>, opts: Options) {
+    let (tx, rx) = bounded(1);
+    let opts_for_setup = opts.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(Session::start(&opts_for_setup));
+    });
+
+    *panel.pending.borrow_mut() = Some(rx);
+    window.global::<App>().set_tab("session".into());
+    panel.info("Cihaza bağlanılıyor…");
+
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), {
+        let panel = panel.clone();
+        move || {
+            // Once the result is in, `pending` is cleared and this becomes a
+            // no-op until the next session; the timer itself is dropped when the
+            // session stops, because a timer cannot safely drop itself here.
+            let result = {
+                let mut slot = panel.pending.borrow_mut();
+                match slot.as_ref().map(|rx| rx.try_recv()) {
+                    Some(Ok(result)) => {
+                        *slot = None;
+                        Some(result)
+                    }
+                    Some(Err(crossbeam_channel::TryRecvError::Disconnected)) => {
+                        *slot = None;
+                        Some(Err(anyhow::anyhow!("session setup thread died")))
+                    }
+                    _ => None,
+                }
+            };
+            let Some(result) = result else { return };
+            install_embedded(&panel, result, &opts);
+        }
+    });
+    *panel.pending_timer.borrow_mut() = Some(timer);
+}
+
+/// Mount a freshly started session in the panel's session tab.
+fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) {
+    let Some(window) = panel.window.upgrade() else {
+        return;
+    };
+
+    let mut session = match result {
+        Ok(session) => session,
+        Err(e) => {
+            panel.warn(&format!("Oturum başlatılamadı: {:#}", e));
+            window.global::<App>().set_session_running(false);
+            return;
+        }
+    };
+
+    *panel.audio.borrow_mut() = session
+        .audio
+        .take()
+        .and_then(|audio| start_audio(&panel.sdl_audio, audio));
+
+    match session.video.take() {
+        None => panel.warn("Video kapalı; gömülecek görüntü yok."),
+        Some(video) => {
+            let apply: Rc<dyn Fn(MirrorUpdate)> = {
+                let weak = panel.window.clone();
+                Rc::new(move |update| {
+                    let Some(window) = weak.upgrade() else { return };
+                    let mirror = window.global::<Mirror>();
+                    match update {
+                        MirrorUpdate::Frame(image) => mirror.set_frame(image),
+                        MirrorUpdate::Geometry { aspect, rotation } => {
+                            mirror.set_display_aspect(aspect);
+                            mirror.set_rotation(rotation);
+                        }
+                        MirrorUpdate::Live(live) => mirror.set_live(live),
+                    }
+                })
+            };
+
+            // A weak handle, not an Rc: the panel owns the attachment, so an Rc
+            // here would be a cycle that outlives the session.
+            let weak_panel = Rc::downgrade(panel);
+            let attachment = attach(
+                video,
+                session.controller.take().map(Rc::new),
+                &window.global::<Mirror>(),
+                opts,
+                apply,
+                // Fullscreen and window resizing belong to a window of its own;
+                // embedded, the mirror is one tab among seven.
+                |_action, _size, _orientation| {},
+                move || {
+                    if let Some(panel) = weak_panel.upgrade() {
+                        panel.info("Görüntü akışı sona erdi.");
+                        stop_session(&panel);
+                    }
+                },
+            );
+            *panel.attachment.borrow_mut() = Some(attachment);
+        }
+    }
+
+    let app = window.global::<App>();
+    app.set_session_title(session.device_name.as_str().into());
+    app.set_session_meta(
+        format!(
+            "{} · gömülü",
+            if opts.serial.is_some() {
+                opts.serial.clone().unwrap_or_default()
+            } else {
+                session.device_name.clone()
+            }
+        )
+        .into(),
+    );
+    app.set_session_running(true);
+
+    *panel.embedded.borrow_mut() = Some(session);
+    panel.info("Oturum başladı.");
+}
+
+/// Run the session as a second copy of this binary, in its own window.
+fn start_windowed(window: &PanelWindow, panel: &Rc<Panel>, config: &PanelConfig) {
+    let (args, _) = config.to_client_args();
+
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(e) => {
@@ -708,8 +909,6 @@ fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
             return;
         }
     };
-
-    panel.info(&format!("Başlatılıyor: {}", config.to_command_line()));
 
     let child = Command::new(&exe)
         .args(&args)
@@ -726,9 +925,12 @@ fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
     };
 
     // Pipe the session's output into the log tab.
-    for stream in [child.stdout.take().map(Stream::Out), child.stderr.take().map(Stream::Err)]
-        .into_iter()
-        .flatten()
+    for stream in [
+        child.stdout.take().map(Stream::Out),
+        child.stderr.take().map(Stream::Err),
+    ]
+    .into_iter()
+    .flatten()
     {
         let weak = panel.window.clone();
         std::thread::spawn(move || {
@@ -747,29 +949,28 @@ fn start_session(window: &PanelWindow, panel: &Rc<Panel>) {
         });
     }
 
-    *panel.session.borrow_mut() = Some(child);
-    window.global::<App>().set_session_running(true);
-    window.global::<App>().set_session_title(config.serial.clone().into());
-    window
-        .global::<App>()
-        .set_session_meta(format!("{} · {} bayrak", config.video_codec, config.flag_count()).into());
+    *panel.process.borrow_mut() = Some(child);
+    let app = window.global::<App>();
+    app.set_session_running(true);
+    app.set_session_title(config.serial.as_str().into());
+    app.set_session_meta(format!("{} · ayrı pencere", config.video_codec).into());
 
     // Watch for the session ending on its own.
     let panel_watch = panel.clone();
     let watch = slint::Timer::default();
     watch.start(
         slint::TimerMode::Repeated,
-        std::time::Duration::from_millis(500),
+        Duration::from_millis(500),
         move || {
             let ended = {
-                let mut slot = panel_watch.session.borrow_mut();
+                let mut slot = panel_watch.process.borrow_mut();
                 match slot.as_mut() {
                     Some(child) => matches!(child.try_wait(), Ok(Some(_))),
                     None => false,
                 }
             };
             if ended {
-                panel_watch.session.borrow_mut().take();
+                panel_watch.process.borrow_mut().take();
                 if let Some(window) = panel_watch.window.upgrade() {
                     window.global::<App>().set_session_running(false);
                 }
@@ -785,14 +986,38 @@ enum Stream {
     Err(std::process::ChildStderr),
 }
 
+/// Stop whichever kind of session is running.
 fn stop_session(panel: &Rc<Panel>) {
-    match panel.session.borrow_mut().take() {
-        Some(mut child) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            panel.info("Oturum durduruldu.");
-        }
-        None => panel.warn("Çalışan bir oturum yok."),
+    let mut stopped = panel.pending.borrow_mut().take().is_some();
+    panel.pending_timer.borrow_mut().take();
+    panel.session_watch.borrow_mut().take();
+
+    if let Some(mut child) = panel.process.borrow_mut().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+        stopped = true;
+    }
+
+    // Order matters: the attachment owns the frame channel, and the decoder
+    // thread cannot finish until that is dropped.
+    if panel.attachment.borrow_mut().take().is_some() {
+        stopped = true;
+    }
+    panel.audio.borrow_mut().take();
+    if let Some(session) = panel.embedded.borrow_mut().take() {
+        session.shutdown();
+        stopped = true;
+    }
+
+    if let Some(window) = panel.window.upgrade() {
+        window.global::<App>().set_session_running(false);
+        window.global::<Mirror>().set_live(false);
+    }
+
+    if stopped {
+        panel.info("Oturum durduruldu.");
+    } else {
+        panel.warn("Çalışan bir oturum yok.");
     }
 }
 

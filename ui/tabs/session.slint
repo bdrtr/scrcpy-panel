@@ -16,6 +16,7 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
+import { MirrorView } from "../mirror_view.slint";
 import { App, Cfg, Settings, MetricRow } from "../state.slint";
 import { Btn, Kicker, Mono, SectionHead, Tag } from "../components.slint";
 
@@ -89,68 +90,15 @@ export component TabSession inherits VerticalLayout {
                         }
                     }
 
-                    // Panele gömülü kip: telefon oranında bir yer tutucu.
+                    // Panele gömülü kip: aynanın kendisi. MirrorView, ayrı
+                    // ayna penceresiyle aynı bileşen ve aynı Mirror global'ini
+                    // okuyor, yani girdi yolu iki kipte de birebir aynı.
                     if App.session-running && Settings.mirror-mode == "embedded": Rectangle {
-                        phone := Rectangle {
-                            height: parent.height - 2 * Theme.s6;
-                            width: self.height * 0.4615; // 1080 / 2340
-                            x: (parent.width - self.width) / 2;
+                        MirrorView {
+                            x: Theme.s6;
                             y: Theme.s6;
-                            background: Theme.neutral-900;
-
-                            VerticalLayout {
-                                padding: Theme.s3;
-
-                                HorizontalLayout {
-                                    vertical-stretch: 0;
-                                    Text {
-                                        text: "09:41";
-                                        font-family: Theme.mono;
-                                        font-size: 10px;
-                                        color: Theme.neutral-500;
-                                    }
-                                    Rectangle { horizontal-stretch: 1; }
-                                    Text {
-                                        text: "LTE ▮";
-                                        font-family: Theme.mono;
-                                        font-size: 10px;
-                                        color: Theme.neutral-500;
-                                    }
-                                }
-
-                                VerticalLayout {
-                                    vertical-stretch: 1;
-                                    alignment: center;
-                                    spacing: 6px;
-
-                                    Text {
-                                        text: "AYNA GÖRÜNTÜSÜ";
-                                        font-family: Theme.mono;
-                                        font-size: 11px;
-                                        letter-spacing: 1.54px;
-                                        color: Theme.neutral-500;
-                                        horizontal-alignment: center;
-                                    }
-                                    Text {
-                                        text: "1080 × 2340";
-                                        font-family: Theme.mono;
-                                        font-size: 11px;
-                                        color: Theme.neutral-500;
-                                        horizontal-alignment: center;
-                                    }
-                                }
-
-                                // Ana ekran çubuğu — genişliğin %40'ı, ortalı.
-                                HorizontalLayout {
-                                    height: 3px;
-                                    Rectangle { horizontal-stretch: 3; }
-                                    Rectangle {
-                                        horizontal-stretch: 4;
-                                        background: Theme.neutral-600;
-                                    }
-                                    Rectangle { horizontal-stretch: 3; }
-                                }
-                            }
+                            width: parent.width - 2 * Theme.s6;
+                            height: parent.height - 2 * Theme.s6;
                         }
                     }
 
