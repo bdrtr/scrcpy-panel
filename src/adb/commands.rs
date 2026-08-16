@@ -53,12 +53,62 @@ pub fn get_devices() -> Result<Vec<String>> {
 
 /// Select a device — uses serial if provided, otherwise picks the only connected device
 pub fn select_device(serial: Option<&str>) -> Result<String> {
+    select_device_filtered(serial, DeviceFilter::Any)
+}
+
+/// Which connections `--select-usb` and `--select-tcpip` narrow the search to.
+///
+/// A wireless device's serial is `host:port`; a USB one's never is, which is
+/// the same test scrcpy uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceFilter {
+    Any,
+    Usb,
+    TcpIp,
+}
+
+impl DeviceFilter {
+    pub fn from_flags(usb: bool, tcpip: bool) -> Self {
+        match (usb, tcpip) {
+            (true, false) => DeviceFilter::Usb,
+            (false, true) => DeviceFilter::TcpIp,
+            _ => DeviceFilter::Any,
+        }
+    }
+
+    fn accepts(self, serial: &str) -> bool {
+        match self {
+            DeviceFilter::Any => true,
+            DeviceFilter::Usb => !serial.contains(':'),
+            DeviceFilter::TcpIp => serial.contains(':'),
+        }
+    }
+}
+
+pub fn select_device_filtered(serial: Option<&str>, filter: DeviceFilter) -> Result<String> {
     if let Some(s) = serial {
         return Ok(s.to_string());
     }
-    let devices = get_devices()?;
+    let all = get_devices()?;
+    let devices: Vec<String> = all
+        .iter()
+        .filter(|serial| filter.accepts(serial))
+        .cloned()
+        .collect();
+
     match devices.len() {
-        0 => bail!("No device connected. Plug in your phone and enable USB debugging."),
+        0 if all.is_empty() => {
+            bail!("No device connected. Plug in your phone and enable USB debugging.")
+        }
+        0 => bail!(
+            "No {} device among {:?}",
+            match filter {
+                DeviceFilter::Usb => "USB",
+                DeviceFilter::TcpIp => "TCP/IP",
+                DeviceFilter::Any => "connected",
+            },
+            all
+        ),
         1 => Ok(devices[0].clone()),
         n => bail!("{} devices connected. Use --serial to select one: {:?}", n, devices),
     }

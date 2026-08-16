@@ -65,7 +65,7 @@ pub struct Options {
     pub always_on_top: bool,
 
     /// Borderless window
-    #[arg(long, default_value = "false")]
+    #[arg(long, alias = "window-borderless", default_value = "false")]
     pub borderless: bool,
 
     /// Record to file
@@ -77,7 +77,7 @@ pub struct Options {
     pub crop: Option<String>,
 
     /// Port range for ADB tunnel (e.g. 27183:27199)
-    #[arg(short = 'p', long, default_value = "27183:27199")]
+    #[arg(short = 'p', long, alias = "port", default_value = "27183:27199")]
     pub port_range: String,
 
     /// Turn screen off while mirroring
@@ -128,6 +128,42 @@ pub struct Options {
     /// Turn the device power on at start
     #[arg(long, default_value = "true")]
     pub power_on: bool,
+
+    /// Do not turn the device power on at start
+    #[arg(long, default_value = "false")]
+    pub no_power_on: bool,
+
+    /// Server log level: debug, info, warn, error
+    #[arg(long, default_value = "info")]
+    pub verbosity: String,
+
+    /// Keep the virtual display's content when the session ends
+    #[arg(long, default_value = "false")]
+    pub no_vd_destroy_content: bool,
+
+    /// Hide the system bars on the virtual display
+    #[arg(long, default_value = "false")]
+    pub no_vd_system_decorations: bool,
+
+    /// Only consider a USB device when selecting one
+    #[arg(long, default_value = "false")]
+    pub select_usb: bool,
+
+    /// Only consider a TCP/IP device when selecting one
+    #[arg(long, default_value = "false")]
+    pub select_tcpip: bool,
+
+    /// Forward every mouse button to the device (same as --mouse-bind=++++)
+    #[arg(long, default_value = "false")]
+    pub forward_all_clicks: bool,
+
+    /// Prefer injecting text over keycodes
+    #[arg(long, default_value = "false")]
+    pub prefer_text: bool,
+
+    /// Send every key as a raw keycode, never as text
+    #[arg(long, default_value = "false")]
+    pub raw_key_events: bool,
 
     /// Power off the device screen on close
     #[arg(long, default_value = "false")]
@@ -244,6 +280,10 @@ pub struct Options {
     /// Enable clipboard auto-sync
     #[arg(long, default_value = "true")]
     pub clipboard_autosync: bool,
+
+    /// Disable clipboard auto-sync
+    #[arg(long, default_value = "false")]
+    pub no_clipboard_autosync: bool,
 
     /// Disable screensaver while mirroring
     #[arg(long, default_value = "false")]

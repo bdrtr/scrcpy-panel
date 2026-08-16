@@ -58,6 +58,7 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | `--mouse-bind` | works — parsed, with 6 tests; malformed input warns and keeps the default |
 | Ayarlar: adb path, adb port, record dir, screenshot dir | consulted at runtime |
 | Ayarlar: autostart profile, version check, log to disk | work |
+| Recording started and stopped mid-session | implemented, not yet run against a device |
 | `--max-size`, `--max-fps`, `--time-limit` | work |
 | `--list-encoders/-displays/-cameras/-apps` | work |
 | scrcpy 4.1 server handshake | works, no unknown-option warnings |
@@ -94,14 +95,18 @@ with the opening session header, which every run exercises.
   request and refused it on merit, so the ioctl number and struct layout are right. What is
   untested is a successful publish, which needs
   `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
+- **Three flags still reach the command bar and not the device**: `--tunnel-host` and
+  `--tunnel-port` (connecting through a remote adb server) and `--v4l2-buffer`. The panel
+  names them as dropped. Everything else the form can produce — 76 of 79 flags — is
+  implemented.
+- **One device at a time.** The mockup promises simultaneous mirroring on several devices;
+  the panel selects one, and the tab copy says so.
 - **`--adb-port` applies to the panel's adb commands but not to a session.**
   `src/adb/protocol.rs` speaks the daemon protocol on a hardcoded 5037. The panel warns at
   startup when the setting differs rather than leaving the two out of step silently.
 - **Interface language and minimize-to-tray are disabled**, with labels saying so: one
   needs a translation layer, the other a tray icon. Slint 1.17 does have `SystemTrayIcon`,
   so the second is a question of time rather than possibility.
-- **One device at a time.** The mockup promises simultaneous mirroring on several devices;
-  the panel selects one. The tab copy says so rather than implying otherwise.
 - Drag-and-drop file transfer is not possible yet: Slint 1.17's `DataTransfer` exposes
   plain text and images, not dropped file paths.
 - `--always-on-top` and `--borderless` do nothing: Slint 1.17 exposes no window API for

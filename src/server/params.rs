@@ -4,7 +4,7 @@ use crate::options::Options;
 pub fn build_server_args(opts: &Options, scid: u32, tunnel_port: u16) -> Vec<String> {
     let mut args = vec![
         format!("scid={:08x}", scid),
-        format!("log_level=info"),
+        format!("log_level={}", opts.verbosity),
         format!("tunnel_forward={}", opts.force_adb_forward),
     ];
 
@@ -27,7 +27,7 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_port: u16) -> Vec<Str
         args.push(format!("audio_codec={}", opts.audio_codec));
     }
 
-    if !opts.clipboard_autosync {
+    if !opts.clipboard_autosync || opts.no_clipboard_autosync {
         args.push("clipboard_autosync=false".to_string());
     }
 
@@ -54,7 +54,7 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_port: u16) -> Vec<Str
         args.push("stay_awake=true".to_string());
     }
 
-    if !opts.power_on {
+    if !opts.power_on || opts.no_power_on {
         args.push("power_on=false".to_string());
     }
 
@@ -116,6 +116,15 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_port: u16) -> Vec<Str
     // Virtual display
     if let Some(ref nd) = opts.new_display {
         args.push(format!("new_display={}", nd));
+
+        // These only mean anything alongside a virtual display, and the server
+        // rejects nothing — it just ignores them — so keep them scoped.
+        if opts.no_vd_destroy_content {
+            args.push("vd_destroy_content=false".to_string());
+        }
+        if opts.no_vd_system_decorations {
+            args.push("vd_system_decorations=false".to_string());
+        }
     }
 
     // Audio dup (play on both device and client)

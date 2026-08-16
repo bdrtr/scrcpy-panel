@@ -69,13 +69,30 @@ pub fn attach(
     let orientation = Rc::new(Cell::new(Orientation::from_degrees(opts.orientation)));
     let frame_size = Rc::new(Cell::new((video.info.width, video.info.height)));
 
+    // scrcpy spells some of these two ways: --prefer-text and --raw-key-events
+    // are shorthands for a key inject mode, and --forward-all-clicks is one for
+    // a mouse binding. Resolve them here so only one form reaches the
+    // translator.
+    let key_inject_mode = if opts.raw_key_events {
+        "raw"
+    } else if opts.prefer_text {
+        "text"
+    } else {
+        opts.key_inject_mode.as_str()
+    };
+    let mouse_bind = if opts.forward_all_clicks {
+        Some("++++")
+    } else {
+        opts.mouse_bind.as_deref()
+    };
+
     let input = Rc::new(RefCell::new(SlintInput::new(
         video.info.width,
         video.info.height,
         &opts.shortcut_mod,
-        &opts.key_inject_mode,
+        key_inject_mode,
         opts.legacy_paste,
-        opts.mouse_bind.as_deref(),
+        mouse_bind,
         orientation.get(),
     )));
     let fps = Rc::new(RefCell::new(FpsCounter::new()));

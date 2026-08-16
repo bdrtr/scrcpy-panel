@@ -262,6 +262,18 @@ const SUPPORTED: &[&str] = &[
     "--mouse",
     "--shortcut-mod",
     "--no-control",
+    "--no-clipboard-autosync",
+    "--forward-all-clicks",
+    "--prefer-text",
+    "--raw-key-events",
+    "--verbosity",
+    "--port",
+    "--select-usb",
+    "--select-tcpip",
+    "--window-borderless",
+    "--no-power-on",
+    "--no-vd-destroy-content",
+    "--no-vd-system-decorations",
     "--legacy-paste",
     "--new-display",
     "--start-app",
@@ -596,14 +608,14 @@ mod tests {
     #[test]
     fn unsupported_flags_are_reported_rather_than_passed_on() {
         let mut cfg = PanelConfig::default();
-        cfg.max_size = "800".into();  // supported
-        cfg.otg = true;               // not implemented by this client yet
-        cfg.verbosity = "debug".into();
+        cfg.max_size = "800".into();          // supported
+        cfg.otg = true;                       // needs USB/AOA, not implemented
+        cfg.tunnel_host = "10.0.0.1".into();  // remote adb server, not implemented
 
         let (accepted, dropped) = cfg.to_client_args();
         assert_eq!(accepted, vec!["--max-size=800".to_string()]);
         assert!(dropped.contains(&"--otg".to_string()));
-        assert!(dropped.contains(&"--verbosity=debug".to_string()));
+        assert!(dropped.contains(&"--tunnel-host=10.0.0.1".to_string()));
     }
 
     #[test]
@@ -679,36 +691,47 @@ mod tests {
         }
     }
 
-    /// Every flag the panel is willing to launch with must actually parse, so
-    /// the supported list cannot drift away from the command line.
+    /// Every flag the panel is willing to launch with must actually parse.
+    ///
+    /// Whether a flag takes a value is asked of clap rather than kept in a list
+    /// here: the list drifted the moment a value-taking flag was added, and a
+    /// stale list fails in a way that looks like the flag is broken.
     #[test]
     fn every_supported_flag_parses() {
-        use clap::Parser;
+        use clap::{CommandFactory, Parser};
 
-        // A value that is plausible for any flag that takes one.
-        let sample = |name: &str| -> Vec<String> {
-            let takes_value = matches!(
-                name,
-                "--video-source" | "--video-codec" | "--video-encoder" | "--video-bit-rate"
-                    | "--max-size" | "--max-fps" | "--crop" | "--display-id" | "--video-buffer"
-                    | "--v4l2-sink" | "--audio-codec" | "--audio-source" | "--audio-encoder"
-                    | "--audio-bit-rate" | "--audio-buffer" | "--audio-output-buffer"
-                    | "--record" | "--record-format" | "--time-limit" | "--keyboard" | "--mouse"
-                    | "--shortcut-mod" | "--mouse-bind" | "--new-display" | "--start-app"
-                    | "--camera-id" | "--camera-size" | "--camera-facing" | "--camera-ar"
-                    | "--camera-fps" | "--window-title" | "--orientation" | "--window-x"
-                    | "--window-y" | "--window-width" | "--window-height" | "--serial" | "--tcpip"
-            );
-            if takes_value {
-                vec![format!("{}=1", name)]
-            } else {
-                vec![name.to_string()]
-            }
-        };
+        let command = crate::options::Options::command();
 
         for name in SUPPORTED {
+            let long = name.trim_start_matches("--");
+            let argument = command
+                .get_arguments()
+                .find(|arg| {
+                    arg.get_long() == Some(long)
+                        || arg
+                            .get_all_aliases()
+                            .is_some_and(|aliases| aliases.contains(&long))
+                })
+                .unwrap_or_else(|| panic!("{name} is offered but the command line has no such argument"));
+
+            // num_args is only set when it was given explicitly, so ask what
+            // the argument *does* instead: a boolean flag sets a value itself.
+            let takes_value = !matches!(
+                argument.get_action(),
+                clap::ArgAction::SetTrue
+                    | clap::ArgAction::SetFalse
+                    | clap::ArgAction::Count
+                    | clap::ArgAction::Help
+                    | clap::ArgAction::Version
+            );
+
             let mut argv = vec!["scrcpy-slint".to_string()];
-            argv.extend(sample(name));
+            argv.push(if takes_value {
+                format!("{name}=1")
+            } else {
+                name.to_string()
+            });
+
             let parsed = crate::options::Options::try_parse_from(&argv);
             assert!(
                 parsed.is_ok(),

@@ -72,6 +72,9 @@ struct Panel {
     /// Refreshes the Ölçümler table once a second.
     metrics_timer: RefCell<Option<slint::Timer>>,
     started_at: std::cell::Cell<Option<std::time::Instant>>,
+    /// Which profile "Düzenle" loaded, so the next save overwrites it instead
+    /// of leaving a near-duplicate behind.
+    editing_profile: std::cell::Cell<Option<usize>>,
     /// Session setup blocks on adb, so it runs on a worker thread and arrives
     /// here; a timer on the event loop picks it up.
     pending: RefCell<Option<Receiver<Result<Session>>>>,
@@ -124,6 +127,7 @@ pub fn run(opts: &Options) -> Result<()> {
         controller: RefCell::new(None),
         metrics_timer: RefCell::new(None),
         started_at: std::cell::Cell::new(None),
+        editing_profile: std::cell::Cell::new(None),
         pending: RefCell::new(None),
         pending_timer: RefCell::new(None),
         log_file: RefCell::new(None),
@@ -648,6 +652,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
             if let Some(window) = weak.upgrade() {
                 write_config(&window, &PanelConfig::default());
                 refresh_command(&window);
+                panel.editing_profile.set(None);
                 panel.info("Yapılandırma varsayılanlara döndürüldü.");
             }
         });
@@ -725,16 +730,32 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
         app.on_save_profile(move || {
             if let Some(window) = weak.upgrade() {
                 let config = read_config(&window);
-                let count = config.flag_count();
-                let name = format!("Profil {}", panel.profiles.borrow().len() + 1);
-                panel.profiles.borrow_mut().push(Profile {
-                    name: name.clone(),
-                    description: format!("{} bayrak · {}", count, config.video_codec),
-                    config,
-                });
+                let description = format!("{} bayrak · {}", config.flag_count(), config.video_codec);
+
+                let message = match panel.editing_profile.take() {
+                    // Saving while editing writes back to the profile the form
+                    // came from; it used to leave a near-identical copy behind.
+                    Some(index) if index < panel.profiles.borrow().len() => {
+                        let mut profiles = panel.profiles.borrow_mut();
+                        let profile = &mut profiles[index];
+                        profile.description = description;
+                        profile.config = config;
+                        format!("Profil güncellendi: {}", profile.name)
+                    }
+                    _ => {
+                        let name = format!("Profil {}", panel.profiles.borrow().len() + 1);
+                        panel.profiles.borrow_mut().push(Profile {
+                            name: name.clone(),
+                            description,
+                            config,
+                        });
+                        format!("Profil kaydedildi: {name}")
+                    }
+                };
+
                 save_profiles(&panel);
                 refresh_profile_cards(&panel);
-                panel.info(&format!("Profil kaydedildi: {}", name));
+                panel.info(&message);
             }
         });
     }
@@ -749,6 +770,8 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                     write_config(&window, &profile.config);
                     drop(profiles);
                     refresh_command(&window);
+                    // Applying is not editing: a later save makes a new profile.
+                    panel.editing_profile.set(None);
                     panel.info("Profil uygulandı.");
                 }
             }
@@ -760,6 +783,9 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
         app.on_delete_profile(move |index| {
             let index = index as usize;
             if index < panel.profiles.borrow().len() {
+                // Deleting shifts every later index, so an edit in flight would
+                // otherwise write back to the wrong profile.
+                panel.editing_profile.set(None);
                 let removed = panel.profiles.borrow_mut().remove(index);
                 save_profiles(&panel);
                 refresh_profile_cards(&panel);
@@ -932,11 +958,21 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 if let Some(config) = applied {
                     write_config(&window, &config);
                     refresh_command(&window);
-                    // Editing a profile is applying it and opening the form.
+                    // Editing a profile is applying it, opening the form, and
+                    // remembering which one to write back to.
+                    panel.editing_profile.set(Some(index as usize));
                     let app = window.global::<App>();
                     app.set_tab("config".into());
                     app.set_section("video".into());
-                    panel.info("Profil düzenleme için yapılandırmaya yüklendi.");
+                    let name = panel
+                        .profiles
+                        .borrow()
+                        .get(index as usize)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default();
+                    panel.info(&format!(
+                        "\"{name}\" düzenleniyor — kaydedince üzerine yazılacak."
+                    ));
                 }
             }
         });
@@ -951,21 +987,47 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 let on = !cfg.get_record_enabled();
                 cfg.set_record_enabled(on);
                 refresh_command(&window);
-                let running = panel.is_running();
                 if on && cfg.get_record_path().is_empty() {
                     panel.warn("Kayıt açıldı ama dosya yolu boş — Kayıt bölümünden doldurun.");
-                } else if running {
-                    // The recorder is wired up when a session starts, so this
-                    // only takes effect on the next one. Say so rather than
-                    // letting the label imply the current session is recording.
-                    panel.warn(&format!(
-                        "Kayıt {} — ama çalışan oturumu etkilemez, sonraki oturumda geçerli olacak.",
-                        if on { "açıldı" } else { "kapatıldı" }
-                    ));
-                } else if on {
-                    panel.info("Kayıt açıldı; oturum başlayınca dosyaya yazılacak.");
-                } else {
-                    panel.info("Kayıt kapatıldı.");
+                    return;
+                }
+
+                // A running embedded session can start and stop recording in
+                // place; the demux threads read the recorder out of a shared
+                // slot on every packet.
+                let embedded = panel.embedded.borrow();
+                match embedded.as_ref() {
+                    Some(session) if on => {
+                        let config = launch_config(&window);
+                        let format = if config.record_format == "mp4" {
+                            None
+                        } else {
+                            Some(config.record_format.clone())
+                        };
+                        let controller = panel.controller.borrow().clone();
+                        match session.start_recording(
+                            &config.effective_record_path(),
+                            format.as_deref(),
+                            controller.as_deref(),
+                        ) {
+                            Ok(()) => panel.info(&format!(
+                                "Kayıt başladı: {}",
+                                config.effective_record_path()
+                            )),
+                            Err(e) => panel.warn(&format!("Kayıt başlatılamadı: {e:#}")),
+                        }
+                    }
+                    Some(session) => {
+                        if session.stop_recording() {
+                            panel.info("Kayıt durduruldu, dosya kapatıldı.");
+                        } else {
+                            panel.info("Kayıt kapatıldı.");
+                        }
+                    }
+                    None if on => {
+                        panel.info("Kayıt açıldı; oturum başlayınca dosyaya yazılacak.")
+                    }
+                    None => panel.info("Kayıt kapatıldı."),
                 }
             }
         });

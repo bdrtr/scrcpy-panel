@@ -16,6 +16,7 @@ use anyhow::{Context, Result};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::io::BufReader;
 use std::net::TcpStream;
+use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -71,7 +72,12 @@ pub struct Session {
     video_socket: Option<TcpStream>,
     demuxer_thread: Option<JoinHandle<()>>,
     decoder_thread: Option<JoinHandle<()>>,
-    recorder: Option<Recorder>,
+    /// Shared with the demux threads so a recording can be started and stopped
+    /// while the session runs, rather than only being decided at launch.
+    recorder: Arc<RwLock<Option<Recorder>>>,
+    /// What a recorder started later needs to know about the streams.
+    video_codec: Option<VideoCodecInfo>,
+    audio_codec_id: Option<u32>,
     server_process: adb::commands::ShellHandle,
     tunnel: adb::tunnel::AdbTunnel,
     no_cleanup: bool,
@@ -92,8 +98,11 @@ impl Session {
 
         connect_tcpip_if_requested(opts)?;
 
-        let serial = adb::commands::select_device(opts.serial.as_deref())
-            .context("Device selection failed")?;
+        let serial = adb::commands::select_device_filtered(
+            opts.serial.as_deref(),
+            adb::commands::DeviceFilter::from_flags(opts.select_usb, opts.select_tcpip),
+        )
+        .context("Device selection failed")?;
         log::info!("Using device: {}", serial);
 
         let server_path = resolve_server_path(opts)?;
@@ -139,12 +148,14 @@ impl Session {
             )
             .context("Failed to connect to server")?;
 
-        // The recorder is teed from the demuxers, so it has to exist before them.
-        let recorder: Option<Recorder> = opts.record.as_ref().map(|_| Recorder::new());
+        // The recorder is teed from the demuxers, so the slot has to exist
+        // before them even when nothing is recording yet.
+        let recorder: Arc<RwLock<Option<Recorder>>> =
+            Arc::new(RwLock::new(opts.record.as_ref().map(|_| Recorder::new())));
 
-        let audio = match audio_socket {
-            Some(socket) => start_audio(socket, opts, recorder.as_ref())?,
-            None => None,
+        let (audio, audio_codec_id) = match audio_socket {
+            Some(socket) => start_audio(socket, opts, &recorder)?,
+            None => (None, None),
         };
 
         let controller = match control_socket {
@@ -171,6 +182,8 @@ impl Session {
             demuxer_thread: None,
             decoder_thread: None,
             recorder: recorder.clone(),
+            video_codec: None,
+            audio_codec_id,
             server_process,
             tunnel,
             no_cleanup: opts.no_cleanup,
@@ -178,19 +191,14 @@ impl Session {
         };
 
         if let Some(socket) = video_socket {
-            session.start_video(socket, opts, recorder)?;
+            session.start_video(socket, opts)?;
         }
 
         Ok(session)
     }
 
     /// Set up the demux and decode threads for the video socket.
-    fn start_video(
-        &mut self,
-        socket: TcpStream,
-        opts: &Options,
-        recorder: Option<Recorder>,
-    ) -> Result<()> {
+    fn start_video(&mut self, socket: TcpStream, opts: &Options) -> Result<()> {
         let mut header_socket = socket;
         let info = demuxer::read_video_header(&mut header_socket)?
             .context("Video stream disabled")?;
@@ -205,7 +213,7 @@ impl Session {
         }
         let (packet_tx, packet_rx): (Sender<DemuxPacket>, Receiver<DemuxPacket>) = bounded(8);
 
-        if let Some(ref rec) = recorder {
+        {
             use ffmpeg_sys_next as ffi;
             let codec_id: u32 = match info.codec {
                 demuxer::CodecType::H264 => ffi::AVCodecID::AV_CODEC_ID_H264 as u32,
@@ -215,27 +223,32 @@ impl Session {
                 demuxer::CodecType::Vp9 => ffi::AVCodecID::AV_CODEC_ID_VP9 as u32,
                 _ => ffi::AVCodecID::AV_CODEC_ID_H264 as u32,
             };
-            rec.set_video_codec(VideoCodecInfo {
+            let video_codec = VideoCodecInfo {
                 codec_id,
                 width: info.width as i32,
                 height: info.height as i32,
-            });
-            let path = opts.record.as_ref().expect("recorder implies --record").clone();
-            let _ = rec.spawn(
-                path.clone(),
-                opts.record_format.clone(),
-                opts.video_enabled(),
-                opts.audio_enabled(),
-            );
-            match opts.record_format {
-                Some(ref format) => log::info!("Recording to: {} ({})", path, format),
-                None => log::info!("Recording to: {}", path),
+            };
+            self.video_codec = Some(video_codec.clone());
+
+            if let Some(rec) = self.recorder.read().expect("recorder lock").as_ref() {
+                rec.set_video_codec(video_codec);
+                let path = opts.record.as_ref().expect("recorder implies --record").clone();
+                let _ = rec.spawn(
+                    path.clone(),
+                    opts.record_format.clone(),
+                    opts.video_enabled(),
+                    opts.audio_enabled(),
+                );
+                match opts.record_format {
+                    Some(ref format) => log::info!("Recording to: {} ({})", path, format),
+                    None => log::info!("Recording to: {}", path),
+                }
             }
         }
 
         self.video_socket = header_socket.try_clone().ok();
 
-        let recorder_clone = recorder.clone();
+        let recorder_clone = self.recorder.clone();
         self.demuxer_thread = Some(
             thread::Builder::new()
                 .name("scrcpy-demuxer".into())
@@ -282,6 +295,74 @@ impl Session {
         Ok(())
     }
 
+    /// Is a recording running right now?
+    pub fn is_recording(&self) -> bool {
+        self.recorder.read().expect("recorder lock").is_some()
+    }
+
+    /// Start recording a session that is already running.
+    ///
+    /// The demux threads read the recorder out of a shared slot on every
+    /// packet, so installing one here is enough — but the stream is mid-GOP,
+    /// and a file that starts on a delta frame is unplayable until the next
+    /// keyframe. `ControlMsg::ResetVideo` asks the device for a fresh config
+    /// and keyframe, which is what makes a mid-session recording start clean.
+    /// `controller` comes from the caller because the host takes the session's
+    /// own control channel when it mounts the mirror.
+    pub fn start_recording(
+        &self,
+        path: &str,
+        format: Option<&str>,
+        controller: Option<&Controller>,
+    ) -> Result<()> {
+        if self.is_recording() {
+            anyhow::bail!("Already recording");
+        }
+        let video_codec = self
+            .video_codec
+            .clone()
+            .context("Cannot record without a video stream")?;
+
+        let recorder = Recorder::new();
+        recorder.set_video_codec(video_codec);
+        let has_audio = self.audio_codec_id.is_some();
+        if let Some(codec_id) = self.audio_codec_id {
+            recorder.set_audio_codec(codec_id, true);
+        }
+        let _ = recorder.spawn(
+            path.to_string(),
+            format.map(str::to_string),
+            true,
+            has_audio,
+        );
+
+        *self.recorder.write().expect("recorder lock") = Some(recorder);
+
+        if let Some(controller) = controller.or(self.controller.as_ref()) {
+            controller.push_msg(ControlMsg::ResetVideo);
+        } else {
+            log::warn!(
+                "Recording started without a control channel, so the file begins \
+                 at the next keyframe the device happens to send"
+            );
+        }
+
+        log::info!("Recording started: {}", path);
+        Ok(())
+    }
+
+    /// Stop a recording without ending the session.
+    pub fn stop_recording(&self) -> bool {
+        match self.recorder.write().expect("recorder lock").take() {
+            Some(recorder) => {
+                recorder.stop();
+                log::info!("Recording stopped");
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Unwind the pipeline in order and let the device go.
     ///
     /// The decoder thread owns the FFmpeg hardware context; returning while it
@@ -305,7 +386,7 @@ impl Session {
             }
         }
 
-        if let Some(recorder) = self.recorder.take() {
+        if let Some(recorder) = self.recorder.write().expect("recorder lock").take() {
             recorder.stop();
             // Give the recorder a moment to write its trailer.
             thread::sleep(Duration::from_millis(500));
@@ -345,8 +426,11 @@ pub fn run_list_query(opts: &Options) -> Result<bool> {
     };
 
     connect_tcpip_if_requested(opts)?;
-    let serial = adb::commands::select_device(opts.serial.as_deref())
-        .context("Device selection failed")?;
+    let serial = adb::commands::select_device_filtered(
+        opts.serial.as_deref(),
+        adb::commands::DeviceFilter::from_flags(opts.select_usb, opts.select_tcpip),
+    )
+    .context("Device selection failed")?;
     let server_path = resolve_server_path(opts)?;
     adb::commands::push(&serial, &server_path, "/data/local/tmp/scrcpy-server.jar")?;
 
@@ -415,8 +499,8 @@ fn start_controller(socket: TcpStream) -> Result<Controller> {
 fn start_audio(
     socket: TcpStream,
     opts: &Options,
-    recorder: Option<&Recorder>,
-) -> Result<Option<AudioStream>> {
+    recorder: &Arc<RwLock<Option<Recorder>>>,
+) -> Result<(Option<AudioStream>, Option<u32>)> {
     let mut header_socket = socket;
     let info = match demuxer::read_audio_header(&mut header_socket) {
         Ok(Some(info)) => info,
@@ -431,40 +515,49 @@ fn start_audio(
         }
         Ok(None) => {
             log::info!("Audio stream disabled by server");
-            return Ok(None);
+            return Ok((None, None));
         }
         Err(e) => {
             log::warn!("Failed to read audio header: {}", e);
-            return Ok(None);
+            return Ok((None, None));
         }
     };
 
-    if let Some(rec) = recorder {
+    let codec_id = {
         use ffmpeg_sys_next as ffi;
-        let codec_id = match info.codec {
+        match info.codec {
             demuxer::CodecType::Opus => ffi::AVCodecID::AV_CODEC_ID_OPUS as u32,
             demuxer::CodecType::Aac => ffi::AVCodecID::AV_CODEC_ID_AAC as u32,
             demuxer::CodecType::Flac => ffi::AVCodecID::AV_CODEC_ID_FLAC as u32,
             demuxer::CodecType::Raw => ffi::AVCodecID::AV_CODEC_ID_PCM_S16LE as u32,
             _ => ffi::AVCodecID::AV_CODEC_ID_OPUS as u32,
-        };
+        }
+    };
+    if let Some(rec) = recorder.read().expect("recorder lock").as_ref() {
         rec.set_audio_codec(codec_id, true);
     }
 
     let (samples_tx, samples_rx): (Sender<Vec<f32>>, Receiver<Vec<f32>>) = bounded(32);
     let codec = info.codec;
-    let recorder = recorder.cloned();
+    let recorder = recorder.clone();
     thread::Builder::new()
         .name("scrcpy-audio".into())
         .spawn(move || run_audio_pipeline(header_socket, codec, samples_tx, recorder))
         .context("Failed to start audio thread")?;
 
-    Ok(Some(AudioStream {
+    Ok((Some(AudioStream {
         samples: samples_rx,
         buffer_ms: opts.audio_buffer,
         output_buffer_ms: opts.audio_output_buffer,
         playback: !(opts.no_playback || opts.no_audio_playback),
-    }))
+    }), Some(codec_id)))
+}
+
+/// Stop whatever is in a shared recorder slot, if anything.
+fn stop_recorder(slot: &Arc<RwLock<Option<Recorder>>>) {
+    if let Some(rec) = slot.read().expect("recorder lock").as_ref() {
+        rec.stop();
+    }
 }
 
 // =====================================================================
@@ -472,13 +565,17 @@ fn start_audio(
 // =====================================================================
 
 /// Reads raw packets from TCP and tees them to the decoder and the recorder.
-fn run_demuxer(socket: TcpStream, sender: Sender<DemuxPacket>, recorder: Option<Recorder>) {
+fn run_demuxer(
+    socket: TcpStream,
+    sender: Sender<DemuxPacket>,
+    recorder: Arc<RwLock<Option<Recorder>>>,
+) {
     let mut reader = BufReader::with_capacity(256 * 1024, socket);
 
     loop {
         match demuxer::read_stream_item(&mut reader) {
             Ok(Some(demuxer::StreamItem::Packet(packet))) => {
-                if let Some(ref rec) = recorder {
+                if let Some(rec) = recorder.read().expect("recorder lock").as_ref() {
                     rec.push_video(RecPacket {
                         data: packet.data.clone(),
                         pts: packet.pts.unwrap_or(i64::MIN),
@@ -487,9 +584,7 @@ fn run_demuxer(socket: TcpStream, sender: Sender<DemuxPacket>, recorder: Option<
                 }
                 if sender.send(packet).is_err() {
                     log::debug!("Decoder disconnected");
-                    if let Some(ref rec) = recorder {
-                        rec.stop();
-                    }
+                    stop_recorder(&recorder);
                     return;
                 }
             }
@@ -511,16 +606,12 @@ fn run_demuxer(socket: TcpStream, sender: Sender<DemuxPacket>, recorder: Option<
             }
             Ok(None) => {
                 log::info!("End of video stream");
-                if let Some(ref rec) = recorder {
-                    rec.stop();
-                }
+                stop_recorder(&recorder);
                 return;
             }
             Err(e) => {
                 log::error!("Demuxer error: {}", e);
-                if let Some(ref rec) = recorder {
-                    rec.stop();
-                }
+                stop_recorder(&recorder);
                 return;
             }
         }
@@ -574,7 +665,7 @@ fn run_audio_pipeline(
     socket: TcpStream,
     codec_type: demuxer::CodecType,
     samples_tx: Sender<Vec<f32>>,
-    recorder: Option<Recorder>,
+    recorder: Arc<RwLock<Option<Recorder>>>,
 ) {
     let mut decoder = match AudioDecoder::new(codec_type) {
         Ok(decoder) => decoder,
@@ -589,7 +680,7 @@ fn run_audio_pipeline(
     loop {
         match demuxer::read_stream_item(&mut reader) {
             Ok(Some(demuxer::StreamItem::Packet(packet))) => {
-                if let Some(ref rec) = recorder {
+                if let Some(rec) = recorder.read().expect("recorder lock").as_ref() {
                     rec.push_audio(RecPacket {
                         data: packet.data.clone(),
                         pts: packet.pts.unwrap_or(i64::MIN),
