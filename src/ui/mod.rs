@@ -112,28 +112,77 @@ pub fn frame_to_image(frame: &DecodedFrame, flip: bool) -> Image {
     let bytes = buffer.make_mut_bytes();
     let n = expected.min(frame.data.len()).min(bytes.len());
 
-    if !flip {
+    if flip {
+        mirror_rows(&frame.data[..n], frame.width as usize, &mut bytes[..n]);
+    } else {
         bytes[..n].copy_from_slice(&frame.data[..n]);
-        return Image::from_rgb8(buffer);
-    }
-
-    let stride = frame.width as usize * 3;
-    for (row, target) in bytes[..n].chunks_exact_mut(stride).enumerate() {
-        let start = row * stride;
-        let Some(source) = frame.data.get(start..start + stride) else {
-            break;
-        };
-        for (x, pixel) in target.chunks_exact_mut(3).enumerate() {
-            let mirrored = (frame.width as usize - 1 - x) * 3;
-            pixel.copy_from_slice(&source[mirrored..mirrored + 3]);
-        }
     }
     Image::from_rgb8(buffer)
+}
+
+/// Copy packed RGB8 rows into `target`, each row reversed.
+///
+/// Ragged tails are left alone rather than guessed at: a short frame is a
+/// decoder that went wrong, and half a mirrored row is no better than none.
+fn mirror_rows(source: &[u8], width: usize, target: &mut [u8]) {
+    let stride = width * 3;
+    if stride == 0 {
+        return;
+    }
+    for (row, out) in target.chunks_exact_mut(stride).enumerate() {
+        let Some(line) = source.get(row * stride..(row + 1) * stride) else {
+            break;
+        };
+        for (x, pixel) in out.chunks_exact_mut(3).enumerate() {
+            let mirrored = (width - 1 - x) * 3;
+            pixel.copy_from_slice(&line[mirrored..mirrored + 3]);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// --display-orientation=flipN mirrors horizontally: rows keep their order
+    /// and each one is reversed pixel by pixel, not byte by byte.
+    #[test]
+    fn a_flip_reverses_pixels_within_a_row() {
+        // Two rows of three pixels, each pixel a distinct colour.
+        let source: Vec<u8> = vec![
+            1, 1, 1, 2, 2, 2, 3, 3, 3, // row 0
+            4, 4, 4, 5, 5, 5, 6, 6, 6, // row 1
+        ];
+        let mut target = vec![0u8; source.len()];
+        mirror_rows(&source, 3, &mut target);
+        assert_eq!(
+            target,
+            vec![
+                3, 3, 3, 2, 2, 2, 1, 1, 1, //
+                6, 6, 6, 5, 5, 5, 4, 4, 4,
+            ]
+        );
+    }
+
+    /// Twice is the same as not at all, which is the cheapest way to say the
+    /// mapping has no off-by-one in it.
+    #[test]
+    fn flipping_twice_is_the_original() {
+        let source: Vec<u8> = (0..(4 * 3 * 3) as u8).collect();
+        let mut once = vec![0u8; source.len()];
+        mirror_rows(&source, 4, &mut once);
+        let mut twice = vec![0u8; source.len()];
+        mirror_rows(&once, 4, &mut twice);
+        assert_eq!(twice, source);
+    }
+
+    #[test]
+    fn a_short_frame_does_not_panic() {
+        let source = vec![9u8; 5];
+        let mut target = vec![0u8; 12];
+        mirror_rows(&source, 2, &mut target);
+        assert_eq!(target, vec![0u8; 12], "nothing was copied from a short row");
+    }
 
     /// The window hands over a point inside the visible rectangle; the device
     /// needs the pixel it came from. Getting this backwards sends taps to the
