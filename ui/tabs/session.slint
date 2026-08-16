@@ -362,6 +362,16 @@ export component TabSession inherits VerticalLayout {
                             color: Theme.neutral-700;
                             wrap: word-wrap;
                         }
+
+                        // Sonuç tıklanan yerde görünsün; günlük sekmesinde
+                        // kalırsa kimse baktığını bilmiyor.
+                        if App.transfer-status != "": Text {
+                            text: App.transfer-status;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: App.transfer-failed ? Theme.accent-700 : Theme.neutral-900;
+                            wrap: word-wrap;
+                        }
                     }
 
                     pick := TouchArea {

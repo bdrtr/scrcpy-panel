@@ -1108,11 +1108,16 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                     .set_title("Cihaza gönderilecek dosyalar")
                     .pick_files()
                 else {
+                    report(&weak, Transfer::done("Dosya seçilmedi.".to_string()));
                     return;
                 };
-                report(&weak, &format!("{} dosya gönderiliyor…", paths.len()));
+                report(
+                    &weak,
+                    Transfer::done(format!("{} dosya gönderiliyor…", paths.len())),
+                );
                 for path in paths {
-                    report(&weak, &transfer_file(&serial, &path));
+                    let transfer = transfer_file(&serial, &path);
+                    report(&weak, transfer);
                 }
             });
         });
@@ -1757,7 +1762,7 @@ const PUSH_TARGET: &str = "/sdcard/Download/";
 /// This is what scrcpy does when a file is dropped on the mirror. Slint's
 /// DataTransfer exposes no file paths, so the panel asks for them with a file
 /// chooser and does the same two things with the answer.
-fn transfer_file(serial: &str, path: &std::path::Path) -> String {
+fn transfer_file(serial: &str, path: &std::path::Path) -> Transfer {
     let name = path
         .file_name()
         .unwrap_or_default()
@@ -1779,7 +1784,7 @@ fn transfer_file(serial: &str, path: &std::path::Path) -> String {
 
     let output = match command.output() {
         Ok(output) => output,
-        Err(e) => return format!("ERROR adb çalıştırılamadı: {e}"),
+        Err(e) => return Transfer::failed(format!("adb çalıştırılamadı: {e}")),
     };
 
     // `adb install` reports a refused install on stdout and still exits 0, so
@@ -1802,22 +1807,53 @@ fn transfer_file(serial: &str, path: &std::path::Path) -> String {
             .unwrap_or("bilinmeyen hata")
             .trim();
         let what = if is_apk { "Kurulamadı" } else { "Gönderilemedi" };
-        format!("ERROR {what}: {name} — {why}")
+        Transfer::failed(format!("{what}: {name} — {why}"))
     } else if is_apk {
-        format!("Kuruldu: {name}")
+        Transfer::done(format!("Kuruldu: {name}"))
     } else {
-        format!("Gönderildi: {name} → {PUSH_TARGET}")
+        Transfer::done(format!("Gönderildi: {name} → {PUSH_TARGET}"))
     }
 }
 
-/// Put a line in the panel's log from a worker thread.
-fn report(weak: &slint::Weak<PanelWindow>, line: &str) {
+/// What one transfer did, in the words the panel shows.
+struct Transfer {
+    ok: bool,
+    message: String,
+}
+
+impl Transfer {
+    fn done(message: String) -> Self {
+        Self { ok: true, message }
+    }
+    fn failed(message: String) -> Self {
+        Self { ok: false, message }
+    }
+}
+
+/// Report a transfer from a worker thread: in the log for the history, and
+/// under the box that was clicked, which is where anyone is actually looking.
+fn report(weak: &slint::Weak<PanelWindow>, transfer: Transfer) {
+    // Also on stdout — a transfer that goes wrong should leave a trace outside
+    // a window the user may already have closed.
+    if transfer.ok {
+        log::info!("{}", transfer.message);
+    } else {
+        log::warn!("{}", transfer.message);
+    }
     let weak = weak.clone();
-    let line = line.to_string();
     let _ = slint::invoke_from_event_loop(move || {
-        if let Some(window) = weak.upgrade() {
-            append_log(&window, &line);
-        }
+        let Some(window) = weak.upgrade() else { return };
+        append_log(
+            &window,
+            &if transfer.ok {
+                transfer.message.clone()
+            } else {
+                format!("ERROR {}", transfer.message)
+            },
+        );
+        let app = window.global::<App>();
+        app.set_transfer_status(transfer.message.as_str().into());
+        app.set_transfer_failed(!transfer.ok);
     });
 }
 

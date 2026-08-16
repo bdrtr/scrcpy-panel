@@ -236,5 +236,8 @@ export global App {
     callback screenshot();
     callback send-clipboard();
     callback push-files();
+    /// Son aktarımın sonucu, tıklanan kutunun altında gösterilir.
+    in-out property <string> transfer-status;
+    in-out property <bool> transfer-failed;
     callback device-key(string);
 }

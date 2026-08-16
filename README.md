@@ -101,18 +101,18 @@ with the opening session header, which every run exercises.
   request and refused it on merit, so the ioctl number and struct layout are right. What is
   untested is a successful publish, which needs
   `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
-- **Three flags still reach the command bar and not the device**: `--tunnel-host` and
-  `--tunnel-port` (connecting through a remote adb server) and `--v4l2-buffer`. The panel
-  names them as dropped. Everything else the form can produce — 76 of 79 flags — is
-  implemented.
+- Every flag the form can produce — all 79 — now reaches the device; nothing is dropped
+  between the command bar and the session.
 - **`--adb-port` applies to the panel's adb commands but not to a session.**
   `src/adb/protocol.rs` speaks the daemon protocol on a hardcoded 5037. The panel warns at
   startup when the setting differs rather than leaving the two out of step silently.
 - **Interface language and minimize-to-tray are disabled**, with labels saying so: one
   needs a translation layer, the other a tray icon. Slint 1.17 does have `SystemTrayIcon`,
   so the second is a question of time rather than possibility.
-- Drag-and-drop file transfer is not possible yet: Slint 1.17's `DataTransfer` exposes
-  plain text and images, not dropped file paths.
+- Drag-and-drop file transfer is not possible: Slint 1.17's `DataTransfer` exposes plain
+  text and images, not dropped file paths. The transfer box takes a click instead and
+  opens the desktop's own file chooser over the XDG portal, which reaches the same two
+  outcomes — an APK is installed, anything else is pushed to `/sdcard/Download`.
 - `--always-on-top` and `--borderless` do nothing: Slint 1.17 exposes no window API for
   either.
 - `--render-driver` was an SDL renderer hint and is now ignored; pick a Slint backend with
