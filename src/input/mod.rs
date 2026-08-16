@@ -1,4 +1,6 @@
 pub mod slint_input;
+pub mod winit_keys;
+pub mod uhid;
 pub mod shortcuts;
 pub mod keymap;
 pub mod hid_keyboard;

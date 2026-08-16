@@ -21,6 +21,7 @@ use std::rc::Rc;
 
 use control::control_msg::ControlMsg;
 use input::slint_input::WindowAction;
+use input::uhid::UhidKeyboard;
 use mirror_host::{
     attach, optimal_window_size, start_audio, FlexDisplay, MirrorUpdate, FLEX_POLL_INTERVAL,
 };
@@ -104,32 +105,55 @@ pub fn watch_for_interrupt(reason: Rc<Cell<&'static str>>) -> slint::Timer {
     timer
 }
 
-/// `--always-on-top`, through the window winit owns.
+/// Choose the backend, with whatever hooks the options ask of it.
 ///
-/// Slint has no property for the window level, and it is an attribute the
-/// window is created with rather than something set afterwards. What the
-/// platform does with it is its own business: Wayland leaves stacking to the
-/// compositor, and winit reports nothing back either way — so this logs what
-/// was asked for, not what happened.
-fn apply_always_on_top(always_on_top: bool) {
-    if !always_on_top {
-        return;
+/// One call, because the selector can only be used once, and two flags want
+/// something from it.
+///
+/// `--always-on-top` has no Slint property and is a window attribute rather
+/// than something set afterwards, so it goes through the attributes hook. What
+/// the platform does with it is its own business: Wayland leaves stacking to
+/// the compositor and winit reports nothing back either way, so this logs what
+/// was asked for rather than what happened.
+///
+/// `--keyboard=uhid` wants the raw winit events, which is where a key's
+/// physical position is; see `input/uhid.rs`.
+pub fn select_backend(opts: &Options, uhid_wanted: bool) -> Option<UhidKeyboard> {
+    let uhid = uhid_wanted.then(|| UhidKeyboard::new(&opts.shortcut_mod));
+    if !opts.always_on_top && uhid.is_none() {
+        return None;
     }
 
     use slint::winit_030::winit::window::WindowLevel;
-    let selected = slint::BackendSelector::new()
-        .with_winit_window_attributes_hook(|attributes| {
+    let mut selector = slint::BackendSelector::new();
+    if opts.always_on_top {
+        selector = selector.with_winit_window_attributes_hook(|attributes| {
             attributes.with_window_level(WindowLevel::AlwaysOnTop)
-        })
-        .select();
-
-    match selected {
-        Ok(()) => log::info!(
-            "Window level: always on top (Wayland leaves stacking to the compositor)"
-        ),
-        // Not being able to say so is no reason to refuse to mirror.
-        Err(e) => log::warn!("--always-on-top could not be applied: {e}"),
+        });
     }
+    if let Some(ref uhid) = uhid {
+        selector = selector.with_winit_custom_application_handler(uhid.handler());
+    }
+
+    match selector.select() {
+        Ok(()) => {
+            if opts.always_on_top {
+                log::info!(
+                    "Window level: always on top (Wayland leaves stacking to the compositor)"
+                );
+            }
+        }
+        // Not being able to hook the backend is no reason to refuse to mirror,
+        // but a UHID keyboard that was not installed would type nowhere.
+        Err(e) => {
+            log::warn!("The winit backend could not be configured: {e}");
+            if uhid.is_some() {
+                log::warn!("--keyboard=uhid needs it, so keys will go as SDK injection instead");
+                return None;
+            }
+        }
+    }
+    uhid
 }
 
 /// `--no-window`: the session with nothing drawing it.
@@ -230,12 +254,17 @@ fn run(opts: Options) -> Result<()> {
              the sink will stop at the first resize"
         );
     }
-    if opts.keyboard != "sdk" || opts.mouse != "sdk" {
+    if opts.mouse != "sdk" {
         log::warn!(
-            "--keyboard={} --mouse={}: only SDK injection is available on the Slint \
-             window so far, falling back to it",
-            opts.keyboard,
+            "--mouse={}: the pointer still goes as SDK injection — a UHID mouse wants \
+             raw motion, which is the next thing to take from winit",
             opts.mouse
+        );
+    }
+    if opts.keyboard != "sdk" && opts.keyboard != "uhid" {
+        log::warn!(
+            "--keyboard={}: only SDK injection and UHID are available, falling back to SDK",
+            opts.keyboard
         );
     }
 
@@ -280,9 +309,9 @@ fn run(opts: Options) -> Result<()> {
     let orientation = Orientation::from_degrees(opts.orientation);
     let (frame_w, frame_h) = (video.info.width, video.info.height);
 
-    // --always-on-top is a window attribute and has to be set before the
-    // window exists. --borderless is not: Slint owns that one.
-    apply_always_on_top(opts.always_on_top);
+    // The backend has to be chosen before any window exists, and both
+    // --always-on-top and --keyboard=uhid want something from it.
+    let uhid = select_backend(&opts, opts.keyboard == "uhid");
 
     let window = MirrorWindow::new().context("Failed to create the Slint window")?;
     window.set_borderless(opts.borderless);
@@ -325,6 +354,12 @@ fn run(opts: Options) -> Result<()> {
     // Kept out of `attach` as well, because --flex-display sends messages of its
     // own that have nothing to do with input.
     let controller = session.controller.take().map(Rc::new);
+
+    // The UHID keyboard needs a device to type on, which is only now that the
+    // control channel is up.
+    if let (Some(uhid), Some(controller)) = (uhid.as_ref(), controller.as_ref()) {
+        uhid.attach(controller.clone(), &opts.shortcut_mod);
+    }
 
     let attachment = {
         let weak = window.as_weak();
@@ -370,6 +405,11 @@ fn run(opts: Options) -> Result<()> {
             },
         )
     };
+
+    // Nothing may inject a key that is already on its way as a HID report.
+    if uhid.is_some() {
+        attachment.input.borrow_mut().set_uhid_keyboard(true);
+    }
 
     // --flex-display: the device's display follows the window, which means
     // telling it the size every time the window settles on a new one.
@@ -427,6 +467,11 @@ fn run(opts: Options) -> Result<()> {
     // Dropping the attachment stops the pump and releases the frame channel,
     // which is what lets the decoder thread finish during shutdown.
     drop(attachment);
+    // Before the control channel goes: a device left holding a keyboard that
+    // has stopped typing keeps it until it notices the socket has closed.
+    if let Some(ref uhid) = uhid {
+        uhid.detach();
+    }
     session.shutdown();
 
     // The session is over, so the terminal should stop advertising it.

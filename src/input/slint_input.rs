@@ -240,6 +240,9 @@ pub struct SlintInput {
     mouse_hover: bool,
     /// --video-source=camera, which gives MOD+Up and MOD+Down to the zoom.
     camera: bool,
+    /// --keyboard=uhid: the keys travel as HID reports built from their
+    /// physical positions, so nothing here may inject them a second time.
+    uhid: bool,
     /// Which axes the second finger is mirrored through, for as long as it is
     /// down: the modifiers are read once, when it goes down.
     vfinger_invert: (bool, bool),
@@ -270,6 +273,7 @@ impl SlintInput {
             key_repeat: true,
             mouse_hover: true,
             camera: false,
+            uhid: false,
             vfinger_invert: (true, true),
         }
     }
@@ -278,6 +282,13 @@ impl SlintInput {
     /// mean the zoom instead.
     pub fn set_camera(&mut self, camera: bool) {
         self.camera = camera;
+    }
+
+    /// --keyboard=uhid. The shortcuts still run — they are control messages —
+    /// but no key is injected, because the same keypress is already on its way
+    /// as a HID report.
+    pub fn set_uhid_keyboard(&mut self, uhid: bool) {
+        self.uhid = uhid;
     }
 
     pub fn set_frame_size(&mut self, width: u32, height: u32) {
@@ -515,7 +526,7 @@ impl SlintInput {
 
         // Ctrl+V without the shortcut modifier pastes the host clipboard as
         // text, matching upstream.
-        if control && !shortcut_active && !self.camera && (c == 'v' || c == 'V') && !repeat {
+        if control && !shortcut_active && !self.camera && !self.uhid && (c == 'v' || c == 'V') && !repeat {
             // Ctrl+V always types the text, which is what --legacy-paste asks
             // the shortcut to do as well.
             let text = get_clipboard_text();
@@ -533,6 +544,11 @@ impl SlintInput {
         // Same as the pointer: a camera takes the shortcuts written for it and
         // nothing else, so a key that is not one goes nowhere.
         if self.camera && !shortcut_active {
+            return WindowAction::None;
+        }
+
+        // Under UHID the key is already travelling as a report of its own.
+        if self.uhid && !shortcut_active {
             return WindowAction::None;
         }
 
@@ -605,7 +621,11 @@ impl SlintInput {
     ) {
         self.alt_held = alt;
         let Some(c) = text.chars().next() else { return };
-        if self.camera || is_modifier(c) || self.shortcut_mod.active(alt, control, meta) {
+        if self.camera
+            || self.uhid
+            || is_modifier(c)
+            || self.shortcut_mod.active(alt, control, meta)
+        {
             return;
         }
 

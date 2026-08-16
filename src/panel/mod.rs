@@ -81,6 +81,9 @@ struct Panel {
     /// the zoom and a video reset: the server treats anything else as a
     /// protocol error and ends its control thread over it.
     camera_session: std::cell::Cell<bool>,
+    /// The UHID keyboard, installed with the backend before any window exists
+    /// and given a device only when an embedded session asks for --keyboard=uhid.
+    uhid: RefCell<Option<crate::input::uhid::UhidKeyboard>>,
     /// Refreshes the Ölçümler table once a second.
     metrics_timer: RefCell<Option<slint::Timer>>,
     started_at: std::cell::Cell<Option<std::time::Instant>>,
@@ -130,6 +133,14 @@ pub fn run(opts: &Options) -> Result<()> {
     // Before the window, and before any thread: see `export_adb_env`.
     export_adb_env();
 
+    // Before the window as well, and for the same reason as in the mirror: the
+    // backend can only be chosen once, and the UHID keyboard is a hook in it.
+    // The panel installs it whatever the command line says, because the form is
+    // where the keyboard mode is chosen and that happens later.
+    // `true`, whatever the command line says: the form is where the keyboard
+    // mode is chosen, and by then the backend has long been fixed.
+    let uhid = crate::select_backend(opts, true);
+
     let window = PanelWindow::new().context("Failed to create the panel window")?;
 
     let panel = Rc::new(Panel {
@@ -145,6 +156,7 @@ pub fn run(opts: &Options) -> Result<()> {
         audio: RefCell::new(None),
         controller: RefCell::new(None),
         camera_session: std::cell::Cell::new(false),
+        uhid: RefCell::new(uhid),
         metrics_timer: RefCell::new(None),
         started_at: std::cell::Cell::new(None),
         editing_profile: std::cell::Cell::new(None),
@@ -1443,6 +1455,20 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
 
             let weak_panel = Rc::downgrade(panel);
             let panel_for_quit = Rc::downgrade(panel);
+            let mut uhid_attached = false;
+            if opts.keyboard == "uhid" {
+                match (panel.uhid.borrow().as_ref(), controller.as_ref()) {
+                    (Some(uhid), Some(controller)) => {
+                        uhid.attach(controller.clone(), &opts.shortcut_mod);
+                        uhid_attached = true;
+                    }
+                    (None, _) => panel.warn(&tr!(
+                        "UHID klavye için winit arka ucu gerekiyor; SDK enjeksiyonuna dönüldü."
+                    )),
+                    (_, None) => {}
+                }
+            }
+
             let attachment = attach(
                 video,
                 controller,
@@ -1470,6 +1496,9 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
                     }
                 },
             );
+            if uhid_attached {
+                attachment.input.borrow_mut().set_uhid_keyboard(true);
+            }
             start_metrics(panel, &attachment);
             *panel.attachment.borrow_mut() = Some(attachment);
         }
@@ -1822,6 +1851,9 @@ fn stop_session(panel: &Rc<Panel>) {
     }
     panel.audio.borrow_mut().take();
     panel.metrics_timer.borrow_mut().take();
+    if let Some(uhid) = panel.uhid.borrow().as_ref() {
+        uhid.detach();
+    }
     panel.controller.borrow_mut().take();
     panel.camera_session.set(false);
     panel.started_at.set(None);

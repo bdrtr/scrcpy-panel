@@ -89,15 +89,24 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | Terminal title | works — written into a pty and taken back at the end |
 | SCAN_FILE after a push | accepted — a POWER keycode sent straight after it still reached the device, so the control channel survived the message |
 | Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
+| `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
+
+`--keyboard=uhid` was verified in two halves, because nothing here can type into its own
+window and be believed. The half above the client: keys pressed in the panel window arrived
+at the winit handler as positions — `Code(KeyA)`, `Code(KeyS)`, `Code(KeyD)`, pressed and
+released, not synthetic. The half below it, on the Redmi over USB: HID reports for usages
+0x08, 0x09 and 0x0A came out of the device's own kernel as `KEY_E`, `KEY_F` and `KEY_G`,
+read from `getevent -lt` on the `scrcpy` input device. The join between the two halves —
+position to usage id — is the table in `input/winit_keys.rs`, which has tests of its own.
 
 Recording a mostly static screen produces a file shorter than the session, which
 is correct rather than a bug: scrcpy's encoder only emits a frame when the
 surface changes, so the last timestamp is the last thing that moved.
 
-The mid-stream session header — the one that arrives when the device rotates or the
-mirrored app resizes — is covered by unit tests (`cargo test`) but has not been seen
-against a real device: the test phone's launcher is rotation locked. It shares its parsing
-with the opening session header, which every run exercises.
+The mid-stream session header — the one that arrives when the stream changes size — has
+now been seen against a real device, three times in one session: `--flex-display` resizes
+the device's display while it runs, and each resize came back as a session header with the
+client-resized flag set. This paragraph used to say it had only ever been unit-tested.
 
 ## Known issues
 
@@ -109,11 +118,19 @@ with the opening session header, which every run exercises.
   `--capture-orientation`, which takes degrees with an optional `@` to lock.
 - The upstream README understates the code: it lists far fewer flags than `--help` actually
   accepts, and marks recording as "Phase 2" although it works.
-- **UHID and AOA input are unreachable.** Those modes need the physical key position, and
-  Slint reports keys as text. Deriving a position from a character would double-apply the
-  layout, which is exactly what UHID exists to avoid, so `--keyboard=uhid`, `--mouse=uhid`
-  and OTG fall back to SDK injection with a warning. The HID report descriptors are still
-  in the tree, waiting on a scancode source.
+- **`--keyboard=uhid` works now; the mouse and OTG do not yet.** This entry used to say
+  the position of a key was out of reach, because Slint reports keys as text and deriving a
+  position from a character would apply the layout twice — which is the one thing UHID
+  exists to avoid. The position was there all along, one layer down: Slint runs on winit,
+  and `BackendSelector::with_winit_custom_application_handler` hands the raw winit events
+  to a handler of one's own, `physical_key` and all. `src/input/uhid.rs` turns those into
+  the HID reports `hid_keyboard.rs` was already able to build, and the device applies its
+  own layout to them. The events are passed on rather than swallowed, so Slint keeps the
+  modifier state its shortcut layer reads; what stops a key arriving twice is that
+  `SlintInput` injects nothing while UHID is attached. A UHID mouse is the same shape of
+  problem and no longer a blocked one — winit's `DeviceEvent::MouseMotion` is the raw
+  motion it wants — but it is not written yet. OTG is still out: it needs USB and AOA
+  rather than a control socket.
 - `--v4l2-sink` publishes the mirror as a webcam: `VIDIOC_S_FMT` once, then a write per
   frame. Verified end to end against a loopback device — the phone's screen read back out
   of `/dev/video9` by ffmpeg at the right size and in the right colours, with and without
@@ -285,7 +302,8 @@ curl -L -o target/release/scrcpy-server \
 3. ~~Embed the mirror in the panel~~ — done; Ayarlar switches between embedded and a
    window of its own
 4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, pinned to 4.1
-5. Get input parity back: UHID and AOA keyboards, mice and gamepads
+5. Get input parity back: ~~UHID keyboard~~ — done, through winit's raw key events; a UHID
+   mouse is next, and AOA and gamepads after it
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
 7. GPU frame path (Slint's `unstable-wgpu-29` texture import) to remove the per-frame copies
 8. Fill in what upstream left out: ~~virtual display (`--new-display`)~~ and ~~the rest of
