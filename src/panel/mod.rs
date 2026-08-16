@@ -27,6 +27,7 @@ use crate::mirror_host::{attach, start_audio, Attachment, MirrorUpdate};
 use crate::options::Options;
 use crate::session::{self, Session};
 use crate::ui::{
+    TrayIcon,
     App, Cfg, DeviceRow, LogRow, MetricRow, Mirror, PanelWindow, ProfileCard, Settings,
     ShortcutRow,
 };
@@ -94,6 +95,9 @@ struct Panel {
     /// "Cihaz bulunduğunda ilk profili başlat": the serial the autostart has
     /// already fired for, so a second scan of the same device does not relaunch.
     autostarted: RefCell<Option<String>>,
+    /// The tray icon, kept alive for as long as the panel is. Its visibility
+    /// is what decides whether closing the window quits or hides.
+    tray: RefCell<Option<TrayIcon>>,
 }
 
 thread_local! {
@@ -141,6 +145,7 @@ pub fn run(opts: &Options) -> Result<()> {
         log_file: RefCell::new(None),
         log_disk_failed: Cell::new(false),
         autostarted: RefCell::new(None),
+        tray: RefCell::new(None),
     });
     CURRENT_PANEL.with(|slot| *slot.borrow_mut() = Rc::downgrade(&panel));
 
@@ -160,6 +165,7 @@ pub fn run(opts: &Options) -> Result<()> {
 
     refresh_profile_cards(&panel);
     wire(&window, &panel);
+    sync_tray_presence(&window, &panel);
     refresh_command(&window);
     panel.info("Panel hazır.");
 
@@ -248,6 +254,16 @@ impl Panel {
     }
 
     fn push_log(&self, level: &str, message: &str) {
+        // Also through the log crate. The panel's own lines used to exist only
+        // inside the window, so anything it refused to do — an invalid flag, a
+        // transfer that failed — was invisible to a terminal, to a log file,
+        // and to anyone debugging it.
+        match level {
+            "ERROR" => log::error!("{message}"),
+            "WARN" => log::warn!("{message}"),
+            _ => log::info!("{message}"),
+        }
+
         // The panel's own clock only needs to order lines, not date them.
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -649,6 +665,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 // this, an edited path reached the panel's commands but not an
                 // embedded session's until a restart.
                 export_adb_env();
+                with_panel(|panel| sync_tray_presence(&window, panel));
             }
         });
     }
@@ -744,6 +761,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
             stop_session(&panel);
             if let Some(window) = weak.upgrade() {
                 window.global::<App>().set_session_running(false);
+                sync_tray(false);
             }
         });
     }
@@ -1289,6 +1307,9 @@ fn start_embedded(window: &PanelWindow, panel: &Rc<Panel>, opts: Options) {
     });
 
     *panel.pending.borrow_mut() = Some(rx);
+    // Setup runs on a worker thread, so the menu would otherwise offer to start
+    // a session that is already on its way up.
+    sync_tray(true);
     window.global::<App>().set_tab("session".into());
     panel.info("Cihaza bağlanılıyor…");
 
@@ -1331,6 +1352,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
         Err(e) => {
             panel.warn(&format!("Oturum başlatılamadı: {:#}", e));
             window.global::<App>().set_session_running(false);
+            sync_tray(false);
             return;
         }
     };
@@ -1400,6 +1422,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
         .into(),
     );
     app.set_session_running(true);
+    sync_tray(true);
 
     *panel.embedded.borrow_mut() = Some(session);
     panel.info("Oturum başladı.");
@@ -1470,6 +1493,7 @@ fn start_windowed(
     panel.process.borrow_mut().push(child);
     let app = window.global::<App>();
     app.set_session_running(true);
+    sync_tray(true);
     app.set_session_title(serial.unwrap_or(config.serial.as_str()).into());
     app.set_session_meta(
         format!(
@@ -1499,6 +1523,7 @@ fn start_windowed(
             if after == 0 && before > 0 {
                 if let Some(window) = panel_watch.window.upgrade() {
                     window.global::<App>().set_session_running(false);
+                    sync_tray(false);
                 }
                 panel_watch.info("Oturum sona erdi.");
             } else if after < before {
@@ -1744,6 +1769,7 @@ fn stop_session(panel: &Rc<Panel>) {
 
     if let Some(window) = panel.window.upgrade() {
         window.global::<App>().set_session_running(false);
+        sync_tray(false);
         window.global::<Mirror>().set_live(false);
     }
 
@@ -1752,6 +1778,86 @@ fn stop_session(panel: &Rc<Panel>) {
     } else {
         panel.warn("Çalışan bir oturum yok.");
     }
+}
+
+/// Create or drop the tray icon so that it exists exactly when the setting says.
+///
+/// Existence rather than visibility, for the reasons in ui/tray.slint. It is
+/// also the whole of "close to tray": Slint hides a window on close and ends
+/// the loop once nothing is left, so a live icon is what keeps the panel
+/// running behind a closed window.
+fn sync_tray_presence(window: &PanelWindow, panel: &Rc<Panel>) {
+    let wanted = window.global::<Settings>().get_minimize_to_tray();
+    if !wanted {
+        // Dropping the instance is what takes the icon out of the tray, and it
+        // is also what lets the event loop end when the window closes.
+        panel.tray.borrow_mut().take();
+        return;
+    }
+    if panel.tray.borrow().is_some() {
+        return;
+    }
+
+    let tray = match TrayIcon::new() {
+        Ok(tray) => tray,
+        Err(e) => {
+            // No tray is a missing convenience, not a broken panel.
+            log::warn!("Sistem tepsisi kullanılamıyor: {e}");
+            panel.warn("Sistem tepsisi bu masaüstünde kullanılamıyor.");
+            return;
+        }
+    };
+
+    {
+        let weak = window.as_weak();
+        tray.on_show_panel(move || {
+            if let Some(window) = weak.upgrade() {
+                let _ = window.show();
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let panel = panel.clone();
+        tray.on_toggle_session(move || {
+            let Some(window) = weak.upgrade() else { return };
+            if panel.is_running() {
+                stop_session(&panel);
+            } else {
+                // Starting from the tray means the window may be hidden; show
+                // it, or a failure would report itself to nobody.
+                let _ = window.show();
+                start_session(&window, &panel);
+            }
+        });
+    }
+    tray.on_quit_app(|| {
+        let _ = slint::quit_event_loop();
+    });
+
+    tray.set_session_running(panel.is_running());
+    *panel.tray.borrow_mut() = Some(tray);
+    log::info!("Sistem tepsisi simgesi eklendi");
+}
+
+/// Mirror the session state into the tray menu.
+///
+/// The tray has its own copy of every global, so it cannot read the window's
+/// `App.session-running` and has to be told.
+fn sync_tray(running: bool) {
+    with_panel(|panel| {
+        // Read the title before borrowing the tray: the upgrade reaches back
+        // into the panel, and a live borrow across it is asking for a panic.
+        let device = panel
+            .window
+            .upgrade()
+            .map(|window| window.global::<App>().get_session_title().to_string())
+            .unwrap_or_default();
+        if let Some(tray) = panel.tray.borrow().as_ref() {
+            tray.set_session_running(running);
+            tray.set_device(device.as_str().into());
+        }
+    });
 }
 
 /// Where a pushed file lands, matching scrcpy's own default.

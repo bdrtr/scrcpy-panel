@@ -1,0 +1,54 @@
+// The panel's system tray icon.
+//
+// A SystemTrayIcon is a top-level component with no window of its own, and it
+// does not share globals with PanelWindow — each instance gets its own copy of
+// every global. So nothing here reads App or Settings: state comes in as
+// properties and intent goes out as callbacks, both wired from Rust.
+//
+// Its existence is what implements "close to tray". Closing a window hides it,
+// and Slint's event loop runs until the last window is hidden *and* the last
+// tray icon is gone; a live icon is therefore the whole mechanism, with no
+// close handler involved.
+//
+// Nothing here touches `visible`, and Rust creates and drops the instance
+// instead of calling `show()`/`hide()`. Two things in Slint 1.17.1 make that
+// the only working option: `visible` is frozen as constant when no binding in
+// the file changes it, so the generated `show()`/`hide()` panic with "Constant
+// property being changed"; and the platform handle is built from the icon
+// alone, without consulting `visible`, so an icon bound to false still appears
+// in the tray as Active.
+
+export component TrayIcon inherits SystemTrayIcon {
+    in property <bool> session-running;
+    /// The device a running session is showing, for the tooltip.
+    in property <string> device;
+
+    icon: @image-url("../assets/tray.png");
+    title: "scrcpy-slint";
+    tooltip: root.session-running && root.device != ""
+        ? "scrcpy-slint — " + root.device
+        : "scrcpy-slint";
+
+    callback show-panel();
+    callback toggle-session();
+    callback quit-app();
+
+    clicked => { root.show-panel(); }
+
+    Menu {
+        MenuItem {
+            title: "Paneli göster";
+            activated => { root.show-panel(); }
+        }
+        MenuSeparator { }
+        MenuItem {
+            title: root.session-running ? "Oturumu durdur" : "Oturumu başlat";
+            activated => { root.toggle-session(); }
+        }
+        MenuSeparator { }
+        MenuItem {
+            title: "Çık";
+            activated => { root.quit-app(); }
+        }
+    }
+}

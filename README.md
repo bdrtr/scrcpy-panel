@@ -106,9 +106,13 @@ with the opening session header, which every run exercises.
 - **`--adb-port` applies to the panel's adb commands but not to a session.**
   `src/adb/protocol.rs` speaks the daemon protocol on a hardcoded 5037. The panel warns at
   startup when the setting differs rather than leaving the two out of step silently.
-- **Interface language and minimize-to-tray are disabled**, with labels saying so: one
-  needs a translation layer, the other a tray icon. Slint 1.17 does have `SystemTrayIcon`,
-  so the second is a question of time rather than possibility.
+- **Interface language is disabled**, with a label saying so: it needs a translation layer.
+- Minimize-to-tray works, with two workarounds around Slint 1.17.1: the generated
+  `show()`/`hide()` on a tray-rooted component panic, because `visible` is frozen as
+  constant when no binding in the file writes it; and the platform handle is built from
+  the icon alone without consulting `visible`, so an icon bound to false is still shown.
+  Presence is therefore controlled by creating and dropping the component, which is the
+  documented lifecycle anyway.
 - Drag-and-drop file transfer is not possible: Slint 1.17's `DataTransfer` exposes plain
   text and images, not dropped file paths. The transfer box takes a click instead and
   opens the desktop's own file chooser over the XDG portal, which reaches the same two

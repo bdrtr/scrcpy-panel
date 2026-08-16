@@ -139,11 +139,12 @@ export component TabSettings inherits VerticalLayout {
                         toggled => { Settings.changed(); }
                     }
                     Chk {
-                        // Slint can draw a tray icon, but a tray icon with a menu
-                        // and a window that hides into it is a feature of its own.
-                        text: "Kapatınca sistem tepsisine küçült — henüz yok";
+                        // Slint draws the icon; closing the window hides it,
+                        // and the visible icon is what then keeps the event
+                        // loop alive.
+                        text: "Kapatınca sistem tepsisine küçült";
                         checked <=> Settings.minimize-to-tray;
-                        enabled: false;
+                        toggled => { Settings.changed(); }
                     }
                 }
                 Row {
