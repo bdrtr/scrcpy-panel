@@ -20,11 +20,13 @@ use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::control::control_msg::ControlMsg;
 use crate::mirror_host::{attach, start_audio, Attachment, MirrorUpdate};
 use crate::options::Options;
 use crate::session::{self, Session};
 use crate::ui::{
-    App, Cfg, DeviceRow, LogRow, Mirror, PanelWindow, ProfileCard, Settings, ShortcutRow,
+    App, Cfg, DeviceRow, LogRow, MetricRow, Mirror, PanelWindow, ProfileCard, Settings,
+    ShortcutRow,
 };
 
 /// Where profiles and preferences live.
@@ -63,28 +65,21 @@ struct Panel {
     /// stops the frame pump, which is the first step of shutting one down.
     attachment: RefCell<Option<Attachment>>,
     audio: RefCell<Option<crate::audio::player::AudioPlayer>>,
+    /// The embedded session's control channel, kept so the panel's own buttons
+    /// can reach the device without going through adb shell.
+    controller: RefCell<Option<Rc<crate::control::controller::Controller>>>,
+    /// Refreshes the Ölçümler table once a second.
+    metrics_timer: RefCell<Option<slint::Timer>>,
+    started_at: std::cell::Cell<Option<std::time::Instant>>,
     /// Session setup blocks on adb, so it runs on a worker thread and arrives
     /// here; a timer on the event loop picks it up.
     pending: RefCell<Option<Receiver<Result<Session>>>>,
     pending_timer: RefCell<Option<slint::Timer>>,
-    /// SDL is not the renderer any more, but the audio player is still built on
-    /// it, so the subsystem has to outlive every session the panel starts.
-    sdl_audio: sdl2::AudioSubsystem,
 }
 
 /// Open the panel and run until its window closes.
 pub fn run(opts: &Options) -> Result<()> {
     let window = PanelWindow::new().context("Failed to create the panel window")?;
-
-    // Only the audio subsystem is used, but SDL insists on being initialised as
-    // a whole, and the clipboard helpers reach into its video side.
-    let sdl = sdl2::init().map_err(|e| anyhow::anyhow!("SDL init failed: {}", e))?;
-    let _sdl_video = sdl
-        .video()
-        .map_err(|e| anyhow::anyhow!("SDL video init failed: {}", e))?;
-    let sdl_audio = sdl
-        .audio()
-        .map_err(|e| anyhow::anyhow!("SDL audio init failed: {}", e))?;
 
     let panel = Rc::new(Panel {
         window: window.as_weak(),
@@ -97,9 +92,11 @@ pub fn run(opts: &Options) -> Result<()> {
         embedded: RefCell::new(None),
         attachment: RefCell::new(None),
         audio: RefCell::new(None),
+        controller: RefCell::new(None),
+        metrics_timer: RefCell::new(None),
+        started_at: std::cell::Cell::new(None),
         pending: RefCell::new(None),
         pending_timer: RefCell::new(None),
-        sdl_audio,
     });
 
     {
@@ -709,15 +706,47 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
     }
 
     {
+        let weak = window.as_weak();
         let panel = panel.clone();
         app.on_screenshot(move || {
-            panel.warn("Ekran görüntüsü henüz uygulanmadı — ayna penceresi gömülünce gelecek.");
+            let (serial, directory) = weak
+                .upgrade()
+                .map(|window| {
+                    (
+                        window.global::<Cfg>().get_serial().to_string(),
+                        window.global::<Settings>().get_screenshot_dir().to_string(),
+                    )
+                })
+                .unwrap_or_default();
+            match take_screenshot(&serial, &directory) {
+                Ok(path) => panel.info(&format!("Ekran görüntüsü kaydedildi: {path}")),
+                Err(e) => panel.warn(&format!("Ekran görüntüsü alınamadı: {e:#}")),
+            }
         });
     }
     {
         let panel = panel.clone();
         app.on_send_clipboard(move || {
-            panel.warn("Panoyu cihaza gönderme henüz panelden yapılamıyor.");
+            let text = crate::input::slint_input::get_clipboard_text();
+            if text.is_empty() {
+                panel.warn("Pano boş.");
+                return;
+            }
+            let controller = panel.controller.borrow().clone();
+            match controller {
+                Some(controller) => {
+                    controller.push_msg(ControlMsg::SetClipboard {
+                        sequence: 0,
+                        paste: false,
+                        text,
+                    });
+                    panel.info("Pano cihaza gönderildi.");
+                }
+                None => panel.warn(
+                    "Panoyu göndermek için gömülü bir oturum gerekiyor \
+                     (Ayarlar > Ayna penceresi: Panele gömülü).",
+                ),
+            }
         });
     }
 }
@@ -851,7 +880,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
     *panel.audio.borrow_mut() = session
         .audio
         .take()
-        .and_then(|audio| start_audio(&panel.sdl_audio, audio));
+        .and_then(start_audio);
 
     match session.video.take() {
         None => panel.warn("Video kapalı; gömülecek görüntü yok."),
@@ -874,10 +903,13 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
 
             // A weak handle, not an Rc: the panel owns the attachment, so an Rc
             // here would be a cycle that outlives the session.
+            let controller = session.controller.take().map(Rc::new);
+            *panel.controller.borrow_mut() = controller.clone();
+
             let weak_panel = Rc::downgrade(panel);
             let attachment = attach(
                 video,
-                session.controller.take().map(Rc::new),
+                controller,
                 &window.global::<Mirror>(),
                 opts,
                 apply,
@@ -891,6 +923,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
                     }
                 },
             );
+            start_metrics(panel, &attachment);
             *panel.attachment.borrow_mut() = Some(attachment);
         }
     }
@@ -1002,6 +1035,105 @@ enum Stream {
     Err(std::process::ChildStderr),
 }
 
+/// Refresh the Ölçümler table while a session runs.
+///
+/// The session tab shows nothing without this: the mockup draws a metrics
+/// table, and until now nothing ever wrote to `App.metrics`.
+fn start_metrics(panel: &Rc<Panel>, attachment: &Attachment) {
+    panel.started_at.set(Some(std::time::Instant::now()));
+
+    let timer = slint::Timer::default();
+    let weak = panel.window.clone();
+    let started_at = panel.started_at.clone();
+    let fps = attachment.fps.clone();
+    let frame_size = attachment.frame_size.clone();
+    let orientation = attachment.orientation.clone();
+
+    timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), move || {
+        let Some(window) = weak.upgrade() else { return };
+        let cfg = window.global::<Cfg>();
+        let (width, height) = frame_size.get();
+
+        let elapsed = started_at.get().map(|t| t.elapsed().as_secs()).unwrap_or(0);
+        let rows = vec![
+            MetricRow {
+                key: "Çözünürlük".into(),
+                value: format!("{} × {}", width, height).as_str().into(),
+            },
+            MetricRow {
+                key: "Kare hızı".into(),
+                value: format!("{:.1} fps", fps.borrow().rate()).as_str().into(),
+            },
+            MetricRow {
+                key: "Kodek".into(),
+                value: if cfg.get_no_audio() {
+                    cfg.get_video_codec()
+                } else {
+                    format!("{} + {}", cfg.get_video_codec(), cfg.get_audio_codec())
+                        .as_str()
+                        .into()
+                },
+            },
+            MetricRow {
+                key: "Döndürme".into(),
+                value: format!("{}°", orientation.get().degrees() as i32).as_str().into(),
+            },
+            MetricRow {
+                key: "Süre".into(),
+                value: format!("{:02}:{:02}", elapsed / 60, elapsed % 60).as_str().into(),
+            },
+        ];
+
+        let app = window.global::<App>();
+        match app.get_metrics().as_any().downcast_ref::<VecModel<MetricRow>>() {
+            Some(model) => model.set_vec(rows),
+            None => app.set_metrics(ModelRc::from(Rc::new(VecModel::from(rows)))),
+        }
+    });
+
+    *panel.metrics_timer.borrow_mut() = Some(timer);
+}
+
+/// Capture the device's screen with adb.
+///
+/// The mirror's own frames are compressed and scaled; `screencap` gives the
+/// panel a full-resolution shot, which is what a screenshot button is for.
+fn take_screenshot(serial: &str, directory: &str) -> Result<String> {
+    let directory = if directory.is_empty() {
+        std::env::var("HOME")
+            .map(|home| format!("{home}/Pictures"))
+            .unwrap_or_else(|_| ".".to_string())
+    } else {
+        directory.to_string()
+    };
+    std::fs::create_dir_all(&directory)
+        .with_context(|| format!("Cannot create {directory}"))?;
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path = format!("{directory}/scrcpy-{stamp}.png");
+
+    let mut command = Command::new("adb");
+    if !serial.is_empty() {
+        command.args(["-s", serial]);
+    }
+    let output = command
+        .args(["exec-out", "screencap", "-p"])
+        .output()
+        .context("Failed to run adb screencap")?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        anyhow::bail!(
+            "adb screencap produced nothing: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    std::fs::write(&path, &output.stdout).with_context(|| format!("Cannot write {path}"))?;
+    Ok(path)
+}
+
 /// Stop whichever kind of session is running.
 fn stop_session(panel: &Rc<Panel>) {
     let mut stopped = panel.pending.borrow_mut().take().is_some();
@@ -1020,6 +1152,9 @@ fn stop_session(panel: &Rc<Panel>) {
         stopped = true;
     }
     panel.audio.borrow_mut().take();
+    panel.metrics_timer.borrow_mut().take();
+    panel.controller.borrow_mut().take();
+    panel.started_at.set(None);
     if let Some(session) = panel.embedded.borrow_mut().take() {
         session.shutdown();
         stopped = true;

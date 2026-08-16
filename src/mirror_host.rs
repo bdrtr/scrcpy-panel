@@ -274,24 +274,20 @@ fn start_pump(
 
 /// Start playing a session's audio.
 ///
-/// Kept out of [`crate::session`] because SDL's audio device is not `Send` and a
+/// Kept out of [`crate::session`] because a cpal stream is not `Send` and a
 /// session has to cross a thread boundary to reach the window.
-pub fn start_audio(
-    sdl_audio: &sdl2::AudioSubsystem,
-    audio: AudioStream,
-) -> Option<crate::audio::player::AudioPlayer> {
+pub fn start_audio(audio: AudioStream) -> Option<crate::audio::player::AudioPlayer> {
     let mut regulator =
         crate::audio::regulator::AudioRegulator::new(48000, 2, Some(audio.buffer_ms));
     let consumer = regulator.consumer_state();
 
-    let player =
-        match crate::audio::player::AudioPlayer::new_regulated(sdl_audio, 48000, 2, consumer) {
-            Ok(player) => player,
-            Err(e) => {
-                log::warn!("Failed to create audio player: {}", e);
-                return None;
-            }
-        };
+    let player = match crate::audio::player::AudioPlayer::new_regulated(consumer) {
+        Ok(player) => player,
+        Err(e) => {
+            log::warn!("Audio playback unavailable: {:#}", e);
+            return None;
+        }
+    };
 
     let samples = audio.samples;
     if let Err(e) = std::thread::Builder::new()

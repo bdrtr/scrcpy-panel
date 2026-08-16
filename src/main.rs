@@ -89,16 +89,6 @@ fn run(opts: Options) -> Result<()> {
         return Ok(());
     }
 
-    // SDL no longer renders anything — Slint does — but the audio player still
-    // uses it and the clipboard helpers call into its video subsystem.
-    let sdl = sdl2::init().map_err(|e| anyhow::anyhow!("SDL init failed: {}", e))?;
-    let sdl_video = sdl
-        .video()
-        .map_err(|e| anyhow::anyhow!("SDL video init failed: {}", e))?;
-    let sdl_audio = sdl
-        .audio()
-        .map_err(|e| anyhow::anyhow!("SDL audio init failed: {}", e))?;
-
     if opts.render_driver.is_some() {
         log::warn!(
             "--render-driver applies to the old SDL renderer and is ignored; \
@@ -106,8 +96,9 @@ fn run(opts: Options) -> Result<()> {
         );
     }
     if opts.disable_screensaver {
-        sdl_video.disable_screen_saver();
-        log::info!("Screensaver disabled");
+        // SDL used to handle this; Slint has no equivalent, and the portal
+        // inhibit protocol is a separate piece of work.
+        log::warn!("--disable-screensaver is not implemented since SDL was dropped");
     }
     if opts.keyboard != "sdk" || opts.mouse != "sdk" {
         log::warn!(
@@ -125,7 +116,7 @@ fn run(opts: Options) -> Result<()> {
     let _audio = session
         .audio
         .take()
-        .and_then(|audio| start_audio(&sdl_audio, audio));
+        .and_then(start_audio);
 
     let Some(video) = session.video.take() else {
         log::info!("Video is disabled, so there is nothing to show");

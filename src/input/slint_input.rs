@@ -579,27 +579,46 @@ fn metastate(alt: bool, control: bool, shift: bool, meta: bool) -> u32 {
     state
 }
 
-/// Read the host clipboard.
+/// The host clipboard.
 ///
-/// Still SDL-backed: SDL is initialised for audio playback anyway, and Slint
-/// 1.17 exposes no clipboard API. This goes away with the audio backend.
-pub fn get_clipboard_text() -> String {
-    unsafe {
-        let ptr = sdl2::sys::SDL_GetClipboardText();
-        if ptr.is_null() {
-            return String::new();
+/// Kept alive between calls rather than opened per call: on X11 the process
+/// that sets the selection has to stay around to serve it, so a Clipboard that
+/// is dropped immediately hands back an empty selection. All calls come from
+/// the event loop thread, so one instance per thread is enough.
+thread_local! {
+    static CLIPBOARD: std::cell::RefCell<Option<arboard::Clipboard>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> Result<T, arboard::Error>) -> Option<T> {
+    CLIPBOARD.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            match arboard::Clipboard::new() {
+                Ok(clipboard) => *slot = Some(clipboard),
+                Err(e) => {
+                    log::warn!("No clipboard available: {}", e);
+                    return None;
+                }
+            }
         }
-        let text = std::ffi::CStr::from_ptr(ptr).to_string_lossy().to_string();
-        sdl2::sys::SDL_free(ptr as *mut std::ffi::c_void);
-        text
-    }
+        match f(slot.as_mut().expect("clipboard was just opened")) {
+            Ok(value) => Some(value),
+            Err(e) => {
+                log::debug!("Clipboard operation failed: {}", e);
+                None
+            }
+        }
+    })
+}
+
+/// Read the host clipboard.
+pub fn get_clipboard_text() -> String {
+    with_clipboard(|clipboard| clipboard.get_text()).unwrap_or_default()
 }
 
 /// Write the host clipboard.
 pub fn set_clipboard_text(text: &str) {
-    if let Ok(cstr) = std::ffi::CString::new(text) {
-        unsafe {
-            sdl2::sys::SDL_SetClipboardText(cstr.as_ptr());
-        }
-    }
+    let text = text.to_string();
+    with_clipboard(move |clipboard| clipboard.set_text(text));
 }

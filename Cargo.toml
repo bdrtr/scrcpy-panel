@@ -7,7 +7,8 @@ license = "Apache-2.0"
 repository = "https://github.com/bdrtr/scrcpy-panel"
 
 [dependencies]
-sdl2 = "0.37"
+cpal = "0.18"
+arboard = { version = "3.6", features = ["wayland-data-control"] }
 ffmpeg-next = "9"
 ffmpeg-sys-next = "9"
 clap = { version = "4", features = ["derive", "env"] }

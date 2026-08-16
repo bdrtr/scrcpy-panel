@@ -1,123 +1,89 @@
-//! Audio player — plays decoded audio samples via SDL2.
+//! Audio playback.
 //!
-//! Uses the AudioRegulator for buffering and drift compensation,
-//! with SDL2's callback-based audio for low-latency playback.
+//! The regulator keeps a ring buffer at a target fill level and hands out a
+//! consumer; all a player has to do is call `pull` from the sound card's
+//! callback. That callback runs on the audio thread, so it must not allocate,
+//! lock for long, or log — `pull` is written to that rule.
+//!
+//! This used to be SDL2. cpal covers the same ground in Rust, which is the last
+//! reason SDL was linked at all besides the clipboard.
 
-use anyhow::Result;
-use crossbeam_channel::Receiver;
-use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
+use anyhow::{bail, Context, Result};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
 use super::regulator::AudioRegulatorConsumer;
 
-/// SDL2 audio callback that pulls from the regulator
-struct RegulatedAudioCallback {
-    consumer: AudioRegulatorConsumer,
-}
+/// scrcpy's server always sends 48 kHz stereo, so there is nothing to negotiate
+/// beyond finding an output that accepts it.
+const SAMPLE_RATE: u32 = 48_000;
+const CHANNELS: u16 = 2;
 
-impl AudioCallback for RegulatedAudioCallback {
-    type Channel = f32;
-
-    fn callback(&mut self, out: &mut [f32]) {
-        self.consumer.pull(out);
-    }
-}
-
-/// Simple callback without regulator (direct channel drain)
-struct DirectAudioCallback {
-    rx: Receiver<Vec<f32>>,
-    buffer: Vec<f32>,
-    read_pos: usize,
-}
-
-impl AudioCallback for DirectAudioCallback {
-    type Channel = f32;
-
-    fn callback(&mut self, out: &mut [f32]) {
-        let mut written = 0;
-
-        // Drain from current buffer first
-        while written < out.len() && self.read_pos < self.buffer.len() {
-            out[written] = self.buffer[self.read_pos];
-            self.read_pos += 1;
-            written += 1;
-        }
-
-        // Get new buffers from channel
-        while written < out.len() {
-            match self.rx.try_recv() {
-                Ok(samples) => {
-                    self.buffer = samples;
-                    self.read_pos = 0;
-                    while written < out.len() && self.read_pos < self.buffer.len() {
-                        out[written] = self.buffer[self.read_pos];
-                        self.read_pos += 1;
-                        written += 1;
-                    }
-                }
-                Err(_) => {
-                    for sample in &mut out[written..] {
-                        *sample = 0.0;
-                    }
-                    return;
-                }
-            }
-        }
-    }
-}
-
-/// Audio player that supports both direct and regulated modes
-pub enum AudioPlayer {
-    Direct { _device: AudioDevice<DirectAudioCallback> },
-    Regulated { _device: AudioDevice<RegulatedAudioCallback> },
+/// An open output stream. Dropping it stops playback.
+pub struct AudioPlayer {
+    _stream: cpal::Stream,
 }
 
 impl AudioPlayer {
-    /// Create a direct (non-regulated) audio player
-    pub fn new_direct(
-        sdl_audio: &sdl2::AudioSubsystem,
-        sample_rate: u32,
-        channels: u16,
-        rx: Receiver<Vec<f32>>,
-    ) -> Result<Self> {
-        let desired = AudioSpecDesired {
-            freq: Some(sample_rate as i32),
-            channels: Some(channels as u8),
-            samples: Some(1024),
-        };
+    /// Open the default output and feed it from the regulator.
+    pub fn new_regulated(consumer: AudioRegulatorConsumer) -> Result<Self> {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .context("No audio output device")?;
 
-        let device = sdl_audio.open_playback(None, &desired, |_spec| {
-            DirectAudioCallback {
-                rx,
-                buffer: Vec::new(),
-                read_pos: 0,
-            }
-        }).map_err(|e| anyhow::anyhow!("Failed to open audio device: {}", e))?;
+        let name = device
+            .description()
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|_| "bilinmeyen çıkış".into());
+        let config = output_config(&device)?;
 
-        device.resume();
-        log::info!("Audio player started (direct): {}Hz, {} channels", sample_rate, channels);
+        let stream = device
+            .build_output_stream(
+                config.clone(),
+                move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    consumer.pull(out);
+                },
+                |err| log::error!("Audio stream error: {}", err),
+                None,
+            )
+            .context("Failed to open the audio output stream")?;
 
-        Ok(AudioPlayer::Direct { _device: device })
+        stream.play().context("Failed to start audio playback")?;
+        log::info!(
+            "Audio player started: {} — {} Hz, {} channels",
+            name,
+            config.sample_rate,
+            config.channels
+        );
+
+        Ok(Self { _stream: stream })
+    }
+}
+
+/// Find a 48 kHz stereo float configuration on the device.
+///
+/// Nothing here resamples, so a device that cannot do 48 kHz stereo is an error
+/// rather than something to paper over — silently playing at the wrong rate
+/// would sound like a slow-motion recording.
+fn output_config(device: &cpal::Device) -> Result<cpal::StreamConfig> {
+    let supported = device
+        .supported_output_configs()
+        .context("Failed to query audio output configurations")?;
+
+    for range in supported {
+        if range.sample_format() != cpal::SampleFormat::F32 || range.channels() != CHANNELS {
+            continue;
+        }
+        let rate: cpal::SampleRate = SAMPLE_RATE;
+        if range.min_sample_rate() <= rate && rate <= range.max_sample_rate() {
+            return Ok(range.with_sample_rate(rate).config());
+        }
     }
 
-    /// Create a regulated audio player with drift compensation
-    pub fn new_regulated(
-        sdl_audio: &sdl2::AudioSubsystem,
-        sample_rate: u32,
-        channels: u16,
-        consumer: AudioRegulatorConsumer,
-    ) -> Result<Self> {
-        let desired = AudioSpecDesired {
-            freq: Some(sample_rate as i32),
-            channels: Some(channels as u8),
-            samples: Some(1024),
-        };
-
-        let device = sdl_audio.open_playback(None, &desired, |_spec| {
-            RegulatedAudioCallback { consumer }
-        }).map_err(|e| anyhow::anyhow!("Failed to open audio device: {}", e))?;
-
-        device.resume();
-        log::info!("Audio player started (regulated): {}Hz, {} channels", sample_rate, channels);
-
-        Ok(AudioPlayer::Regulated { _device: device })
-    }
+    bail!(
+        "No {} Hz {}-channel float output on this device; audio needs resampling, \
+         which this client does not do yet",
+        SAMPLE_RATE,
+        CHANNELS
+    )
 }

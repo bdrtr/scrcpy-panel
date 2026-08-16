@@ -8,7 +8,6 @@
 //!   byte 3: vertical scroll (-127..127)
 //!   byte 4: horizontal scroll (-127..127)
 
-use sdl2::mouse::MouseButton;
 use crate::control::control_msg::ControlMsg;
 use crate::control::controller::Controller;
 
@@ -149,28 +148,21 @@ impl HidMouse {
     }
 }
 
-/// Convert SDL mouse button state bitmask to HID button byte
-/// SDL: bit 0=left, bit 1=middle, bit 2=right, bit 3=X1, bit 4=X2
-/// HID: bit 0=left, bit 1=right, bit 2=middle, bit 3=X1, bit 4=X2
-pub fn sdl_buttons_to_hid(sdl_state: u32) -> u8 {
-    let mut hid: u8 = 0;
-    if sdl_state & 1 != 0 { hid |= 1 << 0; } // left
-    if sdl_state & 4 != 0 { hid |= 1 << 1; } // right (SDL bit 2 → HID bit 1)
-    if sdl_state & 2 != 0 { hid |= 1 << 2; } // middle (SDL bit 1 → HID bit 2)
-    if sdl_state & 8 != 0 { hid |= 1 << 3; } // X1
-    if sdl_state & 16 != 0 { hid |= 1 << 4; } // X2
-    hid
-}
-
-/// Convert a single SDL MouseButton to HID button mask
-pub fn sdl_button_to_hid_mask(btn: MouseButton, pressed: bool) -> u8 {
-    let bit = match btn {
-        MouseButton::Left => 1 << 0,
-        MouseButton::Right => 1 << 1,
-        MouseButton::Middle => 1 << 2,
-        MouseButton::X1 => 1 << 3,
-        MouseButton::X2 => 1 << 4,
+/// HID button mask for one button, using the ids `ui/mirror_view.slint` reports:
+/// 1 left, 2 right, 3 middle.
+///
+/// HID orders them left, right, middle — not the order SDL used, which is why
+/// the translation existed at all.
+pub fn button_to_hid_mask(button: i32, pressed: bool) -> u8 {
+    let bit: u8 = match button {
+        1 => 1 << 0,
+        2 => 1 << 1,
+        3 => 1 << 2,
         _ => 0,
     };
-    if pressed { bit } else { 0 }
+    if pressed {
+        bit
+    } else {
+        0
+    }
 }

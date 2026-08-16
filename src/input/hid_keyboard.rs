@@ -6,7 +6,6 @@
 //!   byte 1: reserved (0)
 //!   bytes 2-7: up to 6 currently-pressed scancodes
 
-use sdl2::keyboard::{Mod, Scancode};
 use crate::control::control_msg::ControlMsg;
 use crate::control::controller::Controller;
 
@@ -99,16 +98,22 @@ impl HidKeyboard {
         log::info!("UHID keyboard destroyed");
     }
 
-    /// Process an SDL key event and send the resulting HID report.
+    /// Send a HID report for one key transition.
+    ///
+    /// `hid_usage` is a USB HID keyboard usage id and `modifiers` is the HID
+    /// modifier byte. SDL scancodes used to be translated here, but its enum
+    /// values were the usage ids already, so the translation was an identity —
+    /// what the caller has to supply is unchanged.
+    ///
     /// Returns true if the event was handled, false if it should be ignored.
     pub fn process_key(
         &mut self,
-        scancode: Scancode,
+        hid_usage: u8,
         pressed: bool,
-        mods: Mod,
+        modifiers: u8,
         controller: &Controller,
     ) -> bool {
-        let hid_scancode = sdl_scancode_to_hid(scancode);
+        let hid_scancode = hid_usage;
 
         // Modifier keys (0xE0-0xE7) are handled via the modifier byte,
         // not the key array. But we still need to send a report.
@@ -125,8 +130,8 @@ impl HidKeyboard {
         // Build the 8-byte HID report
         let mut report = [0u8; REPORT_SIZE];
 
-        // Byte 0: modifier flags from current SDL mod state
-        report[0] = sdl_mod_to_hid_mod(mods);
+        // Byte 0: modifier flags
+        report[0] = modifiers;
 
         // Byte 1: reserved
         report[1] = 0;
@@ -156,27 +161,4 @@ impl HidKeyboard {
 
         true
     }
-}
-
-/// Convert SDL modifier state to HID modifier byte
-fn sdl_mod_to_hid_mod(mods: Mod) -> u8 {
-    let mut hid = 0u8;
-    if mods.contains(Mod::LCTRLMOD)  { hid |= MOD_LEFT_CTRL; }
-    if mods.contains(Mod::LSHIFTMOD) { hid |= MOD_LEFT_SHIFT; }
-    if mods.contains(Mod::LALTMOD)   { hid |= MOD_LEFT_ALT; }
-    if mods.contains(Mod::LGUIMOD)   { hid |= MOD_LEFT_GUI; }
-    if mods.contains(Mod::RCTRLMOD)  { hid |= MOD_RIGHT_CTRL; }
-    if mods.contains(Mod::RSHIFTMOD) { hid |= MOD_RIGHT_SHIFT; }
-    if mods.contains(Mod::RALTMOD)   { hid |= MOD_RIGHT_ALT; }
-    if mods.contains(Mod::RGUIMOD)   { hid |= MOD_RIGHT_GUI; }
-    hid
-}
-
-/// Convert SDL scancode to USB HID scancode.
-/// SDL scancodes are based on USB HID usage tables, so the mapping is
-/// mostly identity for the standard keys.
-fn sdl_scancode_to_hid(sc: Scancode) -> u8 {
-    // SDL scancodes map 1:1 to USB HID for standard keys (A=4, B=5, etc.)
-    // The SDL_Scancode enum values match USB HID usage IDs.
-    sc as u8
 }

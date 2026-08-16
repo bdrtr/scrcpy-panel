@@ -1,4 +1,3 @@
-use sdl2::keyboard::Keycode;
 
 /// Android keycodes (subset used by scrcpy shortcuts)
 pub const AKEYCODE_HOME: u32 = 3;
@@ -37,47 +36,6 @@ pub enum ShortcutAction {
     None,
 }
 
-/// Determine if a key press is a scrcpy shortcut
-///
-/// Shortcuts require Alt (LAlt or RAlt) as modifier
-pub fn get_shortcut(keycode: Keycode, alt_pressed: bool, shift_pressed: bool) -> ShortcutAction {
-    if !alt_pressed {
-        return ShortcutAction::None;
-    }
-
-    match keycode {
-        Keycode::H => ShortcutAction::Home,
-        Keycode::B | Keycode::Backspace => ShortcutAction::Back,
-        Keycode::S => ShortcutAction::AppSwitch,
-        Keycode::P => ShortcutAction::Power,
-        Keycode::M => ShortcutAction::Menu,
-        Keycode::Up => ShortcutAction::VolumeUp,
-        Keycode::Down => ShortcutAction::VolumeDown,
-        Keycode::F => ShortcutAction::ToggleFullscreen,
-        Keycode::W => ShortcutAction::ResizeToFit,
-        Keycode::G => ShortcutAction::PixelPerfect,
-        Keycode::I => ShortcutAction::ToggleFps,
-        Keycode::N => {
-            if shift_pressed {
-                ShortcutAction::CollapsePanels
-            } else {
-                ShortcutAction::ExpandNotifications
-            }
-        }
-        Keycode::R => ShortcutAction::RotateDevice,
-        Keycode::Right => ShortcutAction::RotateCW,
-        Keycode::Left => ShortcutAction::RotateCCW,
-        Keycode::C => ShortcutAction::CopyToPC,
-        Keycode::X => ShortcutAction::CutToPC,
-        Keycode::V => ShortcutAction::PasteFromPC,
-        Keycode::K => ShortcutAction::OpenKeyboardSettings,
-        Keycode::O => {
-            if shift_pressed {
-                ShortcutAction::SetDisplayPowerOn
-            } else {
-                ShortcutAction::SetDisplayPowerOff
-            }
-        }
-        _ => ShortcutAction::None,
-    }
-}
+// The keycode-to-shortcut table that used to live here was written against SDL
+// keycodes. Slint reports characters, so `input/slint_input.rs::shortcut_for`
+// owns that mapping now; this file keeps the vocabulary both sides share.

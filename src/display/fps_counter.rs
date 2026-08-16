@@ -1,10 +1,15 @@
 use std::time::Instant;
 
-/// Simple FPS counter
+/// Counts rendered frames.
+///
+/// The rate is measured whether or not anyone asked for `--print-fps`, because
+/// the panel shows it in the session tab; `started` only decides whether it is
+/// also written to the log.
 pub struct FpsCounter {
     frames: u32,
     last_report: Instant,
     started: bool,
+    rate: f32,
 }
 
 impl FpsCounter {
@@ -13,6 +18,7 @@ impl FpsCounter {
             frames: 0,
             last_report: Instant::now(),
             started: false,
+            rate: 0.0,
         }
     }
 
@@ -36,14 +42,20 @@ impl FpsCounter {
         if self.started { self.stop() } else { self.start() }
     }
 
-    /// Record a rendered frame; prints FPS every second
+    /// The most recent rate, refreshed once a second.
+    pub fn rate(&self) -> f32 {
+        self.rate
+    }
+
+    /// Record a rendered frame.
     pub fn add_frame(&mut self) {
-        if !self.started { return; }
         self.frames += 1;
         let elapsed = self.last_report.elapsed();
-        if elapsed.as_secs() >= 1 {
-            let fps = self.frames as f64 / elapsed.as_secs_f64();
-            log::info!("{:.1} fps", fps);
+        if elapsed.as_secs_f64() >= 1.0 {
+            self.rate = (self.frames as f64 / elapsed.as_secs_f64()) as f32;
+            if self.started {
+                log::info!("{:.1} fps", self.rate);
+            }
             self.frames = 0;
             self.last_report = Instant::now();
         }

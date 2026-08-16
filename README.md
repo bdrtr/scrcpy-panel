@@ -52,6 +52,8 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | `--time-limit` | works — enforced client side |
 | Ctrl-C / SIGTERM shutdown | works — pipeline unwinds, no crash |
 | scrcpy 4.1 server handshake | works, no unknown-option warnings |
+| Audio through cpal | works — 48 kHz stereo, no SDL |
+| Session metrics | works — resolution, frame rate, codec, rotation, elapsed |
 
 The mid-stream session header — the one that arrives when the device rotates or the
 mirrored app resizes — is covered by unit tests (`cargo test`) but has not been seen
@@ -75,6 +77,8 @@ with the opening session header, which every run exercises.
   either.
 - `--render-driver` was an SDL renderer hint and is now ignored; pick a Slint backend with
   `SLINT_BACKEND` instead.
+- `--disable-screensaver` went with SDL. Inhibiting the screensaver now means talking to
+  the desktop portal, which is its own piece of work; the flag warns and does nothing.
 - Each frame is copied twice on the way to the screen (swscale output → packed buffer →
   Slint pixel buffer). Fine at 1080p60, but a GPU texture path would remove both.
 
@@ -109,8 +113,6 @@ with the opening session header, which every run exercises.
 
 - Rust 1.70+
 - FFmpeg 9 development libraries (`libavcodec`, `libavformat`, `libavutil`, `libswscale`)
-- SDL2 — no longer used for rendering, but the audio player and the clipboard helpers
-  still call into it
 - `adb` on `PATH`
 - A `scrcpy-server` binary matching the pinned protocol version, next to the built binary
 
@@ -140,7 +142,7 @@ curl -L -o target/release/scrcpy-server \
    window of its own
 4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, pinned to 4.1
 5. Get input parity back: UHID and AOA keyboards, mice and gamepads
-6. Drop SDL2 entirely — audio to `cpal`, clipboard to a native crate
+6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
 7. GPU frame path (Slint's `unstable-wgpu-29` texture import) to remove the per-frame copies
 8. Fill in what upstream left out: virtual display (`--new-display`), OTG, the rest of camera
 
