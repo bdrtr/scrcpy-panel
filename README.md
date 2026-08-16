@@ -132,6 +132,17 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   twice is that `SlintInput` sends nothing to the device while UHID is attached. OTG is
   still out: it needs USB and AOA rather than a control socket, and so does `--gamepad`,
   which additionally has no source — winit reports no gamepads.
+- **`--gamepad=uhid` works, and is the one thing here with no gamepad to prove it on.**
+  The report side was ported with the rest of scrcpy's HID code; what it lacked was a
+  source, and neither Slint nor winit reads gamepads. gilrs does, on every desktop this
+  runs on, so it is the one dependency taken for input. What it reports is not what the
+  report wants — `hid_gamepad.rs` speaks SDL's button and axis numbering, gilrs speaks its
+  own — so `input/gamepads.rs` is mostly that translation, and the translation is what the
+  tests cover: the button order, the analog triggers being axes rather than buttons, and
+  the sticks' vertical axis, which gilrs points up and SDL points down. gilrs is a queue to
+  drain rather than something to wait on, so it is read every 8 ms on a timer, which is
+  what a wired pad reports at. All of that has been run with no gamepad connected — gilrs
+  starts, enumerates none, and the session is unaffected — and none of it with one.
 - A UHID mouse is a relative mouse, so the pointer is captured while it runs, as it is in
   scrcpy: the window locks it where the compositor allows that and confines it to the
   window where it does not. LAlt, LSuper or RSuper give it back, and take it again. The
@@ -145,12 +156,11 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   of `/dev/video9` by ffmpeg at the right size and in the right colours, with and without
   `--v4l2-buffer`. It needs the module first:
   `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
-- Of the 74 flags the form can produce, 72 reach the device. The two that do not are
-  `--otg` and `--gamepad`, which need a scancode source and a gamepad source the Slint
-  window does not have; the panel names them as dropped rather than pretending. An earlier
-  version of this line claimed all of them, which was a miscount: the check that produced
-  the number was reading the list of deliberately unimplemented flags in a test as though
-  it were the supported list.
+- Of the 74 flags the form can produce, 73 reach the device. The one that does not is
+  `--otg`, which needs USB and the AOA protocol rather than a control socket; the panel
+  names it as dropped rather than pretending. An earlier version of this line claimed all
+  of them, which was a miscount: the check that produced the number was reading the list of
+  deliberately unimplemented flags in a test as though it were the supported list.
 - **The command line is scrcpy 4.1's, less three.** Comparing the two `--help` outputs
   leaves `--otg` and `--gamepad`, which want an input source Slint does not have, and
   `--no-window-aspect-ratio-lock`, which has nothing to turn off: SDL3 can lock a window to
@@ -318,8 +328,8 @@ curl -L -o target/release/scrcpy-server \
 3. ~~Embed the mirror in the panel~~ — done; Ayarlar switches between embedded and a
    window of its own
 4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, pinned to 4.1
-5. Get input parity back: ~~UHID keyboard and mouse~~ — done, through winit's raw events;
-   AOA and gamepads need USB and a gamepad source, and are what is left
+5. Get input parity back: ~~UHID keyboard and mouse~~ — done, through winit's raw events —
+   and ~~gamepads~~, through gilrs; AOA and OTG need USB, and are what is left
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
 7. GPU frame path (Slint's `unstable-wgpu-29` texture import) to remove the per-frame copies
 8. Fill in what upstream left out: ~~virtual display (`--new-display`)~~ and ~~the rest of

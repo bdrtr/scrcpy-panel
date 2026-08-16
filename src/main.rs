@@ -21,6 +21,7 @@ use std::rc::Rc;
 
 use control::control_msg::ControlMsg;
 use input::slint_input::WindowAction;
+use input::gamepads::Gamepads;
 use input::uhid::UhidInput;
 use mirror_host::{
     attach, optimal_window_size, start_audio, FlexDisplay, MirrorUpdate, FLEX_POLL_INTERVAL,
@@ -257,6 +258,12 @@ fn run(opts: Options) -> Result<()> {
              the sink will stop at the first resize"
         );
     }
+    if opts.gamepad == "aoa" {
+        log::warn!(
+            "--gamepad=aoa needs USB and the AOA protocol; UHID is the one that works over \
+             the control socket, so nothing will be forwarded"
+        );
+    }
     for (name, mode) in [("--keyboard", &opts.keyboard), ("--mouse", &opts.mouse)] {
         if mode != "sdk" && mode != "uhid" && mode != "disabled" {
             log::warn!(
@@ -403,6 +410,23 @@ fn run(opts: Options) -> Result<()> {
         )
     };
 
+    // The gamepads on this desk, as gamepads on the device. gilrs is a queue
+    // rather than something to wait on, so it is read on a timer of its own.
+    let gamepad_poll = slint::Timer::default();
+    let gamepads = (opts.gamepad == "uhid")
+        .then(Gamepads::new)
+        .flatten()
+        .map(|gamepads| Rc::new(std::cell::RefCell::new(gamepads)));
+    if let (Some(gamepads), Some(controller)) = (gamepads.as_ref(), controller.as_ref()) {
+        gamepads.borrow_mut().attach(controller.clone());
+        let gamepads = gamepads.clone();
+        gamepad_poll.start(
+            slint::TimerMode::Repeated,
+            input::gamepads::POLL_INTERVAL,
+            move || gamepads.borrow_mut().poll(),
+        );
+    }
+
     // Nothing may inject an input that is already on its way as a HID report.
     if let Some(ref uhid) = uhid {
         let mut input = attachment.input.borrow_mut();
@@ -468,6 +492,10 @@ fn run(opts: Options) -> Result<()> {
     drop(attachment);
     // Before the control channel goes: a device left holding a keyboard that
     // has stopped typing keeps it until it notices the socket has closed.
+    drop(gamepad_poll);
+    if let Some(ref gamepads) = gamepads {
+        gamepads.borrow_mut().detach();
+    }
     if let Some(ref uhid) = uhid {
         uhid.detach();
     }

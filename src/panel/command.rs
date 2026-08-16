@@ -261,6 +261,7 @@ const SUPPORTED: &[&str] = &[
     "--time-limit",
     "--keyboard",
     "--mouse",
+    "--gamepad",
     "--shortcut-mod",
     "--no-control",
     "--no-clipboard-autosync",
@@ -653,12 +654,13 @@ mod tests {
         let mut cfg = PanelConfig::default();
         cfg.max_size = "800".into();          // supported
         cfg.otg = true;                    // needs USB/AOA, not implemented
-        cfg.gamepad = "uhid".into();       // no gamepad source on the Slint side
+        cfg.gamepad = "uhid".into();       // read by gilrs since the port grew a source
 
         let (accepted, dropped) = cfg.to_client_args();
-        assert_eq!(accepted, vec!["--max-size=800".to_string()]);
+        assert_eq!(accepted.len(), 2, "{accepted:?}");
+        assert!(accepted.contains(&"--max-size=800".to_string()));
+        assert!(accepted.contains(&"--gamepad=uhid".to_string()));
         assert!(dropped.contains(&"--otg".to_string()));
-        assert!(dropped.contains(&"--gamepad=uhid".to_string()));
     }
 
     #[test]
@@ -773,8 +775,7 @@ mod tests {
         for flag in [
             // Nothing is unimplemented-but-offered right now. The list is kept
             // so the next flag added without an implementation lands here.
-            "--gamepad",  // no gamepad source on the Slint side
-            "--otg",      // needs USB/AOA, which needs scancodes
+            "--otg",      // needs USB and AOA rather than a control socket
         ] {
             assert!(
                 !SUPPORTED.contains(&flag),

@@ -77,6 +77,11 @@ struct Panel {
     /// The embedded session's control channel, kept so the panel's own buttons
     /// can reach the device without going through adb shell.
     controller: RefCell<Option<Rc<crate::control::controller::Controller>>>,
+    /// The gamepads on this desk while an embedded session wants them, and the
+    /// timer that reads them: gilrs is a queue to drain rather than something
+    /// to wait on.
+    gamepads: RefCell<Option<Rc<RefCell<crate::input::gamepads::Gamepads>>>>,
+    gamepad_timer: RefCell<Option<slint::Timer>>,
     /// Whether that session is mirroring a camera, which takes only the torch,
     /// the zoom and a video reset: the server treats anything else as a
     /// protocol error and ends its control thread over it.
@@ -156,6 +161,8 @@ pub fn run(opts: &Options) -> Result<()> {
         audio: RefCell::new(None),
         controller: RefCell::new(None),
         camera_session: std::cell::Cell::new(false),
+        gamepads: RefCell::new(None),
+        gamepad_timer: RefCell::new(None),
         uhid: RefCell::new(uhid),
         metrics_timer: RefCell::new(None),
         started_at: std::cell::Cell::new(None),
@@ -1471,6 +1478,24 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
                 }
             }
 
+            if opts.gamepad == "uhid" {
+                if let (Some(gamepads), Some(controller)) =
+                    (crate::input::gamepads::Gamepads::new(), controller.as_ref())
+                {
+                    let gamepads = Rc::new(RefCell::new(gamepads));
+                    gamepads.borrow_mut().attach(controller.clone());
+                    let timer = slint::Timer::default();
+                    let polled = gamepads.clone();
+                    timer.start(
+                        slint::TimerMode::Repeated,
+                        crate::input::gamepads::POLL_INTERVAL,
+                        move || polled.borrow_mut().poll(),
+                    );
+                    *panel.gamepads.borrow_mut() = Some(gamepads);
+                    *panel.gamepad_timer.borrow_mut() = Some(timer);
+                }
+            }
+
             let attachment = attach(
                 video,
                 controller,
@@ -1855,6 +1880,10 @@ fn stop_session(panel: &Rc<Panel>) {
     }
     panel.audio.borrow_mut().take();
     panel.metrics_timer.borrow_mut().take();
+    panel.gamepad_timer.borrow_mut().take();
+    if let Some(gamepads) = panel.gamepads.borrow_mut().take() {
+        gamepads.borrow_mut().detach();
+    }
     if let Some(uhid) = panel.uhid.borrow().as_ref() {
         uhid.detach();
     }

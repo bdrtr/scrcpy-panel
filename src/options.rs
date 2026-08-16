@@ -295,6 +295,10 @@ pub struct Options {
     #[arg(long, default_value = "sdk")]
     pub mouse: String,
 
+    /// Gamepad input mode: disabled, uhid, aoa
+    #[arg(long, default_value = "disabled", value_parser = ["disabled", "uhid", "aoa"])]
+    pub gamepad: String,
+
     /// Key inject mode: mixed (default), text, raw
     #[arg(long, default_value = "mixed")]
     pub key_inject_mode: String,
