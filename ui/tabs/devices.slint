@@ -241,15 +241,22 @@ export component TabDevices inherits VerticalLayout {
 
                     HorizontalLayout {
                         alignment: start;
-                        Kicker { text: "Hata".to-uppercase(); }
+                        Kicker { text: App.device-error-tag.to-uppercase(); }
                     }
 
                     Text {
-                        text: "Cihaz listesi alınamadı";
+                        text: App.device-error-title;
                         font-family: Theme.font;
                         font-size: 22px;
                         font-weight: Theme.heading-weight;
                         color: Theme.accent-800;
+                    }
+
+                    Text {
+                        text: App.device-error-detail;
+                        font-size: 13px;
+                        color: Theme.accent-800;
+                        wrap: word-wrap;
                     }
 
                     // The mockup prints the failing command and its output in a
@@ -276,6 +283,13 @@ export component TabDevices inherits VerticalLayout {
                             text: "Yeniden tara";
                             kind: "primary";
                             clicked => { App.refresh-devices(); }
+                        }
+                        // The second action depends on the failure; with
+                        // nothing useful to offer there is no button.
+                        if App.device-error-action != "": Btn {
+                            text: App.device-error-action;
+                            kind: "secondary";
+                            clicked => { App.device-remedy(); }
                         }
                         Btn {
                             text: "Günlüğü aç";

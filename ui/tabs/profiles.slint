@@ -6,8 +6,14 @@
 //
 // The mockup lays the cards out in a three-column CSS grid. Slint's GridLayout
 // takes static `Row { }` children, so it cannot be driven by a `for` over a
-// dynamic model; the cards are stacked in a VerticalLayout inside a ScrollView
-// instead. See the note at the end of this file.
+// dynamic model. Three columns side by side do the same job: each one walks the
+// whole model and keeps every third card, the way a grid fills row by row.
+//
+// A `for` cannot skip an item in Slint, so the cards that belong to another
+// column stay as empty wrappers. That is why the columns carry no spacing —
+// spacing would be inserted between the empty ones too, and the columns would
+// drift apart. The 2px gaps are drawn by the cards themselves over a divider
+// background, which is what gives the mockup its hairline grid.
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
@@ -51,65 +57,86 @@ export component TabProfiles inherits VerticalLayout {
         // scrollbar; they wrap inside the card instead.
         viewport-width: self.visible-width;
 
-        VerticalLayout {
-            spacing: Theme.s2;
+        // The ground the 2px gaps show through.
+        Rectangle {
+            background: Theme.divider;
 
-            for p[i] in App.profiles: Rectangle {
-                background: Theme.surface;
+            HorizontalLayout {
+                spacing: 2px;
+                alignment: start;
 
-                VerticalLayout {
-                    padding: Theme.s3;
-                    spacing: Theme.s2;
+                for col in [0, 1, 2]: VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: start;
 
-                    Kicker { text: p.kicker.to-uppercase(); }
+                    for p[i] in App.profiles: slot := VerticalLayout {
+                        property <bool> mine: Math.mod(i, 3) == col;
+                        // Nothing of another column's card is laid out.
+                        vertical-stretch: 0;
 
-                    Text {
-                        text: p.name;
-                        font-family: Theme.font;
-                        font-size: 17px;
-                        font-weight: Theme.heading-weight;
-                        color: Theme.text;
-                        overflow: elide;
-                    }
+                        if slot.mine: VerticalLayout {
+                            Rectangle {
+                                background: Theme.bg;
 
-                    Text {
-                        text: p.desc;
-                        font-size: 13px;
-                        color: Theme.text-70;
-                        wrap: word-wrap;
-                    }
+                                VerticalLayout {
+                                    padding: Theme.s4;
+                                    spacing: Theme.s2;
 
-                    Mono {
-                        text: p.flags;
-                        font-size: 11px;
-                        color: Theme.neutral-700;
-                        wrap: word-wrap;
-                    }
+                                    Kicker { text: p.kicker.to-uppercase(); }
 
-                    // `border-top` on the action row in the mockup.
-                    Rectangle {
-                        height: 1px;
-                        background: Theme.divider;
-                    }
+                                    Text {
+                                        text: p.name;
+                                        font-family: Theme.font;
+                                        font-size: 17px;
+                                        font-weight: Theme.heading-weight;
+                                        color: Theme.text;
+                                        overflow: elide;
+                                    }
 
-                    HorizontalLayout {
-                        spacing: Theme.s2;
+                                    Text {
+                                        text: p.desc;
+                                        font-size: 13px;
+                                        color: Theme.text-70;
+                                        wrap: word-wrap;
+                                    }
 
-                        Btn {
-                            text: "Uygula";
-                            kind: "ghost";
-                            clicked => { App.apply-profile(i); }
-                        }
-                        Btn {
-                            text: "Düzenle";
-                            kind: "ghost";
-                            clicked => { App.edit-profile(i); }
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                        Btn {
-                            text: "Sil";
-                            kind: "ghost";
-                            clicked => { App.delete-profile(i); }
+                                    Mono {
+                                        text: p.flags;
+                                        font-size: 11px;
+                                        color: Theme.neutral-700;
+                                        wrap: word-wrap;
+                                    }
+
+                                    // `border-top` on the action row in the mockup.
+                                    Rectangle {
+                                        height: 1px;
+                                        background: Theme.divider;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: Theme.s2;
+
+                                        Btn {
+                                            text: "Uygula";
+                                            kind: "ghost";
+                                            clicked => { App.apply-profile(i); }
+                                        }
+                                        Btn {
+                                            text: "Düzenle";
+                                            kind: "ghost";
+                                            clicked => { App.edit-profile(i); }
+                                        }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Btn {
+                                            text: "Sil";
+                                            kind: "ghost";
+                                            clicked => { App.delete-profile(i); }
+                                        }
+                                    }
+                                }
+                            }
+                            // The gap below the card, in the grid's colour.
+                            Rectangle { height: 2px; }
                         }
                     }
                 }

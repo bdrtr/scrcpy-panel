@@ -94,12 +94,10 @@ with the opening session header, which every run exercises.
   layout, which is exactly what UHID exists to avoid, so `--keyboard=uhid`, `--mouse=uhid`
   and OTG fall back to SDK injection with a warning. The HID report descriptors are still
   in the tree, waiting on a scancode source.
-- **`--v4l2-sink` has not been seen working end to end.** The implementation is real —
-  `VIDIOC_S_FMT` then a write per frame — and its failure paths are verified: a missing
-  device explains how to load the module, and a device that is not an output rejects the
-  format. That last one is `EINVAL` rather than `ENOTTY`, which means the kernel parsed the
-  request and refused it on merit, so the ioctl number and struct layout are right. What is
-  untested is a successful publish, which needs
+- `--v4l2-sink` publishes the mirror as a webcam: `VIDIOC_S_FMT` once, then a write per
+  frame. Verified end to end against a loopback device — the phone's screen read back out
+  of `/dev/video9` by ffmpeg at the right size and in the right colours, with and without
+  `--v4l2-buffer`. It needs the module first:
   `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
 - Every flag the form can produce — all 79 — now reaches the device; nothing is dropped
   between the command bar and the session.

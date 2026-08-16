@@ -186,7 +186,16 @@ export global App {
 
     // Devices tab
     in property <[DeviceRow]> devices;
+    /// The raw output of whatever failed, shown verbatim under the card.
     in property <string> device-error;
+    /// The card itself: which failure this is, and the one extra thing worth
+    /// trying about it. Filled by src/panel/failure.rs.
+    in property <string> device-error-tag;
+    in property <string> device-error-title;
+    in property <string> device-error-detail;
+    /// Label of the secondary button; empty hides it.
+    in property <string> device-error-action;
+    callback device-remedy();
     in property <bool> devices-loading;
     in-out property <string> pair-addr;
     in-out property <string> pair-code;

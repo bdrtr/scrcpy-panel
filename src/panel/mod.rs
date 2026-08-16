@@ -22,6 +22,8 @@ use std::sync::{Arc, Mutex};
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
+mod failure;
+
 use crate::control::control_msg::ControlMsg;
 use crate::mirror_host::{attach, start_audio, Attachment, MirrorUpdate};
 use crate::options::Options;
@@ -1113,6 +1115,16 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
     }
     {
         let weak = window.as_weak();
+        let panel = panel.clone();
+        app.on_device_remedy(move || {
+            if let Some(window) = weak.upgrade() {
+                run_remedy(&window, &panel);
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
         app.on_push_files(move || {
             let serial = weak
                 .upgrade()
@@ -1351,6 +1363,7 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
         Ok(session) => session,
         Err(e) => {
             panel.warn(&format!("Oturum başlatılamadı: {:#}", e));
+            show_failure(&window, &format!("{e:#}"));
             window.global::<App>().set_session_running(false);
             sync_tray(false);
             return;
@@ -1461,6 +1474,7 @@ fn start_windowed(
         Ok(child) => child,
         Err(e) => {
             panel.warn(&format!("Oturum başlatılamadı: {e}"));
+            show_failure(window, &format!("{e}"));
             return;
         }
     };
@@ -1860,6 +1874,79 @@ fn sync_tray(running: bool) {
     });
 }
 
+/// Put a failure on the Devices tab, classified, or clear the card.
+///
+/// Everything that can fail visibly goes through here — the device scan and a
+/// session that would not start — so the panel says the same thing about the
+/// same failure wherever it came from.
+fn show_failure(window: &PanelWindow, text: &str) {
+    let app = window.global::<App>();
+    app.set_device_error(text.into());
+    if text.trim().is_empty() {
+        app.set_device_error_tag("".into());
+        app.set_device_error_title("".into());
+        app.set_device_error_detail("".into());
+        app.set_device_error_action("".into());
+        return;
+    }
+
+    let card = failure::classify(text);
+    app.set_device_error_tag(card.tag.into());
+    app.set_device_error_title(card.title.into());
+    app.set_device_error_detail(card.detail.into());
+    app.set_device_error_action(card.remedy.label().unwrap_or("").into());
+    REMEDY.with(|slot| slot.set(card.remedy));
+}
+
+thread_local! {
+    /// What the card's second button should do, set alongside the card.
+    static REMEDY: Cell<failure::Remedy> = const { Cell::new(failure::Remedy::None) };
+}
+
+/// Run the one extra thing the card offered.
+fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
+    match REMEDY.with(|slot| slot.get()) {
+        failure::Remedy::None => {}
+        failure::Remedy::RestartAdb => {
+            panel.info("adb sunucusu yeniden başlatılıyor…");
+            let killed = adb().arg("kill-server").output();
+            let started = adb().arg("start-server").output();
+            match (killed, started) {
+                (Ok(_), Ok(out)) if out.status.success() => {
+                    panel.info("adb sunucusu yeniden başlatıldı.");
+                    spawn_device_scan(panel);
+                }
+                _ => panel.warn("adb sunucusu yeniden başlatılamadı."),
+            }
+        }
+        failure::Remedy::PickAdbPath => {
+            // The dialog blocks, and the panel is what it would block.
+            let weak = window.as_weak();
+            std::thread::spawn(move || {
+                let Some(path) = rfd::FileDialog::new()
+                    .set_title("adb çalıştırılabilir dosyasını seçin")
+                    .pick_file()
+                else {
+                    return;
+                };
+                let path = path.to_string_lossy().to_string();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(window) = weak.upgrade() else { return };
+                    let settings = window.global::<Settings>();
+                    settings.set_adb_path(path.as_str().into());
+                    settings.invoke_changed();
+                    with_panel(|panel| {
+                        panel.info(&format!("adb yolu: {path}"));
+                        spawn_device_scan(panel);
+                    });
+                });
+            });
+        }
+        failure::Remedy::ListEncoders => window.global::<App>().invoke_list_encoders(),
+        failure::Remedy::OpenSettings => window.global::<App>().set_tab("settings".into()),
+    }
+}
+
 /// Where a pushed file lands, matching scrcpy's own default.
 const PUSH_TARGET: &str = "/sdcard/Download/";
 
@@ -2089,7 +2176,7 @@ fn spawn_device_scan(panel: &Rc<Panel>) {
                 );
             }
 
-            app.set_device_error(error.as_str().into());
+            show_failure(&window, &error);
             app.set_devices_loading(false);
             app.set_adb_status(status.as_str().into());
 
