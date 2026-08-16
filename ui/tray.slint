@@ -24,10 +24,10 @@ export component TrayIcon inherits SystemTrayIcon {
     in property <string> device;
 
     icon: @image-url("../assets/tray.png");
-    title: "scrcpy-slint";
+    title: @tr("scrcpy-slint");
     tooltip: root.session-running && root.device != ""
-        ? "scrcpy-slint — " + root.device
-        : "scrcpy-slint";
+        ? @tr("scrcpy-slint — ") + root.device
+        : @tr("scrcpy-slint");
 
     callback show-panel();
     callback toggle-session();
@@ -37,17 +37,17 @@ export component TrayIcon inherits SystemTrayIcon {
 
     Menu {
         MenuItem {
-            title: "Paneli göster";
+            title: @tr("Paneli göster");
             activated => { root.show-panel(); }
         }
         MenuSeparator { }
         MenuItem {
-            title: root.session-running ? "Oturumu durdur" : "Oturumu başlat";
+            title: root.session-running ? @tr("Oturumu durdur") : @tr("Oturumu başlat");
             activated => { root.toggle-session(); }
         }
         MenuSeparator { }
         MenuItem {
-            title: "Çık";
+            title: @tr("Çık");
             activated => { root.quit-app(); }
         }
     }

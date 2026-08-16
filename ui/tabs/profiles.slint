@@ -30,9 +30,9 @@ export component TabProfiles inherits VerticalLayout {
 
         SectionHead {
             horizontal-stretch: 1;
-            kicker: "Kayıtlı yapılandırmalar";
-            title: "Profiller";
-            desc: "Her profil tam bir bayrak kümesidir. Bir profili uygulamak Yapılandırma sekmesindeki tüm alanları yeniden yazar; cihaza sabitlenen profiller o cihaz bağlandığında öntanımlı olur.";
+            kicker: @tr("Kayıtlı yapılandırmalar");
+            title: @tr("Profiller");
+            desc: @tr("Her profil tam bir bayrak kümesidir. Bir profili uygulamak Yapılandırma sekmesindeki tüm alanları yeniden yazar; cihaza sabitlenen profiller o cihaz bağlandığında öntanımlı olur.");
         }
 
         // `align-items: flex-end` in the mockup — the button sits on the
@@ -41,7 +41,7 @@ export component TabProfiles inherits VerticalLayout {
             alignment: end;
             horizontal-stretch: 0;
             Btn {
-                text: "Geçerli ayarları kaydet";
+                text: @tr("Geçerli ayarları kaydet");
                 kind: "primary";
                 clicked => { App.save-profile(); }
             }
@@ -117,18 +117,18 @@ export component TabProfiles inherits VerticalLayout {
                                         spacing: Theme.s2;
 
                                         Btn {
-                                            text: "Uygula";
+                                            text: @tr("Uygula");
                                             kind: "ghost";
                                             clicked => { App.apply-profile(i); }
                                         }
                                         Btn {
-                                            text: "Düzenle";
+                                            text: @tr("Düzenle");
                                             kind: "ghost";
                                             clicked => { App.edit-profile(i); }
                                         }
                                         Rectangle { horizontal-stretch: 1; }
                                         Btn {
-                                            text: "Sil";
+                                            text: @tr("Sil");
                                             kind: "ghost";
                                             clicked => { App.delete-profile(i); }
                                         }

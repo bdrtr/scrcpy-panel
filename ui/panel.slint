@@ -58,7 +58,7 @@ component SectionLink inherits Rectangle {
 }
 
 export component PanelWindow inherits Window {
-    title: "scrcpy panel";
+    title: @tr("scrcpy panel");
     background: Theme.bg;
     preferred-width: 1200px;
     preferred-height: 800px;
@@ -87,7 +87,7 @@ export component PanelWindow inherits Window {
                 }
 
                 Text {
-                    text: "SCRCPY PANEL";
+                    text: @tr("SCRCPY PANEL");
                     font-size: 12px;
                     font-weight: Theme.heading-weight;
                     letter-spacing: 1.9px;
@@ -96,7 +96,7 @@ export component PanelWindow inherits Window {
                 }
 
                 Text {
-                    text: "Slint · Rust · scrcpy " + Settings.server-version;
+                    text: @tr("Slint · Rust · scrcpy ") + Settings.server-version;
                     font-size: 11px;
                     color: Theme.neutral-500;
                     vertical-alignment: center;
@@ -132,7 +132,7 @@ export component PanelWindow inherits Window {
                 spacing: Theme.s4;
 
                 Seg {
-                    labels: ["Cihazlar", "Yapılandırma", "Oturum", "Profiller", "Günlük", "Kısayollar", "Ayarlar"];
+                    labels: [@tr("Cihazlar"), @tr("Yapılandırma"), @tr("Oturum"), @tr("Profiller"), @tr("Günlük"), @tr("Kısayollar"), @tr("Ayarlar")];
                     values: ["devices", "config", "session", "profiles", "log", "keys", "settings"];
                     value <=> App.tab;
                 }
@@ -183,21 +183,21 @@ export component PanelWindow inherits Window {
 
                     VerticalLayout {
                         Text {
-                            text: "BÖLÜMLER";
+                            text: @tr("BÖLÜMLER");
                             font-size: 10px;
                             letter-spacing: 1.2px;
                             color: Theme.accent;
                             horizontal-alignment: left;
                         }
 
-                        SectionLink { text: "01 · Video"; key: "video"; }
-                        SectionLink { text: "02 · Ses"; key: "audio"; }
-                        SectionLink { text: "03 · Kayıt"; key: "record"; }
-                        SectionLink { text: "04 · Kontrol ve giriş"; key: "control"; }
-                        SectionLink { text: "05 · Sanal ekran"; key: "vdisplay"; }
-                        SectionLink { text: "06 · Kamera"; key: "camera"; }
-                        SectionLink { text: "07 · Pencere ve ekran"; key: "window"; }
-                        SectionLink { text: "08 · Ağ ve ADB"; key: "network"; }
+                        SectionLink { text: @tr("01 · Video"); key: "video"; }
+                        SectionLink { text: @tr("02 · Ses"); key: "audio"; }
+                        SectionLink { text: @tr("03 · Kayıt"); key: "record"; }
+                        SectionLink { text: @tr("04 · Kontrol ve giriş"); key: "control"; }
+                        SectionLink { text: @tr("05 · Sanal ekran"); key: "vdisplay"; }
+                        SectionLink { text: @tr("06 · Kamera"); key: "camera"; }
+                        SectionLink { text: @tr("07 · Pencere ve ekran"); key: "window"; }
+                        SectionLink { text: @tr("08 · Ağ ve ADB"); key: "network"; }
 
                         Rectangle { vertical-stretch: 1; }
 
@@ -205,14 +205,14 @@ export component PanelWindow inherits Window {
                         VerticalLayout {
                             padding: Theme.s4;
                             spacing: Theme.s2;
-                            Kicker { text: "ÖZET"; }
+                            Kicker { text: @tr("ÖZET"); }
                             Text {
-                                text: App.flag-count + " bayrak etkin";
+                                text: App.flag-count + @tr(" bayrak etkin");
                                 font-size: 12px;
                                 color: Theme.neutral-700;
                             }
                             Btn {
-                                text: "Varsayılanlara dön";
+                                text: @tr("Varsayılanlara dön");
                                 block: true;
                                 clicked => { App.reset-defaults(); }
                             }
@@ -254,16 +254,16 @@ export component PanelWindow inherits Window {
 
                 HorizontalLayout {
                     spacing: Theme.s3;
-                    Kicker { text: "OLUŞAN KOMUT"; }
+                    Kicker { text: @tr("OLUŞAN KOMUT"); }
                     Text {
-                        text: App.flag-count + " bayrak";
+                        text: App.flag-count + @tr(" bayrak");
                         font-size: 11px;
                         color: Theme.text-50;
                         vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; }
                     Btn {
-                        text: "Kopyala";
+                        text: @tr("Kopyala");
                         kind: "ghost";
                         clicked => { App.copy-command(); }
                     }
@@ -300,21 +300,21 @@ export component PanelWindow inherits Window {
                 Rectangle { horizontal-stretch: 1; }
 
                 Btn {
-                    text: App.command-open ? "Komutu gizle" : "Komutu göster";
+                    text: App.command-open ? @tr("Komutu gizle") : @tr("Komutu göster");
                     y: (parent.height - self.height) / 2;
                     clicked => { App.command-open = !App.command-open; }
                 }
                 Btn {
-                    text: "Profil olarak kaydet";
+                    text: @tr("Profil olarak kaydet");
                     y: (parent.height - self.height) / 2;
                     clicked => { App.save-profile(); }
                 }
                 Btn {
                     text: App.session-running
-                        ? "Oturumu durdur"
+                        ? @tr("Oturumu durdur")
                         : App.selected-count > 1
-                            ? App.selected-count + " cihazda başlat"
-                            : "Ayarlarınla başlat";
+                            ? App.selected-count + @tr(" cihazda başlat")
+                            : @tr("Ayarlarınla başlat");
                     kind: "primary";
                     y: (parent.height - self.height) / 2;
                     clicked => {

@@ -13,9 +13,9 @@ export component SectionCamera inherits VerticalLayout {
     spacing: Theme.s4;
 
     SectionHead {
-        kicker: "Bölüm 06";
-        title: "Kamera";
-        desc: "Kamera aktarımı Android 12+ gerektirir ve video kaynağı olarak ekranın yerine geçer. Boyut yerine en-boy oranı verilirse cihaz en yakın desteklenen çözünürlüğü seçer.";
+        kicker: @tr("Bölüm 06");
+        title: @tr("Kamera");
+        desc: @tr("Kamera aktarımı Android 12+ gerektirir ve video kaynağı olarak ekranın yerine geçer. Boyut yerine en-boy oranı verilirse cihaz en yakın desteklenen çözünürlüğü seçer.");
     }
 
     Hr {}
@@ -23,16 +23,16 @@ export component SectionCamera inherits VerticalLayout {
     Grp {
         Row {
             Fld {
-                label: "Yön · --camera-facing";
+                label: @tr("Yön · --camera-facing");
                 Seg {
-                    labels: ["arka", "ön", "harici"];
+                    labels: [@tr("arka"), @tr("ön"), @tr("harici")];
                     values: ["back", "front", "external"];
                     value <=> Cfg.camera-facing;
                     changed => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Kamera no · --camera-id";
+                label: @tr("Kamera no · --camera-id");
                 Inp {
                     text <=> Cfg.camera-id;
                     placeholder: "0";
@@ -41,10 +41,10 @@ export component SectionCamera inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Boyut · --camera-size";
+                label: @tr("Boyut · --camera-size");
                 Inp {
                     text <=> Cfg.camera-size;
-                    placeholder: "1920x1080";
+                    placeholder: @tr("1920x1080");
                     mono: true;
                     edited => { Cfg.changed(); }
                 }
@@ -52,7 +52,7 @@ export component SectionCamera inherits VerticalLayout {
         }
         Row {
             Fld {
-                label: "En-boy oranı · --camera-ar";
+                label: @tr("En-boy oranı · --camera-ar");
                 Inp {
                     text <=> Cfg.camera-ar;
                     placeholder: "16:9";
@@ -61,7 +61,7 @@ export component SectionCamera inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Kare hızı · --camera-fps";
+                label: @tr("Kare hızı · --camera-fps");
                 Inp {
                     text <=> Cfg.camera-fps;
                     placeholder: "60";
@@ -72,9 +72,9 @@ export component SectionCamera inherits VerticalLayout {
             // The button sits in the third column with a label above it, so it
             // lines up with the inputs; hence the 36px height instead of 34px.
             Fld {
-                label: "Kamera listesi";
+                label: @tr("Kamera listesi");
                 Btn {
-                    text: "Cihazdan seç · --list-cameras";
+                    text: @tr("Cihazdan seç · --list-cameras");
                     height: 36px;
                     block: true;
                     clicked => { App.list-cameras(); }
@@ -88,7 +88,7 @@ export component SectionCamera inherits VerticalLayout {
     ChkGrp {
         Row {
             Chk {
-                text: "Yüksek hız kipi · --camera-high-speed";
+                text: @tr("Yüksek hız kipi · --camera-high-speed");
                 checked <=> Cfg.camera-high-speed;
                 toggled => { Cfg.changed(); }
             }

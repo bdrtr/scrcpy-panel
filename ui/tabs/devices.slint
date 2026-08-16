@@ -42,9 +42,9 @@ export component TabDevices inherits VerticalLayout {
     spacing: Theme.s4;
 
     SectionHead {
-        kicker: "Bağlı donanım";
-        title: "Cihazlar";
-        desc: "USB ve kablosuz cihazlar adb devices -l ile listelenir. Birden fazla cihaz seçilebilir; aynı yapılandırma hepsinde aynı anda başlatılır ve alt şeritteki komut bir döngüye dönüşür.";
+        kicker: @tr("Bağlı donanım");
+        title: @tr("Cihazlar");
+        desc: @tr("USB ve kablosuz cihazlar adb devices -l ile listelenir. Birden fazla cihaz seçilebilir; aynı yapılandırma hepsinde aynı anda başlatılır ve alt şeritteki komut bir döngüye dönüşür.");
     }
 
     Hr {}
@@ -75,17 +75,17 @@ export component TabDevices inherits VerticalLayout {
 
                         Rectangle { width: 34px; }
                         Th {
-                            text: "CİHAZ";
+                            text: @tr("CİHAZ");
                             horizontal-stretch: 1;
                             min-width: 150px;
                         }
-                        Th { text: "SERİ NO"; width: 170px; }
-                        Th { text: "BAĞLANTI"; width: 90px; }
-                        Th { text: "ANDROID"; width: 80px; }
-                        Th { text: "EKRAN"; width: 100px; }
-                        Th { text: "DURUM"; width: 90px; }
+                        Th { text: @tr("SERİ NO"); width: 170px; }
+                        Th { text: @tr("BAĞLANTI"); width: 90px; }
+                        Th { text: @tr("ANDROID"); width: 80px; }
+                        Th { text: @tr("EKRAN"); width: 100px; }
+                        Th { text: @tr("DURUM"); width: 90px; }
                         Th {
-                            text: "İŞLEM";
+                            text: @tr("İŞLEM");
                             width: 90px;
                             horizontal-alignment: right;
                         }
@@ -157,7 +157,7 @@ export component TabDevices inherits VerticalLayout {
                                 x: parent.width - self.width;
                                 y: (parent.height - self.height) / 2;
                                 width: self.min-width;
-                                text: "Aynala";
+                                text: @tr("Aynala");
                                 kind: "ghost";
                                 clicked => { App.mirror-device(d.serial); }
                             }
@@ -184,11 +184,11 @@ export component TabDevices inherits VerticalLayout {
 
                     HorizontalLayout {
                         alignment: start;
-                        Kicker { text: "Boş durum".to-uppercase(); }
+                        Kicker { text: @tr("Boş durum").to-uppercase(); }
                     }
 
                     Text {
-                        text: "Bağlı cihaz yok";
+                        text: @tr("Bağlı cihaz yok");
                         font-family: Theme.font;
                         font-size: 22px;
                         font-weight: Theme.heading-weight;
@@ -196,7 +196,7 @@ export component TabDevices inherits VerticalLayout {
                     }
 
                     Text {
-                        text: "USB kablosunu takın ve cihazda USB hata ayıklamayı onaylayın. Kablosuz bir cihaz için aşağıdan adres girin.";
+                        text: @tr("USB kablosunu takın ve cihazda USB hata ayıklamayı onaylayın. Kablosuz bir cihaz için aşağıdan adres girin.");
                         font-size: 13px;
                         color: Theme.neutral-700;
                         wrap: word-wrap;
@@ -208,19 +208,19 @@ export component TabDevices inherits VerticalLayout {
                         alignment: start;
 
                         Btn {
-                            text: "Yeniden tara";
+                            text: @tr("Yeniden tara");
                             kind: "primary";
                             clicked => { App.refresh-devices(); }
                         }
                         Btn {
-                            text: "TCP/IP ile bağlan";
+                            text: @tr("TCP/IP ile bağlan");
                             kind: "secondary";
                             clicked => { App.tcpip-connect(); }
                         }
                         // In the mockup only; there is no help view to open
                         // yet, so it is drawn disabled rather than inert.
                         Btn {
-                            text: "Kurulum yardımı";
+                            text: @tr("Kurulum yardımı");
                             kind: "ghost";
                             enabled: false;
                         }
@@ -280,7 +280,7 @@ export component TabDevices inherits VerticalLayout {
                         alignment: start;
 
                         Btn {
-                            text: "Yeniden tara";
+                            text: @tr("Yeniden tara");
                             kind: "primary";
                             clicked => { App.refresh-devices(); }
                         }
@@ -292,7 +292,7 @@ export component TabDevices inherits VerticalLayout {
                             clicked => { App.device-remedy(); }
                         }
                         Btn {
-                            text: "Günlüğü aç";
+                            text: @tr("Günlüğü aç");
                             kind: "ghost";
                             clicked => { App.tab = "log"; }
                         }
@@ -312,12 +312,12 @@ export component TabDevices inherits VerticalLayout {
                     spacing: 0;
                     alignment: start;
 
-                    Kicker { text: "Kablosuz".to-uppercase(); }
+                    Kicker { text: @tr("Kablosuz").to-uppercase(); }
 
                     // `margin: 6px 0 var(--space-3)` on the h3.
                     Rectangle { height: 6px; }
                     Text {
-                        text: "TCP/IP ile bağlan";
+                        text: @tr("TCP/IP ile bağlan");
                         font-family: Theme.font;
                         font-size: 16px;
                         font-weight: 700;
@@ -330,7 +330,7 @@ export component TabDevices inherits VerticalLayout {
 
                         Fld {
                             horizontal-stretch: 1;
-                            label: "Adres:port (--tcpip)";
+                            label: @tr("Adres:port (--tcpip)");
                             Inp {
                                 // Section 08 binds the same value: one
                                 // field, one --tcpip flag.
@@ -346,7 +346,7 @@ export component TabDevices inherits VerticalLayout {
                             alignment: end;
                             horizontal-stretch: 0;
                             Btn {
-                                text: "Bağlan";
+                                text: @tr("Bağlan");
                                 kind: "secondary";
                                 height: 36px;
                                 clicked => { App.tcpip-connect(); }
@@ -356,7 +356,7 @@ export component TabDevices inherits VerticalLayout {
 
                     Rectangle { height: Theme.s2; }
                     Text {
-                        text: "USB'den geçiş için adb tcpip 5555 otomatik çalıştırılır.";
+                        text: @tr("USB'den geçiş için adb tcpip 5555 otomatik çalıştırılır.");
                         font-size: 12px;
                         color: Theme.neutral-700;
                         wrap: word-wrap;
@@ -369,11 +369,11 @@ export component TabDevices inherits VerticalLayout {
                     spacing: 0;
                     alignment: start;
 
-                    Kicker { text: "Android 11+".to-uppercase(); }
+                    Kicker { text: @tr("Android 11+").to-uppercase(); }
 
                     Rectangle { height: 6px; }
                     Text {
-                        text: "Kablosuz eşleştirme";
+                        text: @tr("Kablosuz eşleştirme");
                         font-family: Theme.font;
                         font-size: 16px;
                         font-weight: 700;
@@ -386,7 +386,7 @@ export component TabDevices inherits VerticalLayout {
 
                         Fld {
                             horizontal-stretch: 1;
-                            label: "Eşleştirme adresi";
+                            label: @tr("Eşleştirme adresi");
                             Inp {
                                 text <=> App.pair-addr;
                                 placeholder: "192.168.1.42:37105";
@@ -396,7 +396,7 @@ export component TabDevices inherits VerticalLayout {
                         Fld {
                             width: 110px;
                             horizontal-stretch: 0;
-                            label: "Kod";
+                            label: @tr("Kod");
                             Inp {
                                 text <=> App.pair-code;
                                 placeholder: "482913";
@@ -407,7 +407,7 @@ export component TabDevices inherits VerticalLayout {
                             alignment: end;
                             horizontal-stretch: 0;
                             Btn {
-                                text: "Eşleştir";
+                                text: @tr("Eşleştir");
                                 kind: "secondary";
                                 height: 36px;
                                 clicked => { App.pair-device(); }
@@ -417,7 +417,7 @@ export component TabDevices inherits VerticalLayout {
 
                     Rectangle { height: Theme.s2; }
                     Text {
-                        text: "Geliştirici seçenekleri → Kablosuz hata ayıklama → Cihazı kodla eşleştir.";
+                        text: @tr("Geliştirici seçenekleri → Kablosuz hata ayıklama → Cihazı kodla eşleştir.");
                         font-size: 12px;
                         color: Theme.neutral-700;
                         wrap: word-wrap;

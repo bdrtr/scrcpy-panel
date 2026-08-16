@@ -13,9 +13,9 @@ export component SectionWindow inherits VerticalLayout {
     spacing: Theme.s4;
 
     SectionHead {
-        kicker: "Bölüm 07";
-        title: "Pencere ve ekran";
-        desc: "Ayna penceresinin yerleşimi ve cihazın güç davranışı. Konum ve boyut alanları boş bırakılırsa pencere cihaz oranına göre açılır.";
+        kicker: @tr("Bölüm 07");
+        title: @tr("Pencere ve ekran");
+        desc: @tr("Ayna penceresinin yerleşimi ve cihazın güç davranışı. Konum ve boyut alanları boş bırakılırsa pencere cihaz oranına göre açılır.");
     }
 
     Hr {}
@@ -24,15 +24,15 @@ export component SectionWindow inherits VerticalLayout {
         Row {
             Fld {
                 colspan: 2;
-                label: "Pencere başlığı · --window-title";
+                label: @tr("Pencere başlığı · --window-title");
                 Inp {
                     text <=> Cfg.window-title;
-                    placeholder: "scrcpy";
+                    placeholder: @tr("scrcpy");
                     edited => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Döndürme · --orientation";
+                label: @tr("Döndürme · --orientation");
                 Seg {
                     labels: ["0°", "90°", "180°", "270°"];
                     values: ["0", "90", "180", "270"];
@@ -43,7 +43,7 @@ export component SectionWindow inherits VerticalLayout {
         }
         Row {
             Fld {
-                label: "X · --window-x";
+                label: @tr("X · --window-x");
                 Inp {
                     text <=> Cfg.window-x;
                     placeholder: "0";
@@ -52,7 +52,7 @@ export component SectionWindow inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Y · --window-y";
+                label: @tr("Y · --window-y");
                 Inp {
                     text <=> Cfg.window-y;
                     placeholder: "0";
@@ -61,7 +61,7 @@ export component SectionWindow inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Genişlik · --window-width";
+                label: @tr("Genişlik · --window-width");
                 Inp {
                     text <=> Cfg.window-width;
                     placeholder: "1280";
@@ -72,7 +72,7 @@ export component SectionWindow inherits VerticalLayout {
         }
         Row {
             Fld {
-                label: "Yükseklik · --window-height";
+                label: @tr("Yükseklik · --window-height");
                 Inp {
                     text <=> Cfg.window-height;
                     placeholder: "720";
@@ -90,60 +90,60 @@ export component SectionWindow inherits VerticalLayout {
     ChkGrp {
         Row {
             Chk {
-                text: "Tam ekran · --fullscreen";
+                text: @tr("Tam ekran · --fullscreen");
                 checked <=> Cfg.fullscreen;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Her zaman üstte · --always-on-top";
+                text: @tr("Her zaman üstte · --always-on-top");
                 checked <=> Cfg.always-on-top;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Kenarsız · --window-borderless";
+                text: @tr("Kenarsız · --window-borderless");
                 checked <=> Cfg.window-borderless;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Cihaz ekranını kapat · --turn-screen-off";
+                text: @tr("Cihaz ekranını kapat · --turn-screen-off");
                 checked <=> Cfg.turn-screen-off;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Cihazı uyanık tut · --stay-awake";
+                text: @tr("Cihazı uyanık tut · --stay-awake");
                 checked <=> Cfg.stay-awake;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Dokunuşları göster · --show-touches";
+                text: @tr("Dokunuşları göster · --show-touches");
                 checked <=> Cfg.show-touches;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Ekran koruyucuyu engelle · --disable-screensaver";
+                text: @tr("Ekran koruyucuyu engelle · --disable-screensaver");
                 checked <=> Cfg.disable-screensaver;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Kapanışta ekranı kapat · --power-off-on-close";
+                text: @tr("Kapanışta ekranı kapat · --power-off-on-close");
                 checked <=> Cfg.power-off-on-close;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Başlarken açma · --no-power-on";
+                text: @tr("Başlarken açma · --no-power-on");
                 checked <=> Cfg.no-power-on;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Mipmap kapalı · --no-mipmaps";
+                text: @tr("Mipmap kapalı · --no-mipmaps");
                 checked <=> Cfg.no-mipmaps;
                 toggled => { Cfg.changed(); }
             }

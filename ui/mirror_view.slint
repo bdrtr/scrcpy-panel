@@ -18,7 +18,7 @@ export global Mirror {
     in property <float> rotation: 0;
     /// False before the first frame arrives, so the view can say so.
     in property <bool> live;
-    in property <string> placeholder: "Görüntü bekleniyor…";
+    in property <string> placeholder: @tr("Görüntü bekleniyor…");
 
     // `alt` rides along on press because that is where the decision to place a
     // second, mirrored finger (pinch to zoom) is made. TouchArea's `moved` has

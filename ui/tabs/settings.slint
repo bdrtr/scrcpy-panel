@@ -22,9 +22,9 @@ export component TabSettings inherits VerticalLayout {
             spacing: Theme.s4;
 
             SectionHead {
-                kicker: "Uygulama";
-                title: "Ayarlar";
-                desc: "Bu değerler yapılandırma dosyasına yazılır ve tüm profiller için geçerlidir.";
+                kicker: @tr("Uygulama");
+                title: @tr("Ayarlar");
+                desc: @tr("Bu değerler yapılandırma dosyasına yazılır ve tüm profiller için geçerlidir.");
             }
 
             Hr {}
@@ -34,16 +34,16 @@ export component TabSettings inherits VerticalLayout {
                 Row {
                     Fld {
                         colspan: 2;
-                        label: "adb çalıştırılabiliri";
+                        label: @tr("adb çalıştırılabiliri");
                         Inp {
                             text <=> Settings.adb-path;
-                            placeholder: "/usr/local/bin/adb";
+                            placeholder: @tr("/usr/local/bin/adb");
                             mono: true;
                             edited => { Settings.changed(); }
                         }
                     }
                     Fld {
-                        label: "Sunucu sürümü";
+                        label: @tr("Sunucu sürümü");
                         // Disabled in the mockup too: this only reports the
                         // server version that was detected, it is not a setting.
                         Inp {
@@ -54,7 +54,7 @@ export component TabSettings inherits VerticalLayout {
                         }
                     }
                     Fld {
-                        label: "adb sunucu portu";
+                        label: @tr("adb sunucu portu");
                         Inp {
                             text <=> Settings.adb-port;
                             placeholder: "5037";
@@ -71,41 +71,31 @@ export component TabSettings inherits VerticalLayout {
             Grp {
                 Row {
                     Fld {
-                        // Disabled rather than removed, like the UHID field in
-                        // the control section: the panel has no translation
-                        // layer, so switching to English would change nothing.
-                        label: "Arayüz dili — yalnızca Türkçe";
-                        lang := Rectangle {
-                            height: 34px;
-                            opacity: 0.5;
-                            // No alignment wrapper: the mockup draws this seg at
-                            // width 100%, so it fills the field.
-                            Seg {
-                                labels: ["Türkçe", "English"];
-                                values: ["tr", "en"];
-                                value: Settings.language;
-                            }
-                            // Seg has no enabled property, so the clicks are
-                            // swallowed here instead.
-                            TouchArea {
-                                mouse-cursor: MouseCursor.not-allowed;
-                            }
+                        label: @tr("Arayüz dili");
+                        // The two language names stay in their own language, as
+                        // language pickers do; everything else in the panel is
+                        // translated from the .po files bundled at build time.
+                        Seg {
+                            labels: ["Türkçe", "English"];
+                            values: ["tr", "en"];
+                            value <=> Settings.language;
+                            changed => { Settings.changed(); }
                         }
                     }
                     Fld {
-                        label: "Ayna penceresi";
+                        label: @tr("Ayna penceresi");
                         Seg {
-                            labels: ["Panele gömülü", "Ayrı pencere"];
+                            labels: [@tr("Panele gömülü"), @tr("Ayrı pencere")];
                             values: ["embedded", "window"];
                             value <=> Settings.mirror-mode;
                             changed => { Settings.changed(); }
                         }
                     }
                     Fld {
-                        label: "Kayıt klasörü";
+                        label: @tr("Kayıt klasörü");
                         Inp {
                             text <=> Settings.record-dir;
-                            placeholder: "~/Videos/scrcpy";
+                            placeholder: @tr("~/Videos/scrcpy");
                             mono: true;
                             edited => { Settings.changed(); }
                         }
@@ -113,10 +103,10 @@ export component TabSettings inherits VerticalLayout {
                 }
                 Row {
                     Fld {
-                        label: "Ekran görüntüsü klasörü";
+                        label: @tr("Ekran görüntüsü klasörü");
                         Inp {
                             text <=> Settings.screenshot-dir;
-                            placeholder: "~/Pictures/scrcpy";
+                            placeholder: @tr("~/Pictures/scrcpy");
                             mono: true;
                             edited => { Settings.changed(); }
                         }
@@ -134,7 +124,7 @@ export component TabSettings inherits VerticalLayout {
                     Chk {
                         // "İlk profil", not "öntanımlı profil": profiles have no
                         // default flag, so the autostart takes the first one.
-                        text: "Cihaz bulunduğunda ilk profili başlat";
+                        text: @tr("Cihaz bulunduğunda ilk profili başlat");
                         checked <=> Settings.autostart-profile;
                         toggled => { Settings.changed(); }
                     }
@@ -142,19 +132,19 @@ export component TabSettings inherits VerticalLayout {
                         // Slint draws the icon; closing the window hides it,
                         // and the visible icon is what then keeps the event
                         // loop alive.
-                        text: "Kapatınca sistem tepsisine küçült";
+                        text: @tr("Kapatınca sistem tepsisine küçült");
                         checked <=> Settings.minimize-to-tray;
                         toggled => { Settings.changed(); }
                     }
                 }
                 Row {
                     Chk {
-                        text: "Başlangıçta scrcpy-server sürümünü denetle";
+                        text: @tr("Başlangıçta scrcpy-server sürümünü denetle");
                         checked <=> Settings.check-version;
                         toggled => { Settings.changed(); }
                     }
                     Chk {
-                        text: "Günlüğü diske yaz (~/.config/scrcpy-slint/panel.log)";
+                        text: @tr("Günlüğü diske yaz (~/.config/scrcpy-slint/panel.log)");
                         checked <=> Settings.log-to-disk;
                         toggled => { Settings.changed(); }
                     }

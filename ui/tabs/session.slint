@@ -53,7 +53,7 @@ export component TabSession inherits VerticalLayout {
 
                         if App.session-running: VerticalLayout {
                             alignment: center;
-                            Tag { text: "CANLI"; kind: "accent"; }
+                            Tag { text: @tr("CANLI"); kind: "accent"; }
                         }
 
                         Mono {
@@ -84,9 +84,9 @@ export component TabSession inherits VerticalLayout {
                         alignment: center;
 
                         SectionHead {
-                            kicker: "Oturum yok";
-                            title: "Çalışan oturum yok";
-                            desc: "Alt şeritteki \"Ayarlarınla başlat\" düğmesi geçerli yapılandırmayı seçili cihazda çalıştırır. Cihaz tuşları oturum olmadan da adb üzerinden çalışır.";
+                            kicker: @tr("Oturum yok");
+                            title: @tr("Çalışan oturum yok");
+                            desc: @tr("Alt şeritteki \"Ayarlarınla başlat\" düğmesi geçerli yapılandırmayı seçili cihazda çalıştırır. Cihaz tuşları oturum olmadan da adb üzerinden çalışır.");
                         }
                     }
 
@@ -108,10 +108,10 @@ export component TabSession inherits VerticalLayout {
                         spacing: Theme.s4;
                         alignment: center;
 
-                        Kicker { text: "AYRI PENCERE KİPİ"; }
+                        Kicker { text: @tr("AYRI PENCERE KİPİ"); }
 
                         Text {
-                            text: "Ayna scrcpy penceresinde açık";
+                            text: @tr("Ayna scrcpy penceresinde açık");
                             font-family: Theme.font;
                             font-size: 20px;
                             font-weight: Theme.heading-weight;
@@ -119,7 +119,7 @@ export component TabSession inherits VerticalLayout {
                         }
 
                         Text {
-                            text: "Görüntü panelin dışında, scrcpy'nin kendi SDL penceresinde çalışıyor. Panel kumanda, ölçüm ve kayıt görevlerini üstlenir; kısayollar o pencere odaktayken geçerlidir.";
+                            text: @tr("Görüntü panelin dışında, scrcpy'nin kendi SDL penceresinde çalışıyor. Panel kumanda, ölçüm ve kayıt görevlerini üstlenir; kısayollar o pencere odaktayken geçerlidir.");
                             font-size: 13px;
                             color: Theme.neutral-700;
                             wrap: word-wrap;
@@ -149,7 +149,7 @@ export component TabSession inherits VerticalLayout {
                                     spacing: 4px;
 
                                     Text {
-                                        text: App.session-title + " — ayna";
+                                        text: App.session-title + @tr(" — ayna");
                                         font-family: Theme.mono;
                                         font-size: 12px;
                                         font-weight: 600;
@@ -157,7 +157,7 @@ export component TabSession inherits VerticalLayout {
                                         overflow: elide;
                                     }
                                     Text {
-                                        text: "540 × 1170 · her zaman üstte kapalı";
+                                        text: @tr("540 × 1170 · her zaman üstte kapalı");
                                         font-family: Theme.mono;
                                         font-size: 11px;
                                         color: Theme.neutral-700;
@@ -172,11 +172,11 @@ export component TabSession inherits VerticalLayout {
                                     HorizontalLayout {
                                         spacing: Theme.s2;
                                         Btn {
-                                            text: "Öne getir";
+                                            text: @tr("Öne getir");
                                             clicked => { App.raise-session(); }
                                         }
                                         Btn {
-                                            text: "Panele göm";
+                                            text: @tr("Panele göm");
                                             clicked => {
                                                 Settings.mirror-mode = "embedded";
                                                 Settings.changed();
@@ -210,18 +210,18 @@ export component TabSession inherits VerticalLayout {
                         HorizontalLayout {
                             spacing: Theme.s2;
                             alignment: start;
-                            Btn { text: "Geri"; clicked => { App.device-key("back"); } }
-                            Btn { text: "Ana ekran"; clicked => { App.device-key("home"); } }
-                            Btn { text: "Son uygulamalar"; clicked => { App.device-key("apps"); } }
-                            Btn { text: "Bildirimler"; clicked => { App.device-key("notifications"); } }
+                            Btn { text: @tr("Geri"); clicked => { App.device-key("back"); } }
+                            Btn { text: @tr("Ana ekran"); clicked => { App.device-key("home"); } }
+                            Btn { text: @tr("Son uygulamalar"); clicked => { App.device-key("apps"); } }
+                            Btn { text: @tr("Bildirimler"); clicked => { App.device-key("notifications"); } }
                         }
                         HorizontalLayout {
                             spacing: Theme.s2;
                             alignment: start;
-                            Btn { text: "Ses −"; clicked => { App.device-key("volume-down"); } }
-                            Btn { text: "Ses +"; clicked => { App.device-key("volume-up"); } }
-                            Btn { text: "Güç"; clicked => { App.device-key("power"); } }
-                            Btn { text: "Ekranı döndür"; clicked => { App.device-key("rotate"); } }
+                            Btn { text: @tr("Ses −"); clicked => { App.device-key("volume-down"); } }
+                            Btn { text: @tr("Ses +"); clicked => { App.device-key("volume-up"); } }
+                            Btn { text: @tr("Güç"); clicked => { App.device-key("power"); } }
+                            Btn { text: @tr("Ekranı döndür"); clicked => { App.device-key("rotate"); } }
                         }
                     }
                 }
@@ -244,7 +244,7 @@ export component TabSession inherits VerticalLayout {
                 spacing: Theme.s3;
 
                 // Oturumlar
-                Kicker { text: "OTURUMLAR"; }
+                Kicker { text: @tr("OTURUMLAR"); }
 
                 VerticalLayout {
                     Rectangle { height: 1px; background: Theme.divider; }
@@ -296,7 +296,7 @@ export component TabSession inherits VerticalLayout {
                 }
 
                 // Ölçümler — yalnızca canlı oturumda anlamlı.
-                if App.session-running: Kicker { text: "ÖLÇÜMLER"; }
+                if App.session-running: Kicker { text: @tr("ÖLÇÜMLER"); }
 
                 if App.session-running: VerticalLayout {
                     for m in App.metrics: Rectangle {
@@ -333,7 +333,7 @@ export component TabSession inherits VerticalLayout {
                 }
 
                 // Aktarım
-                Kicker { text: "AKTARIM"; }
+                Kicker { text: @tr("AKTARIM"); }
 
                 // Slint's DataTransfer carries no file paths, so there is
                 // nothing to drop onto. Clicking opens the desktop's file
@@ -351,13 +351,13 @@ export component TabSession inherits VerticalLayout {
                         spacing: 4px;
 
                         Text {
-                            text: "Dosya seçmek için tıklayın";
+                            text: @tr("Dosya seçmek için tıklayın");
                             font-size: 13px;
                             font-weight: 600;
                             color: pick.has-hover ? Theme.accent-700 : Theme.text;
                         }
                         Text {
-                            text: "APK seçilirse kurulur, diğer dosyalar /sdcard/Download altına gönderilir.";
+                            text: @tr("APK seçilirse kurulur, diğer dosyalar /sdcard/Download altına gönderilir.");
                             font-size: 12px;
                             color: Theme.neutral-700;
                             wrap: word-wrap;
@@ -385,24 +385,24 @@ export component TabSession inherits VerticalLayout {
                     spacing: Theme.s2;
 
                     Btn {
-                        text: "Ekran görüntüsü al";
+                        text: @tr("Ekran görüntüsü al");
                         block: true;
                         clicked => { App.screenshot(); }
                     }
                     Btn {
-                        text: "Panoyu cihaza gönder";
+                        text: @tr("Panoyu cihaza gönder");
                         block: true;
                         clicked => { App.send-clipboard(); }
                     }
                     // Tek düğme kaydı açar ve kapatır; etiket --record
                     // durumunu izler.
                     Btn {
-                        text: Cfg.record-enabled ? "Kaydı durdur" : "Kaydı başlat";
+                        text: Cfg.record-enabled ? @tr("Kaydı durdur") : @tr("Kaydı başlat");
                         block: true;
                         clicked => { App.toggle-recording(); }
                     }
                     if App.session-running: Btn {
-                        text: "Oturumu durdur";
+                        text: @tr("Oturumu durdur");
                         kind: "primary";
                         block: true;
                         clicked => { App.stop-session(); }

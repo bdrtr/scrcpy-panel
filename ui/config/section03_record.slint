@@ -13,15 +13,15 @@ export component SectionRecord inherits VerticalLayout {
     spacing: Theme.s4;
 
     SectionHead {
-        kicker: "Bölüm 03";
-        title: "Kayıt";
-        desc: "Kayıt, ayna penceresinden bağımsız çalışır. Süre sınırı dolduğunda dosya düzgün kapatılır; oturum devam eder.";
+        kicker: @tr("Bölüm 03");
+        title: @tr("Kayıt");
+        desc: @tr("Kayıt, ayna penceresinden bağımsız çalışır. Süre sınırı dolduğunda dosya düzgün kapatılır; oturum devam eder.");
     }
 
     Hr {}
 
     Chk {
-        text: "Kaydı etkinleştir · --record";
+        text: @tr("Kaydı etkinleştir · --record");
         strong: true;
         checked <=> Cfg.record-enabled;
         toggled => { Cfg.changed(); }
@@ -32,18 +32,18 @@ export component SectionRecord inherits VerticalLayout {
             // The path takes two of the three columns in the mockup.
             Fld {
                 colspan: 2;
-                label: "Dosya yolu";
+                label: @tr("Dosya yolu");
                 Inp {
                     text <=> Cfg.record-path;
-                    placeholder: "~/Videos/scrcpy/oturum-01.mp4";
+                    placeholder: @tr("~/Videos/scrcpy/oturum-01.mp4");
                     mono: true;
                     edited => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Biçim · --record-format";
+                label: @tr("Biçim · --record-format");
                 Seg {
-                    labels: ["mp4", "mkv", "opus", "wav"];
+                    labels: [@tr("mp4"), @tr("mkv"), @tr("opus"), @tr("wav")];
                     value <=> Cfg.record-format;
                     changed => { Cfg.changed(); }
                 }
@@ -51,7 +51,7 @@ export component SectionRecord inherits VerticalLayout {
         }
         Row {
             Fld {
-                label: "Süre sınırı · --time-limit (s)";
+                label: @tr("Süre sınırı · --time-limit (s)");
                 Inp {
                     text <=> Cfg.time-limit;
                     placeholder: "300";
@@ -60,7 +60,7 @@ export component SectionRecord inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Kayıt yönü · --record-orientation";
+                label: @tr("Kayıt yönü · --record-orientation");
                 Seg {
                     labels: ["0°", "90°", "180°", "270°"];
                     values: ["0", "90", "180", "270"];
@@ -77,12 +77,12 @@ export component SectionRecord inherits VerticalLayout {
     ChkGrp {
         Row {
             Chk {
-                text: "Yalnızca kaydet, gösterme · --no-playback";
+                text: @tr("Yalnızca kaydet, gösterme · --no-playback");
                 checked <=> Cfg.no-playback;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Dosya adına zaman damgası ekle";
+                text: @tr("Dosya adına zaman damgası ekle");
                 checked <=> Cfg.record-timestamp;
                 toggled => { Cfg.changed(); }
             }

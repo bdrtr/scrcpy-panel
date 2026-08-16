@@ -12,9 +12,9 @@ export component SectionNetwork inherits VerticalLayout {
     spacing: Theme.s4;
 
     SectionHead {
-        kicker: "Bölüm 08";
-        title: "Ağ ve ADB";
-        desc: "Yerel port yönlendirme varsayılan yoldur. Uzak bir adb sunucusuna bağlanırken tünel konağı ve portu birlikte verilmelidir.";
+        kicker: @tr("Bölüm 08");
+        title: @tr("Ağ ve ADB");
+        desc: @tr("Yerel port yönlendirme varsayılan yoldur. Uzak bir adb sunucusuna bağlanırken tünel konağı ve portu birlikte verilmelidir.");
     }
 
     Hr {}
@@ -22,16 +22,16 @@ export component SectionNetwork inherits VerticalLayout {
     Grp {
         Row {
             Fld {
-                label: "Hedef seri no · --serial";
+                label: @tr("Hedef seri no · --serial");
                 Inp {
                     text <=> Cfg.serial;
-                    placeholder: "R58M31XABCD";
+                    placeholder: @tr("R58M31XABCD");
                     mono: true;
                     edited => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Yerel port aralığı · --port";
+                label: @tr("Yerel port aralığı · --port");
                 Inp {
                     text <=> Cfg.port;
                     placeholder: "27183";
@@ -40,7 +40,7 @@ export component SectionNetwork inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "TCP/IP adresi · --tcpip";
+                label: @tr("TCP/IP adresi · --tcpip");
                 Inp {
                     text <=> Cfg.tcpip-addr;
                     placeholder: "192.168.1.42:5555";
@@ -51,7 +51,7 @@ export component SectionNetwork inherits VerticalLayout {
         }
         Row {
             Fld {
-                label: "Tünel konağı · --tunnel-host";
+                label: @tr("Tünel konağı · --tunnel-host");
                 Inp {
                     text <=> Cfg.tunnel-host;
                     placeholder: "192.168.1.42";
@@ -60,7 +60,7 @@ export component SectionNetwork inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Tünel portu · --tunnel-port";
+                label: @tr("Tünel portu · --tunnel-port");
                 Inp {
                     text <=> Cfg.tunnel-port;
                     placeholder: "1234";
@@ -69,9 +69,9 @@ export component SectionNetwork inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Sunucu günlük düzeyi · --verbosity";
+                label: @tr("Sunucu günlük düzeyi · --verbosity");
                 Sel {
-                    labels: ["debug", "info", "warn", "error"];
+                    labels: [@tr("debug"), @tr("info"), @tr("warn"), @tr("error")];
                     value <=> Cfg.verbosity;
                     changed => { Cfg.changed(); }
                 }
@@ -84,36 +84,36 @@ export component SectionNetwork inherits VerticalLayout {
     ChkGrp {
         Row {
             Chk {
-                text: "Kablosuz bağlan · --tcpip";
+                text: @tr("Kablosuz bağlan · --tcpip");
                 checked <=> Cfg.tcpip-enabled;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Yönlendirmeyi zorla · --force-adb-forward";
+                text: @tr("Yönlendirmeyi zorla · --force-adb-forward");
                 checked <=> Cfg.force-adb-forward;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Yalnızca USB · --select-usb";
+                text: @tr("Yalnızca USB · --select-usb");
                 checked <=> Cfg.select-usb;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Yalnızca TCP/IP · --select-tcpip";
+                text: @tr("Yalnızca TCP/IP · --select-tcpip");
                 checked <=> Cfg.select-tcpip;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Çıkışta adb'yi durdur · --kill-adb-on-close";
+                text: @tr("Çıkışta adb'yi durdur · --kill-adb-on-close");
                 checked <=> Cfg.kill-adb-on-close;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Temizlik yapma · --no-cleanup";
+                text: @tr("Temizlik yapma · --no-cleanup");
                 checked <=> Cfg.no-cleanup;
                 toggled => { Cfg.changed(); }
             }

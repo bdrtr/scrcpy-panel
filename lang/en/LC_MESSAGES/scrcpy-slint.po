@@ -1,0 +1,775 @@
+# English translation of the scrcpy-slint panel.
+#
+# The source language is Turkish, so msgid is the Turkish string. Anything not
+# listed here falls back to it, which is what technical values (h264, 8M,
+# /dev/video0) and the program's own name want anyway.
+msgid ""
+msgstr ""
+"Project-Id-Version: scrcpy-slint\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Bölüm 01"
+msgstr "Section 01"
+
+msgid "Video"
+msgstr "Video"
+
+msgid "Kaynak, kodek ve görüntü boyutu. Kodlayıcı listesi cihazdan --list-encoders ile çekilir; boş bırakılırsa cihazın varsayılanı kullanılır."
+msgstr "Source, codec and picture size. The encoder list comes from the device through --list-encoders; left empty, the device's own default is used."
+
+msgid "Kaynak · --video-source"
+msgstr "Source · --video-source"
+
+msgid "Ekran"
+msgstr "Screen"
+
+msgid "Kamera"
+msgstr "Camera"
+
+msgid "Kodek · --video-codec"
+msgstr "Codec · --video-codec"
+
+msgid "Kodlayıcı · --video-encoder"
+msgstr "Encoder · --video-encoder"
+
+msgid "Kodlayıcı listesi"
+msgstr "Encoder list"
+
+msgid "Cihazdan seç · --list-encoders"
+msgstr "Pick from the device · --list-encoders"
+
+msgid "Bit hızı · --video-bit-rate"
+msgstr "Bit rate · --video-bit-rate"
+
+msgid "Azami boyut · --max-size"
+msgstr "Maximum size · --max-size"
+
+msgid "Azami kare · --max-fps"
+msgstr "Maximum frame rate · --max-fps"
+
+msgid "Kırpma · --crop"
+msgstr "Crop · --crop"
+
+msgid "Ekran no · --display-id"
+msgstr "Display id · --display-id"
+
+msgid "Ara bellek · --video-buffer (ms)"
+msgstr "Buffer · --video-buffer (ms)"
+
+msgid "Görüntü yönü · --display-orientation"
+msgstr "Display orientation · --display-orientation"
+
+msgid "Aynala"
+msgstr "Mirror"
+
+msgid "Videoyu kapat · --no-video (yalnızca ses/kontrol)"
+msgstr "Turn video off · --no-video (audio and control only)"
+
+msgid "Kare sayacını göster · --print-fps"
+msgstr "Show the frame counter · --print-fps"
+
+msgid "Görüntüyü oynatma · --no-video-playback"
+msgstr "Do not play video · --no-video-playback"
+
+msgid "V4L2 çıkışı · --v4l2-sink (yalnızca Linux)"
+msgstr "V4L2 output · --v4l2-sink (Linux only)"
+
+msgid "V4L2 ara belleği · --v4l2-buffer (ms)"
+msgstr "V4L2 buffer · --v4l2-buffer (ms)"
+
+msgid "Bölüm 02"
+msgstr "Section 02"
+
+msgid "Ses"
+msgstr "Audio"
+
+msgid "Ses aktarımı Android 11 ve üzerini gerektirir. Mikrofon kaynakları çağrı ve ses tanıma senaryolarında ayrı ayrı seçilebilir."
+msgstr "Audio forwarding needs Android 11 or newer. The microphone sources can be chosen separately for call and voice recognition cases."
+
+msgid "Kodek · --audio-codec"
+msgstr "Codec · --audio-codec"
+
+msgid "Kaynak · --audio-source"
+msgstr "Source · --audio-source"
+
+msgid "output — cihaz çıkışı"
+msgstr "output — device output"
+
+msgid "playback — uygulama sesi"
+msgstr "playback — application audio"
+
+msgid "mic — mikrofon"
+msgstr "mic — microphone"
+
+msgid "Kodlayıcı · --audio-encoder"
+msgstr "Encoder · --audio-encoder"
+
+msgid "Bit hızı · --audio-bit-rate"
+msgstr "Bit rate · --audio-bit-rate"
+
+msgid "Ara bellek · --audio-buffer (ms)"
+msgstr "Buffer · --audio-buffer (ms)"
+
+msgid "Çıkış ara belleği · --audio-output-buffer"
+msgstr "Output buffer · --audio-output-buffer"
+
+msgid "Sesi kapat · --no-audio"
+msgstr "Turn audio off · --no-audio"
+
+msgid "Cihazda da çal · --audio-dup"
+msgstr "Play on the device too · --audio-dup"
+
+msgid "Ses başarısızsa çıkış · --require-audio"
+msgstr "Quit if audio fails · --require-audio"
+
+msgid "Sesi oynatma · --no-audio-playback"
+msgstr "Do not play audio · --no-audio-playback"
+
+msgid "Bölüm 03"
+msgstr "Section 03"
+
+msgid "Kayıt"
+msgstr "Recording"
+
+msgid "Kayıt, ayna penceresinden bağımsız çalışır. Süre sınırı dolduğunda dosya düzgün kapatılır; oturum devam eder."
+msgstr "Recording runs independently of the mirror window. When the time limit is reached the file is closed properly and the session carries on."
+
+msgid "Kaydı etkinleştir · --record"
+msgstr "Record · --record"
+
+msgid "Dosya yolu"
+msgstr "File path"
+
+msgid "~/Videos/scrcpy/oturum-01.mp4"
+msgstr "~/Videos/scrcpy/session-01.mp4"
+
+msgid "Biçim · --record-format"
+msgstr "Format · --record-format"
+
+msgid "Süre sınırı · --time-limit (s)"
+msgstr "Time limit · --time-limit (s)"
+
+msgid "Kayıt yönü · --record-orientation"
+msgstr "Recording orientation · --record-orientation"
+
+msgid "Yalnızca kaydet, gösterme · --no-playback"
+msgstr "Record only, do not show · --no-playback"
+
+msgid "Dosya adına zaman damgası ekle"
+msgstr "Add a timestamp to the file name"
+
+msgid "Bölüm 04"
+msgstr "Section 04"
+
+msgid "Kontrol ve giriş"
+msgstr "Control and input"
+
+msgid "UHID modu cihazda fiziksel klavye gibi görünür ve düzeni bilgisayardan alır. AOA yalnızca USB üzerinde çalışır; OTG modunda video hiç aktarılmaz."
+msgstr "UHID mode appears on the device as a physical keyboard and takes its layout from the computer. AOA works over USB only, and in OTG mode no video is forwarded at all."
+
+msgid "Klavye · --keyboard"
+msgstr "Keyboard · --keyboard"
+
+msgid "kapalı"
+msgstr "off"
+
+msgid "Fare · --mouse"
+msgstr "Mouse · --mouse"
+
+msgid "Oyun kumandası · --gamepad"
+msgstr "Gamepad · --gamepad"
+
+msgid "Kısayol tuşu · --shortcut-mod"
+msgstr "Shortcut modifier · --shortcut-mod"
+
+msgid "Sol Alt"
+msgstr "Left Alt"
+
+msgid "Sol Super"
+msgstr "Left Super"
+
+msgid "Sağ Ctrl"
+msgstr "Right Ctrl"
+
+msgid "Sol Ctrl + Sol Alt"
+msgstr "Left Ctrl + Left Alt"
+
+msgid "Klavye düzeni — UHID gelince"
+msgstr "Keyboard layout — once UHID lands"
+
+msgid "UHID henüz yok"
+msgstr "UHID not available yet"
+
+msgid "Pano yönü — henüz yok"
+msgstr "Clipboard direction — not available yet"
+
+msgid "İki yönlü"
+msgstr "Both ways"
+
+msgid "Yalnızca cihaza"
+msgstr "To the device only"
+
+msgid "Yalnızca bilgisayara"
+msgstr "To the computer only"
+
+msgid "OTG modu · --otg (video yok, yalnızca giriş)"
+msgstr "OTG mode · --otg (input only, no video)"
+
+msgid "Salt izleme · --no-control"
+msgstr "Watch only · --no-control"
+
+msgid "Pano eşitlemesini kapat · --no-clipboard-autosync"
+msgstr "Turn clipboard sync off · --no-clipboard-autosync"
+
+msgid "Tüm fare tuşlarını ilet · --forward-all-clicks"
+msgstr "Forward every mouse button · --forward-all-clicks"
+
+msgid "Eski yapıştırma · --legacy-paste"
+msgstr "Legacy paste · --legacy-paste"
+
+msgid "Metin olayını yeğle · --prefer-text"
+msgstr "Prefer text events · --prefer-text"
+
+msgid "Ham tuş olayları · --raw-key-events"
+msgstr "Raw key events · --raw-key-events"
+
+msgid "Fare tuşu eşlemesi · --mouse-bind=++++"
+msgstr "Mouse button mapping · --mouse-bind=++++"
+
+msgid "Bölüm 05"
+msgstr "Section 05"
+
+msgid "Sanal ekran"
+msgstr "Virtual display"
+
+msgid "Android 11+ üzerinde cihazın kendi ekranına dokunmadan ayrı bir ekran oluşturur. Belirtilen uygulama doğrudan bu ekranda açılır; kapanışta içeriğin yok edilip edilmeyeceği seçilebilir."
+msgstr "On Android 11+ this creates a separate display without touching the device's own screen. The named application opens straight onto it, and whether its content is destroyed on close is up to you."
+
+msgid "Yeni sanal ekran oluştur · --new-display"
+msgstr "Create a new virtual display · --new-display"
+
+msgid "Çözünürlük / yoğunluk"
+msgstr "Resolution / density"
+
+msgid "Başlatılacak uygulama · --start-app"
+msgstr "Application to start · --start-app"
+
+msgid "Uygulama listesi"
+msgstr "Application list"
+
+msgid "Cihazdan seç · --list-apps"
+msgstr "Pick from the device · --list-apps"
+
+msgid "Kapanışta içeriği koru · --no-vd-destroy-content"
+msgstr "Keep the content on close · --no-vd-destroy-content"
+
+msgid "Sistem çubuklarını gizle · --no-vd-system-decorations"
+msgstr "Hide the system bars · --no-vd-system-decorations"
+
+msgid "Bölüm 06"
+msgstr "Section 06"
+
+msgid "Kamera aktarımı Android 12+ gerektirir ve video kaynağı olarak ekranın yerine geçer. Boyut yerine en-boy oranı verilirse cihaz en yakın desteklenen çözünürlüğü seçer."
+msgstr "Camera forwarding needs Android 12+ and replaces the screen as the video source. Given an aspect ratio instead of a size, the device picks the nearest resolution it supports."
+
+msgid "Yön · --camera-facing"
+msgstr "Facing · --camera-facing"
+
+msgid "arka"
+msgstr "back"
+
+msgid "ön"
+msgstr "front"
+
+msgid "harici"
+msgstr "external"
+
+msgid "Kamera no · --camera-id"
+msgstr "Camera id · --camera-id"
+
+msgid "Boyut · --camera-size"
+msgstr "Size · --camera-size"
+
+msgid "En-boy oranı · --camera-ar"
+msgstr "Aspect ratio · --camera-ar"
+
+msgid "Kare hızı · --camera-fps"
+msgstr "Frame rate · --camera-fps"
+
+msgid "Kamera listesi"
+msgstr "Camera list"
+
+msgid "Cihazdan seç · --list-cameras"
+msgstr "Pick from the device · --list-cameras"
+
+msgid "Yüksek hız kipi · --camera-high-speed"
+msgstr "High speed mode · --camera-high-speed"
+
+msgid "Bölüm 07"
+msgstr "Section 07"
+
+msgid "Pencere ve ekran"
+msgstr "Window and screen"
+
+msgid "Ayna penceresinin yerleşimi ve cihazın güç davranışı. Konum ve boyut alanları boş bırakılırsa pencere cihaz oranına göre açılır."
+msgstr "Where the mirror window sits, and how the device behaves about power. Left empty, the position and size fields let the window open at the device's own aspect ratio."
+
+msgid "Pencere başlığı · --window-title"
+msgstr "Window title · --window-title"
+
+msgid "Döndürme · --orientation"
+msgstr "Rotation · --orientation"
+
+msgid "X · --window-x"
+msgstr "X · --window-x"
+
+msgid "Y · --window-y"
+msgstr "Y · --window-y"
+
+msgid "Genişlik · --window-width"
+msgstr "Width · --window-width"
+
+msgid "Yükseklik · --window-height"
+msgstr "Height · --window-height"
+
+msgid "Tam ekran · --fullscreen"
+msgstr "Fullscreen · --fullscreen"
+
+msgid "Her zaman üstte · --always-on-top"
+msgstr "Always on top · --always-on-top"
+
+msgid "Kenarsız · --window-borderless"
+msgstr "Borderless · --window-borderless"
+
+msgid "Cihaz ekranını kapat · --turn-screen-off"
+msgstr "Turn the device screen off · --turn-screen-off"
+
+msgid "Cihazı uyanık tut · --stay-awake"
+msgstr "Keep the device awake · --stay-awake"
+
+msgid "Dokunuşları göster · --show-touches"
+msgstr "Show touches · --show-touches"
+
+msgid "Ekran koruyucuyu engelle · --disable-screensaver"
+msgstr "Inhibit the screensaver · --disable-screensaver"
+
+msgid "Kapanışta ekranı kapat · --power-off-on-close"
+msgstr "Turn the screen off on close · --power-off-on-close"
+
+msgid "Başlarken açma · --no-power-on"
+msgstr "Do not power on at start · --no-power-on"
+
+msgid "Mipmap kapalı · --no-mipmaps"
+msgstr "Mipmaps off · --no-mipmaps"
+
+msgid "Bölüm 08"
+msgstr "Section 08"
+
+msgid "Ağ ve ADB"
+msgstr "Network and ADB"
+
+msgid "Yerel port yönlendirme varsayılan yoldur. Uzak bir adb sunucusuna bağlanırken tünel konağı ve portu birlikte verilmelidir."
+msgstr "Local port forwarding is the default path. Reaching a remote adb server needs the tunnel host and port given together."
+
+msgid "Hedef seri no · --serial"
+msgstr "Target serial · --serial"
+
+msgid "Yerel port aralığı · --port"
+msgstr "Local port range · --port"
+
+msgid "TCP/IP adresi · --tcpip"
+msgstr "TCP/IP address · --tcpip"
+
+msgid "Tünel konağı · --tunnel-host"
+msgstr "Tunnel host · --tunnel-host"
+
+msgid "Tünel portu · --tunnel-port"
+msgstr "Tunnel port · --tunnel-port"
+
+msgid "Sunucu günlük düzeyi · --verbosity"
+msgstr "Server log level · --verbosity"
+
+msgid "Kablosuz bağlan · --tcpip"
+msgstr "Connect wirelessly · --tcpip"
+
+msgid "Yönlendirmeyi zorla · --force-adb-forward"
+msgstr "Force forward mode · --force-adb-forward"
+
+msgid "Yalnızca USB · --select-usb"
+msgstr "USB only · --select-usb"
+
+msgid "Yalnızca TCP/IP · --select-tcpip"
+msgstr "TCP/IP only · --select-tcpip"
+
+msgid "Çıkışta adb'yi durdur · --kill-adb-on-close"
+msgstr "Kill adb on exit · --kill-adb-on-close"
+
+msgid "Temizlik yapma · --no-cleanup"
+msgstr "Skip cleanup · --no-cleanup"
+
+msgid "Görüntü bekleniyor…"
+msgstr "Waiting for a picture…"
+
+msgid "scrcpy panel"
+msgstr "scrcpy panel"
+
+msgid "SCRCPY PANEL"
+msgstr "SCRCPY PANEL"
+
+msgid "Cihazlar"
+msgstr "Devices"
+
+msgid "Yapılandırma"
+msgstr "Configuration"
+
+msgid "Oturum"
+msgstr "Session"
+
+msgid "Profiller"
+msgstr "Profiles"
+
+msgid "Günlük"
+msgstr "Log"
+
+msgid "Kısayollar"
+msgstr "Shortcuts"
+
+msgid "Ayarlar"
+msgstr "Settings"
+
+msgid "BÖLÜMLER"
+msgstr "SECTIONS"
+
+msgid "01 · Video"
+msgstr "01 · Video"
+
+msgid "02 · Ses"
+msgstr "02 · Audio"
+
+msgid "03 · Kayıt"
+msgstr "03 · Recording"
+
+msgid "04 · Kontrol ve giriş"
+msgstr "04 · Control and input"
+
+msgid "05 · Sanal ekran"
+msgstr "05 · Virtual display"
+
+msgid "06 · Kamera"
+msgstr "06 · Camera"
+
+msgid "07 · Pencere ve ekran"
+msgstr "07 · Window and screen"
+
+msgid "08 · Ağ ve ADB"
+msgstr "08 · Network and ADB"
+
+msgid "ÖZET"
+msgstr "SUMMARY"
+
+msgid " bayrak etkin"
+msgstr " flags on"
+
+msgid "Varsayılanlara dön"
+msgstr "Back to defaults"
+
+msgid "OLUŞAN KOMUT"
+msgstr "RESULTING COMMAND"
+
+msgid " bayrak"
+msgstr " flags"
+
+msgid "Kopyala"
+msgstr "Copy"
+
+msgid "Komutu gizle"
+msgstr "Hide the command"
+
+msgid "Komutu göster"
+msgstr "Show the command"
+
+msgid "Profil olarak kaydet"
+msgstr "Save as a profile"
+
+msgid "Oturumu durdur"
+msgstr "Stop the session"
+
+msgid " cihazda başlat"
+msgstr " devices"
+
+msgid "Ayarlarınla başlat"
+msgstr "Start with your settings"
+
+msgid "adb —"
+msgstr "adb —"
+
+msgid "cihaz seçilmedi"
+msgstr "no device selected"
+
+msgid "Bağlı donanım"
+msgstr "Connected hardware"
+
+msgid "USB ve kablosuz cihazlar adb devices -l ile listelenir. Birden fazla cihaz seçilebilir; aynı yapılandırma hepsinde aynı anda başlatılır ve alt şeritteki komut bir döngüye dönüşür."
+msgstr "USB and wireless devices are listed with adb devices -l. More than one can be ticked; the same configuration then starts on all of them at once and the command in the bottom bar turns into a loop."
+
+msgid "CİHAZ"
+msgstr "DEVICE"
+
+msgid "SERİ NO"
+msgstr "SERIAL"
+
+msgid "BAĞLANTI"
+msgstr "CONNECTION"
+
+msgid "ANDROID"
+msgstr "ANDROID"
+
+msgid "EKRAN"
+msgstr "SCREEN"
+
+msgid "DURUM"
+msgstr "STATE"
+
+msgid "İŞLEM"
+msgstr "ACTION"
+
+msgid "Boş durum"
+msgstr "Empty state"
+
+msgid "Bağlı cihaz yok"
+msgstr "No device connected"
+
+msgid "USB kablosunu takın ve cihazda USB hata ayıklamayı onaylayın. Kablosuz bir cihaz için aşağıdan adres girin."
+msgstr "Plug the USB cable in and confirm USB debugging on the device. For a wireless device, enter its address below."
+
+msgid "Yeniden tara"
+msgstr "Scan again"
+
+msgid "TCP/IP ile bağlan"
+msgstr "Connect over TCP/IP"
+
+msgid "Kurulum yardımı"
+msgstr "Setup help"
+
+msgid "Günlüğü aç"
+msgstr "Open the log"
+
+msgid "Kablosuz"
+msgstr "Wireless"
+
+msgid "Adres:port (--tcpip)"
+msgstr "Address:port (--tcpip)"
+
+msgid "Bağlan"
+msgstr "Connect"
+
+msgid "USB'den geçiş için adb tcpip 5555 otomatik çalıştırılır."
+msgstr "Switching over from USB runs adb tcpip 5555 for you."
+
+msgid "Android 11+"
+msgstr "Android 11+"
+
+msgid "Kablosuz eşleştirme"
+msgstr "Wireless pairing"
+
+msgid "Eşleştirme adresi"
+msgstr "Pairing address"
+
+msgid "Kod"
+msgstr "Code"
+
+msgid "Eşleştir"
+msgstr "Pair"
+
+msgid "Geliştirici seçenekleri → Kablosuz hata ayıklama → Cihazı kodla eşleştir."
+msgstr "Developer options → Wireless debugging → Pair device with pairing code."
+
+msgid "Süreç çıktısı"
+msgstr "Process output"
+
+msgid "Tümü"
+msgstr "All"
+
+msgid "Bilgi"
+msgstr "Info"
+
+msgid "Uyarı"
+msgstr "Warning"
+
+msgid "Hata"
+msgstr "Error"
+
+msgid "Temizle"
+msgstr "Clear"
+
+msgid "Klavye"
+msgstr "Keyboard"
+
+msgid "MOD tuşu Kontrol bölümünden değiştirilir; şu an "
+msgstr "The MOD key is set in the Control section; right now it is "
+
+msgid ". Kısayollar ayna penceresi odaktayken geçerlidir, OTG modunda devre dışıdır."
+msgstr ". Shortcuts apply while the mirror window has focus, and are off in OTG mode."
+
+msgid "Kayıtlı yapılandırmalar"
+msgstr "Saved configurations"
+
+msgid "Her profil tam bir bayrak kümesidir. Bir profili uygulamak Yapılandırma sekmesindeki tüm alanları yeniden yazar; cihaza sabitlenen profiller o cihaz bağlandığında öntanımlı olur."
+msgstr "A profile is a complete set of flags, not a difference. Applying one rewrites every field in the Configuration tab; a profile pinned to a device becomes its default when that device connects."
+
+msgid "Geçerli ayarları kaydet"
+msgstr "Save the current settings"
+
+msgid "Uygula"
+msgstr "Apply"
+
+msgid "Düzenle"
+msgstr "Edit"
+
+msgid "Sil"
+msgstr "Delete"
+
+msgid "CANLI"
+msgstr "LIVE"
+
+msgid "Oturum yok"
+msgstr "No session"
+
+msgid "Çalışan oturum yok"
+msgstr "No session running"
+
+msgid "Alt şeritteki \"Ayarlarınla başlat\" düğmesi geçerli yapılandırmayı seçili cihazda çalıştırır. Cihaz tuşları oturum olmadan da adb üzerinden çalışır."
+msgstr "The \"Start with your settings\" button in the bottom bar runs the current configuration on the selected device. The device keys work through adb even without a session."
+
+msgid "AYRI PENCERE KİPİ"
+msgstr "SEPARATE WINDOW MODE"
+
+msgid "Ayna scrcpy penceresinde açık"
+msgstr "The mirror is open in a scrcpy window"
+
+msgid "Görüntü panelin dışında, scrcpy'nin kendi SDL penceresinde çalışıyor. Panel kumanda, ölçüm ve kayıt görevlerini üstlenir; kısayollar o pencere odaktayken geçerlidir."
+msgstr "The picture is outside the panel, in scrcpy's own window. The panel takes over control, metrics and recording; shortcuts apply while that window has focus."
+
+msgid " — ayna"
+msgstr " — mirror"
+
+msgid "540 × 1170 · her zaman üstte kapalı"
+msgstr "540 × 1170 · always on top off"
+
+msgid "Öne getir"
+msgstr "Bring to front"
+
+msgid "Panele göm"
+msgstr "Embed in the panel"
+
+msgid "Geri"
+msgstr "Back"
+
+msgid "Ana ekran"
+msgstr "Home"
+
+msgid "Son uygulamalar"
+msgstr "Recents"
+
+msgid "Bildirimler"
+msgstr "Notifications"
+
+msgid "Ses −"
+msgstr "Volume −"
+
+msgid "Ses +"
+msgstr "Volume +"
+
+msgid "Güç"
+msgstr "Power"
+
+msgid "Ekranı döndür"
+msgstr "Rotate the screen"
+
+msgid "OTURUMLAR"
+msgstr "SESSIONS"
+
+msgid "ÖLÇÜMLER"
+msgstr "METRICS"
+
+msgid "AKTARIM"
+msgstr "TRANSFER"
+
+msgid "Dosya seçmek için tıklayın"
+msgstr "Click to choose a file"
+
+msgid "APK seçilirse kurulur, diğer dosyalar /sdcard/Download altına gönderilir."
+msgstr "An APK is installed; anything else is pushed to /sdcard/Download."
+
+msgid "Ekran görüntüsü al"
+msgstr "Take a screenshot"
+
+msgid "Panoyu cihaza gönder"
+msgstr "Send the clipboard to the device"
+
+msgid "Kaydı durdur"
+msgstr "Stop recording"
+
+msgid "Kaydı başlat"
+msgstr "Start recording"
+
+msgid "Uygulama"
+msgstr "Application"
+
+msgid "Bu değerler yapılandırma dosyasına yazılır ve tüm profiller için geçerlidir."
+msgstr "These go into the configuration file and apply to every profile."
+
+msgid "adb çalıştırılabiliri"
+msgstr "adb executable"
+
+msgid "Sunucu sürümü"
+msgstr "Server version"
+
+msgid "adb sunucu portu"
+msgstr "adb server port"
+
+msgid "Arayüz dili"
+msgstr "Interface language"
+
+msgid "Ayna penceresi"
+msgstr "Mirror window"
+
+msgid "Panele gömülü"
+msgstr "Embedded in the panel"
+
+msgid "Ayrı pencere"
+msgstr "Separate window"
+
+msgid "Kayıt klasörü"
+msgstr "Recording folder"
+
+msgid "Ekran görüntüsü klasörü"
+msgstr "Screenshot folder"
+
+msgid "Cihaz bulunduğunda ilk profili başlat"
+msgstr "Start the first profile when a device appears"
+
+msgid "Kapatınca sistem tepsisine küçült"
+msgstr "Minimise to the system tray on close"
+
+msgid "Başlangıçta scrcpy-server sürümünü denetle"
+msgstr "Check the scrcpy-server version at startup"
+
+msgid "Günlüğü diske yaz (~/.config/scrcpy-slint/panel.log)"
+msgstr "Write the log to disk (~/.config/scrcpy-slint/panel.log)"
+
+msgid "scrcpy-slint — "
+msgstr "scrcpy-slint — "
+
+msgid "Paneli göster"
+msgstr "Show the panel"
+
+msgid "Oturumu başlat"
+msgstr "Start a session"
+
+msgid "Çık"
+msgstr "Quit"

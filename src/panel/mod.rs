@@ -162,6 +162,7 @@ pub fn run(opts: &Options) -> Result<()> {
     // The stored adb path and port have to be in hand before anything runs adb,
     // and `adb_status` is the first thing that does.
     load_settings(&window);
+    apply_language(&window);
     refresh_adb_settings(&window);
     window.global::<App>().set_adb_status(adb_status().into());
 
@@ -667,6 +668,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>) {
                 // this, an edited path reached the panel's commands but not an
                 // embedded session's until a restart.
                 export_adb_env();
+                apply_language(&window);
                 with_panel(|panel| sync_tray_presence(&window, panel));
             }
         });
@@ -1944,6 +1946,19 @@ fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
         }
         failure::Remedy::ListEncoders => window.global::<App>().invoke_list_encoders(),
         failure::Remedy::OpenSettings => window.global::<App>().set_tab("settings".into()),
+    }
+}
+
+/// Switch the interface to the language the settings name.
+///
+/// The strings are bundled into the binary at build time, so this is a call
+/// rather than a restart: Slint re-evaluates every `@tr` binding that depends
+/// on the selected language.
+fn apply_language(window: &PanelWindow) {
+    let language = window.global::<Settings>().get_language().to_string();
+    match slint::select_bundled_translation(&language) {
+        Ok(()) => log::info!("Arayüz dili: {language}"),
+        Err(e) => log::warn!("Arayüz dili {language} seçilemedi: {e}"),
     }
 }
 

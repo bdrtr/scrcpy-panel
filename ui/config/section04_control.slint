@@ -12,9 +12,9 @@ export component SectionControl inherits VerticalLayout {
     spacing: Theme.s4;
 
     SectionHead {
-        kicker: "Bölüm 04";
-        title: "Kontrol ve giriş";
-        desc: "UHID modu cihazda fiziksel klavye gibi görünür ve düzeni bilgisayardan alır. AOA yalnızca USB üzerinde çalışır; OTG modunda video hiç aktarılmaz.";
+        kicker: @tr("Bölüm 04");
+        title: @tr("Kontrol ve giriş");
+        desc: @tr("UHID modu cihazda fiziksel klavye gibi görünür ve düzeni bilgisayardan alır. AOA yalnızca USB üzerinde çalışır; OTG modunda video hiç aktarılmaz.");
     }
 
     Hr {}
@@ -22,27 +22,27 @@ export component SectionControl inherits VerticalLayout {
     Grp {
         Row {
             Fld {
-                label: "Klavye · --keyboard";
+                label: @tr("Klavye · --keyboard");
                 Seg {
-                    labels: ["sdk", "uhid", "aoa", "kapalı"];
+                    labels: [@tr("sdk"), @tr("uhid"), @tr("aoa"), @tr("kapalı")];
                     values: ["sdk", "uhid", "aoa", "disabled"];
                     value <=> Cfg.keyboard;
                     changed => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Fare · --mouse";
+                label: @tr("Fare · --mouse");
                 Seg {
-                    labels: ["sdk", "uhid", "aoa", "kapalı"];
+                    labels: [@tr("sdk"), @tr("uhid"), @tr("aoa"), @tr("kapalı")];
                     values: ["sdk", "uhid", "aoa", "disabled"];
                     value <=> Cfg.mouse;
                     changed => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Oyun kumandası · --gamepad";
+                label: @tr("Oyun kumandası · --gamepad");
                 Seg {
-                    labels: ["kapalı", "uhid", "aoa"];
+                    labels: [@tr("kapalı"), @tr("uhid"), @tr("aoa")];
                     values: ["disabled", "uhid", "aoa"];
                     value <=> Cfg.gamepad;
                     changed => { Cfg.changed(); }
@@ -51,9 +51,9 @@ export component SectionControl inherits VerticalLayout {
         }
         Row {
             Fld {
-                label: "Kısayol tuşu · --shortcut-mod";
+                label: @tr("Kısayol tuşu · --shortcut-mod");
                 Sel {
-                    labels: ["Sol Alt", "Sol Super", "Sağ Ctrl", "Sol Ctrl + Sol Alt"];
+                    labels: [@tr("Sol Alt"), @tr("Sol Super"), @tr("Sağ Ctrl"), @tr("Sol Ctrl + Sol Alt")];
                     values: ["lalt", "lsuper", "rctrl", "lctrl+lalt"];
                     value <=> Cfg.shortcut-mod;
                     changed => { Cfg.changed(); }
@@ -63,18 +63,18 @@ export component SectionControl inherits VerticalLayout {
             // them, but nothing reads them yet. An enabled control that does
             // nothing is worse than one that says it does nothing.
             Fld {
-                label: "Klavye düzeni — UHID gelince";
+                label: @tr("Klavye düzeni — UHID gelince");
                 Inp {
                     text <=> Cfg.key-layout;
-                    placeholder: "UHID henüz yok";
+                    placeholder: @tr("UHID henüz yok");
                     mono: true;
                     enabled: false;
                 }
             }
             Fld {
-                label: "Pano yönü — henüz yok";
+                label: @tr("Pano yönü — henüz yok");
                 Sel {
-                    labels: ["İki yönlü", "Yalnızca cihaza", "Yalnızca bilgisayara"];
+                    labels: [@tr("İki yönlü"), @tr("Yalnızca cihaza"), @tr("Yalnızca bilgisayara")];
                     values: ["both", "toDevice", "toPc"];
                     value <=> Cfg.clipboard-direction;
                 }
@@ -87,48 +87,48 @@ export component SectionControl inherits VerticalLayout {
     ChkGrp {
         Row {
             Chk {
-                text: "OTG modu · --otg (video yok, yalnızca giriş)";
+                text: @tr("OTG modu · --otg (video yok, yalnızca giriş)");
                 checked <=> Cfg.otg;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Salt izleme · --no-control";
+                text: @tr("Salt izleme · --no-control");
                 checked <=> Cfg.no-control;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Pano eşitlemesini kapat · --no-clipboard-autosync";
+                text: @tr("Pano eşitlemesini kapat · --no-clipboard-autosync");
                 checked <=> Cfg.no-clipboard-autosync;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Tüm fare tuşlarını ilet · --forward-all-clicks";
+                text: @tr("Tüm fare tuşlarını ilet · --forward-all-clicks");
                 checked <=> Cfg.forward-all-clicks;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Eski yapıştırma · --legacy-paste";
+                text: @tr("Eski yapıştırma · --legacy-paste");
                 checked <=> Cfg.legacy-paste;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Metin olayını yeğle · --prefer-text";
+                text: @tr("Metin olayını yeğle · --prefer-text");
                 checked <=> Cfg.prefer-text;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Ham tuş olayları · --raw-key-events";
+                text: @tr("Ham tuş olayları · --raw-key-events");
                 checked <=> Cfg.raw-key-events;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Fare tuşu eşlemesi · --mouse-bind=++++";
+                text: @tr("Fare tuşu eşlemesi · --mouse-bind=++++");
                 checked <=> Cfg.mouse-bind-enabled;
                 toggled => { Cfg.changed(); }
             }

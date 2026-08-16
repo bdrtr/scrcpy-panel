@@ -177,8 +177,8 @@ export global App {
     in-out property <string> section: "video";
 
     // Chrome
-    in property <string> adb-status: "adb —";
-    in property <string> selection-label: "cihaz seçilmedi";
+    in property <string> adb-status: @tr("adb —");
+    in property <string> selection-label: @tr("cihaz seçilmedi");
     /// How many devices are ticked; the start button says so when it is more
     /// than one.
     in property <int> selected-count;

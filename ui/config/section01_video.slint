@@ -12,9 +12,9 @@ export component SectionVideo inherits VerticalLayout {
     spacing: Theme.s4;
 
     SectionHead {
-        kicker: "Bölüm 01";
-        title: "Video";
-        desc: "Kaynak, kodek ve görüntü boyutu. Kodlayıcı listesi cihazdan --list-encoders ile çekilir; boş bırakılırsa cihazın varsayılanı kullanılır.";
+        kicker: @tr("Bölüm 01");
+        title: @tr("Video");
+        desc: @tr("Kaynak, kodek ve görüntü boyutu. Kodlayıcı listesi cihazdan --list-encoders ile çekilir; boş bırakılırsa cihazın varsayılanı kullanılır.");
     }
 
     Hr {}
@@ -22,35 +22,35 @@ export component SectionVideo inherits VerticalLayout {
     Grp {
         Row {
             Fld {
-                label: "Kaynak · --video-source";
+                label: @tr("Kaynak · --video-source");
                 Seg {
-                    labels: ["Ekran", "Kamera"];
+                    labels: [@tr("Ekran"), @tr("Kamera")];
                     values: ["display", "camera"];
                     value <=> Cfg.video-source;
                     changed => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Kodek · --video-codec";
+                label: @tr("Kodek · --video-codec");
                 Seg {
-                    labels: ["h264", "h265", "av1"];
+                    labels: [@tr("h264"), @tr("h265"), @tr("av1")];
                     value <=> Cfg.video-codec;
                     changed => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Kodlayıcı · --video-encoder";
+                label: @tr("Kodlayıcı · --video-encoder");
                 Inp {
                     text <=> Cfg.video-encoder;
-                    placeholder: "c2.android.avc.encoder";
+                    placeholder: @tr("c2.android.avc.encoder");
                     mono: true;
                     edited => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Kodlayıcı listesi";
+                label: @tr("Kodlayıcı listesi");
                 Btn {
-                    text: "Cihazdan seç · --list-encoders";
+                    text: @tr("Cihazdan seç · --list-encoders");
                     height: 36px;
                     block: true;
                     clicked => { App.list-encoders(); }
@@ -59,16 +59,16 @@ export component SectionVideo inherits VerticalLayout {
         }
         Row {
             Fld {
-                label: "Bit hızı · --video-bit-rate";
+                label: @tr("Bit hızı · --video-bit-rate");
                 Inp {
                     text <=> Cfg.video-bit-rate;
-                    placeholder: "8M";
+                    placeholder: @tr("8M");
                     mono: true;
                     edited => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Azami boyut · --max-size";
+                label: @tr("Azami boyut · --max-size");
                 Inp {
                     text <=> Cfg.max-size;
                     placeholder: "1920";
@@ -77,7 +77,7 @@ export component SectionVideo inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Azami kare · --max-fps";
+                label: @tr("Azami kare · --max-fps");
                 Inp {
                     text <=> Cfg.max-fps;
                     placeholder: "60";
@@ -88,7 +88,7 @@ export component SectionVideo inherits VerticalLayout {
         }
         Row {
             Fld {
-                label: "Kırpma · --crop";
+                label: @tr("Kırpma · --crop");
                 Inp {
                     text <=> Cfg.crop;
                     placeholder: "1224:1440:0:0";
@@ -97,7 +97,7 @@ export component SectionVideo inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Ekran no · --display-id";
+                label: @tr("Ekran no · --display-id");
                 Inp {
                     text <=> Cfg.display-id;
                     placeholder: "0";
@@ -106,7 +106,7 @@ export component SectionVideo inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Ara bellek · --video-buffer (ms)";
+                label: @tr("Ara bellek · --video-buffer (ms)");
                 Inp {
                     text <=> Cfg.video-buffer;
                     placeholder: "0";
@@ -118,11 +118,11 @@ export component SectionVideo inherits VerticalLayout {
     }
 
     Fld {
-        label: "Görüntü yönü · --display-orientation";
+        label: @tr("Görüntü yönü · --display-orientation");
         HorizontalLayout {
             alignment: start;
             Seg {
-                labels: ["0°", "90°", "180°", "270°", "Aynala"];
+                labels: ["0°", "90°", "180°", "270°", @tr("Aynala")];
                 values: ["0", "90", "180", "270", "flip0"];
                 value <=> Cfg.display-orientation;
                 changed => { Cfg.changed(); }
@@ -135,19 +135,19 @@ export component SectionVideo inherits VerticalLayout {
     ChkGrp {
         Row {
             Chk {
-                text: "Videoyu kapat · --no-video (yalnızca ses/kontrol)";
+                text: @tr("Videoyu kapat · --no-video (yalnızca ses/kontrol)");
                 checked <=> Cfg.no-video;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Kare sayacını göster · --print-fps";
+                text: @tr("Kare sayacını göster · --print-fps");
                 checked <=> Cfg.print-fps;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Görüntüyü oynatma · --no-video-playback";
+                text: @tr("Görüntüyü oynatma · --no-video-playback");
                 checked <=> Cfg.no-video-playback;
                 toggled => { Cfg.changed(); }
             }
@@ -160,16 +160,16 @@ export component SectionVideo inherits VerticalLayout {
             // The sink path takes two of the three columns in the mockup.
             Fld {
                 colspan: 2;
-                label: "V4L2 çıkışı · --v4l2-sink (yalnızca Linux)";
+                label: @tr("V4L2 çıkışı · --v4l2-sink (yalnızca Linux)");
                 Inp {
                     text <=> Cfg.v4l2-sink;
-                    placeholder: "/dev/video0";
+                    placeholder: @tr("/dev/video0");
                     mono: true;
                     edited => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "V4L2 ara belleği · --v4l2-buffer (ms)";
+                label: @tr("V4L2 ara belleği · --v4l2-buffer (ms)");
                 Inp {
                     text <=> Cfg.v4l2-buffer;
                     placeholder: "0";

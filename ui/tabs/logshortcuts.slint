@@ -28,25 +28,25 @@ export component TabLog inherits VerticalLayout {
         spacing: Theme.s4;
 
         SectionHead {
-            kicker: "Süreç çıktısı";
-            title: "Günlük";
+            kicker: @tr("Süreç çıktısı");
+            title: @tr("Günlük");
         }
 
         Rectangle { horizontal-stretch: 1; }
 
         Seg {
             y: parent.height - self.height;
-            labels: ["Tümü", "Bilgi", "Uyarı", "Hata"];
+            labels: [@tr("Tümü"), @tr("Bilgi"), @tr("Uyarı"), @tr("Hata")];
             values: ["all", "info", "warn", "error"];
             value <=> App.log-filter;
         }
         Btn {
-            text: "Kopyala";
+            text: @tr("Kopyala");
             y: parent.height - self.height;
             clicked => { App.copy-log(); }
         }
         Btn {
-            text: "Temizle";
+            text: @tr("Temizle");
             y: parent.height - self.height;
             clicked => { App.clear-log(); }
         }
@@ -113,12 +113,12 @@ export component TabShortcuts inherits VerticalLayout {
     // The mockup prints the current MOD key inside the paragraph; it is the
     // Kontrol section's --shortcut-mod, spelled the way that select spells it.
     property <string> mod-label: Cfg.shortcut-mod == "lsuper"
-        ? "Sol Super"
+        ? @tr("Sol Super")
         : Cfg.shortcut-mod == "rctrl"
-            ? "Sağ Ctrl"
+            ? @tr("Sağ Ctrl")
             : Cfg.shortcut-mod == "lctrl+lalt"
-                ? "Sol Ctrl + Sol Alt"
-                : "Sol Alt";
+                ? @tr("Sol Ctrl + Sol Alt")
+                : @tr("Sol Alt");
 
     padding: Theme.s6;
 
@@ -135,13 +135,13 @@ export component TabShortcuts inherits VerticalLayout {
                 spacing: 6px;
 
                 SectionHead {
-                    kicker: "Klavye";
-                    title: "Kısayollar";
+                    kicker: @tr("Klavye");
+                    title: @tr("Kısayollar");
                 }
 
                 HorizontalLayout {
                     Text {
-                        text: "MOD tuşu Kontrol bölümünden değiştirilir; şu an ";
+                        text: @tr("MOD tuşu Kontrol bölümünden değiştirilir; şu an ");
                         font-size: 13px;
                         color: Theme.neutral-700;
                         vertical-alignment: top;
@@ -154,7 +154,7 @@ export component TabShortcuts inherits VerticalLayout {
                         vertical-alignment: top;
                     }
                     Text {
-                        text: ". Kısayollar ayna penceresi odaktayken geçerlidir, OTG modunda devre dışıdır.";
+                        text: @tr(". Kısayollar ayna penceresi odaktayken geçerlidir, OTG modunda devre dışıdır.");
                         font-size: 13px;
                         color: Theme.neutral-700;
                         horizontal-stretch: 1;

@@ -12,9 +12,9 @@ export component SectionAudio inherits VerticalLayout {
     spacing: Theme.s4;
 
     SectionHead {
-        kicker: "Bölüm 02";
-        title: "Ses";
-        desc: "Ses aktarımı Android 11 ve üzerini gerektirir. Mikrofon kaynakları çağrı ve ses tanıma senaryolarında ayrı ayrı seçilebilir.";
+        kicker: @tr("Bölüm 02");
+        title: @tr("Ses");
+        desc: @tr("Ses aktarımı Android 11 ve üzerini gerektirir. Mikrofon kaynakları çağrı ve ses tanıma senaryolarında ayrı ayrı seçilebilir.");
     }
 
     Hr {}
@@ -22,24 +22,24 @@ export component SectionAudio inherits VerticalLayout {
     Grp {
         Row {
             Fld {
-                label: "Kodek · --audio-codec";
+                label: @tr("Kodek · --audio-codec");
                 Seg {
-                    labels: ["opus", "aac", "flac", "raw"];
+                    labels: [@tr("opus"), @tr("aac"), @tr("flac"), @tr("raw")];
                     value <=> Cfg.audio-codec;
                     changed => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Kaynak · --audio-source";
+                label: @tr("Kaynak · --audio-source");
                 Sel {
                     labels: [
-                        "output — cihaz çıkışı",
-                        "playback — uygulama sesi",
-                        "mic — mikrofon",
-                        "mic-unprocessed",
-                        "mic-camcorder",
-                        "voice-call",
-                        "voice-communication",
+                        @tr("output — cihaz çıkışı"),
+                        @tr("playback — uygulama sesi"),
+                        @tr("mic — mikrofon"),
+                        @tr("mic-unprocessed"),
+                        @tr("mic-camcorder"),
+                        @tr("voice-call"),
+                        @tr("voice-communication"),
                     ];
                     values: [
                         "output",
@@ -55,10 +55,10 @@ export component SectionAudio inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Kodlayıcı · --audio-encoder";
+                label: @tr("Kodlayıcı · --audio-encoder");
                 Inp {
                     text <=> Cfg.audio-encoder;
-                    placeholder: "c2.android.opus.encoder";
+                    placeholder: @tr("c2.android.opus.encoder");
                     mono: true;
                     edited => { Cfg.changed(); }
                 }
@@ -66,16 +66,16 @@ export component SectionAudio inherits VerticalLayout {
         }
         Row {
             Fld {
-                label: "Bit hızı · --audio-bit-rate";
+                label: @tr("Bit hızı · --audio-bit-rate");
                 Inp {
                     text <=> Cfg.audio-bit-rate;
-                    placeholder: "128K";
+                    placeholder: @tr("128K");
                     mono: true;
                     edited => { Cfg.changed(); }
                 }
             }
             Fld {
-                label: "Ara bellek · --audio-buffer (ms)";
+                label: @tr("Ara bellek · --audio-buffer (ms)");
                 Inp {
                     text <=> Cfg.audio-buffer;
                     placeholder: "50";
@@ -84,7 +84,7 @@ export component SectionAudio inherits VerticalLayout {
                 }
             }
             Fld {
-                label: "Çıkış ara belleği · --audio-output-buffer";
+                label: @tr("Çıkış ara belleği · --audio-output-buffer");
                 Inp {
                     text <=> Cfg.audio-output-buffer;
                     placeholder: "5";
@@ -100,24 +100,24 @@ export component SectionAudio inherits VerticalLayout {
     ChkGrp {
         Row {
             Chk {
-                text: "Sesi kapat · --no-audio";
+                text: @tr("Sesi kapat · --no-audio");
                 checked <=> Cfg.no-audio;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Cihazda da çal · --audio-dup";
+                text: @tr("Cihazda da çal · --audio-dup");
                 checked <=> Cfg.audio-dup;
                 toggled => { Cfg.changed(); }
             }
         }
         Row {
             Chk {
-                text: "Ses başarısızsa çıkış · --require-audio";
+                text: @tr("Ses başarısızsa çıkış · --require-audio");
                 checked <=> Cfg.require-audio;
                 toggled => { Cfg.changed(); }
             }
             Chk {
-                text: "Sesi oynatma · --no-audio-playback";
+                text: @tr("Sesi oynatma · --no-audio-playback");
                 checked <=> Cfg.no-audio-playback;
                 toggled => { Cfg.changed(); }
             }
