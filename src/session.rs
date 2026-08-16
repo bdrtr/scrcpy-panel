@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::io::BufReader;
 use std::net::TcpStream;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -78,6 +78,14 @@ pub struct Session {
     /// What a recorder started later needs to know about the streams.
     video_codec: Option<VideoCodecInfo>,
     audio_codec_id: Option<u32>,
+    /// The codec config packets, kept from the start of the stream.
+    ///
+    /// A recorder created mid-session never sees them: the video one can be
+    /// asked for again with ResetVideo, but the audio OpusHead arrives exactly
+    /// once, at the top of the stream. Without it the muxer writes an empty
+    /// sample description and the file will not open.
+    video_config: Arc<Mutex<Option<Vec<u8>>>>,
+    audio_config: Arc<Mutex<Option<Vec<u8>>>>,
     server_process: adb::commands::ShellHandle,
     tunnel: adb::tunnel::AdbTunnel,
     no_cleanup: bool,
@@ -153,8 +161,11 @@ impl Session {
         let recorder: Arc<RwLock<Option<Recorder>>> =
             Arc::new(RwLock::new(opts.record.as_ref().map(|_| Recorder::new())));
 
+        let video_config: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+        let audio_config: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+
         let (audio, audio_codec_id) = match audio_socket {
-            Some(socket) => start_audio(socket, opts, &recorder)?,
+            Some(socket) => start_audio(socket, opts, &recorder, audio_config.clone())?,
             None => (None, None),
         };
 
@@ -184,6 +195,8 @@ impl Session {
             recorder: recorder.clone(),
             video_codec: None,
             audio_codec_id,
+            video_config: video_config.clone(),
+            audio_config: audio_config.clone(),
             server_process,
             tunnel,
             no_cleanup: opts.no_cleanup,
@@ -191,14 +204,19 @@ impl Session {
         };
 
         if let Some(socket) = video_socket {
-            session.start_video(socket, opts)?;
+            session.start_video(socket, opts, video_config)?;
         }
 
         Ok(session)
     }
 
     /// Set up the demux and decode threads for the video socket.
-    fn start_video(&mut self, socket: TcpStream, opts: &Options) -> Result<()> {
+    fn start_video(
+        &mut self,
+        socket: TcpStream,
+        opts: &Options,
+        video_config: Arc<Mutex<Option<Vec<u8>>>>,
+    ) -> Result<()> {
         let mut header_socket = socket;
         let info = demuxer::read_video_header(&mut header_socket)?
             .context("Video stream disabled")?;
@@ -252,7 +270,7 @@ impl Session {
         self.demuxer_thread = Some(
             thread::Builder::new()
                 .name("scrcpy-demuxer".into())
-                .spawn(move || run_demuxer(header_socket, packet_tx, recorder_clone))
+                .spawn(move || run_demuxer(header_socket, packet_tx, recorder_clone, video_config))
                 .context("Failed to start demuxer thread")?,
         );
 
@@ -335,6 +353,27 @@ impl Session {
             true,
             has_audio,
         );
+
+        // Seed the queues with the config packets from the top of the stream,
+        // before the recorder is visible to the demuxers, so they are the first
+        // thing it reads. The audio one is the reason: OpusHead is sent once and
+        // will not come again.
+        if let Some(config) = self.video_config.lock().expect("config lock").clone() {
+            recorder.push_video(RecPacket {
+                data: config,
+                pts: i64::MIN,
+                is_key: false,
+            });
+        }
+        if has_audio {
+            if let Some(config) = self.audio_config.lock().expect("config lock").clone() {
+                recorder.push_audio(RecPacket {
+                    data: config,
+                    pts: i64::MIN,
+                    is_key: false,
+                });
+            }
+        }
 
         *self.recorder.write().expect("recorder lock") = Some(recorder);
 
@@ -500,6 +539,7 @@ fn start_audio(
     socket: TcpStream,
     opts: &Options,
     recorder: &Arc<RwLock<Option<Recorder>>>,
+    config_seen: Arc<Mutex<Option<Vec<u8>>>>,
 ) -> Result<(Option<AudioStream>, Option<u32>)> {
     let mut header_socket = socket;
     let info = match demuxer::read_audio_header(&mut header_socket) {
@@ -542,7 +582,7 @@ fn start_audio(
     let recorder = recorder.clone();
     thread::Builder::new()
         .name("scrcpy-audio".into())
-        .spawn(move || run_audio_pipeline(header_socket, codec, samples_tx, recorder))
+        .spawn(move || run_audio_pipeline(header_socket, codec, samples_tx, recorder, config_seen))
         .context("Failed to start audio thread")?;
 
     Ok((Some(AudioStream {
@@ -569,12 +609,16 @@ fn run_demuxer(
     socket: TcpStream,
     sender: Sender<DemuxPacket>,
     recorder: Arc<RwLock<Option<Recorder>>>,
+    config_seen: Arc<Mutex<Option<Vec<u8>>>>,
 ) {
     let mut reader = BufReader::with_capacity(256 * 1024, socket);
 
     loop {
         match demuxer::read_stream_item(&mut reader) {
             Ok(Some(demuxer::StreamItem::Packet(packet))) => {
+                if packet.is_config {
+                    *config_seen.lock().expect("config lock") = Some(packet.data.clone());
+                }
                 if let Some(rec) = recorder.read().expect("recorder lock").as_ref() {
                     rec.push_video(RecPacket {
                         data: packet.data.clone(),
@@ -666,6 +710,7 @@ fn run_audio_pipeline(
     codec_type: demuxer::CodecType,
     samples_tx: Sender<Vec<f32>>,
     recorder: Arc<RwLock<Option<Recorder>>>,
+    config_seen: Arc<Mutex<Option<Vec<u8>>>>,
 ) {
     let mut decoder = match AudioDecoder::new(codec_type) {
         Ok(decoder) => decoder,
@@ -680,6 +725,9 @@ fn run_audio_pipeline(
     loop {
         match demuxer::read_stream_item(&mut reader) {
             Ok(Some(demuxer::StreamItem::Packet(packet))) => {
+                if packet.is_config {
+                    *config_seen.lock().expect("config lock") = Some(packet.data.clone());
+                }
                 if let Some(rec) = recorder.read().expect("recorder lock").as_ref() {
                     rec.push_audio(RecPacket {
                         data: packet.data.clone(),

@@ -58,7 +58,8 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | `--mouse-bind` | works — parsed, with 6 tests; malformed input warns and keeps the default |
 | Ayarlar: adb path, adb port, record dir, screenshot dir | consulted at runtime |
 | Ayarlar: autostart profile, version check, log to disk | work |
-| Recording started and stopped mid-session | implemented, not yet run against a device |
+| Recording started and stopped mid-session | works — 568 video + 552 Opus frames over 11 s |
+| Recording with audio | works — this had never worked; every test had used --no-audio |
 | Several devices selected and started together | implemented, needs a second device to try |
 | `--max-size`, `--max-fps`, `--time-limit` | work |
 | `--list-encoders/-displays/-cameras/-apps` | work |

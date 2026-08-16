@@ -283,6 +283,11 @@ unsafe fn open_and_record(
                 s = cvar.wait(s).unwrap();
             };
             if let Some(config) = config {
+                log::debug!(
+                    "Recorder: video config packet, {} bytes, starts {:02x?}",
+                    config.data.len(),
+                    &config.data[..config.data.len().min(8)]
+                );
                 let vstream_ptr = get_stream(ctx, vid_idx as usize);
                 set_extradata((*vstream_ptr).codecpar, &config.data);
             } else {
@@ -296,6 +301,12 @@ unsafe fn open_and_record(
                 s = cvar.wait(s).unwrap();
             }
             if let Some(cfg) = s.audio_queue.pop_front() {
+                log::debug!(
+                    "Recorder: audio head packet, pts={}, {} bytes, starts {:02x?}",
+                    if cfg.pts == AV_NOPTS { "config".to_string() } else { cfg.pts.to_string() },
+                    cfg.data.len(),
+                    &cfg.data[..cfg.data.len().min(12)]
+                );
                 if cfg.pts == AV_NOPTS && !cfg.data.is_empty() {
                     let astream_ptr = get_stream(ctx, aud_idx as usize);
                     set_extradata((*astream_ptr).codecpar, &cfg.data);
@@ -312,7 +323,15 @@ unsafe fn open_and_record(
     log::info!("Recording started → {} ({})", filename, fmt_name);
 
     // 5. Main packet loop — mirrors C's sc_recorder_process_packets
+    // The two streams share one clock, so nothing can be written until the
+    // first packet of each has been seen. These hold them meanwhile: the loop
+    // used to drop whatever it had popped while waiting for a round in which
+    // both queues happened to be non-empty at the same instant, which with
+    // interleaved audio and video almost never came — every recording made with
+    // audio enabled was an empty file.
     let mut pts_origin: i64 = AV_NOPTS;
+    let mut pending_v: Option<RecPacket> = None;
+    let mut pending_a: Option<RecPacket> = None;
     let mut prev_vpkt: Option<RecPacket> = None;
     let mut vlast: i64 = AV_NOPTS;
     let mut alast: i64 = AV_NOPTS;
@@ -323,7 +342,15 @@ unsafe fn open_and_record(
             loop {
                 let has_v = !s.video_queue.is_empty();
                 let has_a = aud_idx >= 0 && !s.audio_queue.is_empty();
-                if has_v || has_a || s.stopped { break; }
+                // Before the origin is known, wait for both streams rather than
+                // popping what cannot be used yet — the queues hold them.
+                let ready = if pts_origin == AV_NOPTS {
+                    (vid_idx < 0 || has_v || pending_v.is_some())
+                        && (aud_idx < 0 || has_a || pending_a.is_some())
+                } else {
+                    has_v || has_a
+                };
+                if ready || s.stopped { break; }
                 s = cvar.wait(s).unwrap();
             }
             let v = s.video_queue.pop_front();
@@ -338,17 +365,35 @@ unsafe fn open_and_record(
         if matches!(&vpkt, Some(p) if p.pts == AV_NOPTS) { vpkt = None; }
         if matches!(&apkt, Some(p) if p.pts == AV_NOPTS) { apkt = None; }
 
-        // Establish PTS origin = min(first_video_pts, first_audio_pts) — identical to C
+        // Establish PTS origin = min(first_video_pts, first_audio_pts), as C
+        // does, holding on to whatever has arrived so far.
         if pts_origin == AV_NOPTS {
-            match (&vpkt, &apkt) {
-                (Some(v), Some(a))                   => pts_origin = v.pts.min(a.pts),
-                (Some(v), None) if aud_idx < 0       => pts_origin = v.pts,
-                (Some(v), None) if stopped            => pts_origin = v.pts,
-                (None,    Some(a)) if vid_idx < 0     => pts_origin = a.pts,
-                _ => {} // need both; loop again
+            if pending_v.is_none() {
+                pending_v = vpkt.take();
             }
+            if pending_a.is_none() {
+                pending_a = apkt.take();
+            }
+
+            let have_v = vid_idx < 0 || pending_v.is_some();
+            let have_a = aud_idx < 0 || pending_a.is_some();
+            if !have_v || !have_a {
+                if !stopped {
+                    continue;
+                }
+                // Stopping before both streams produced a packet: write what
+                // there is rather than nothing.
+            }
+
+            pts_origin = match (&pending_v, &pending_a) {
+                (Some(v), Some(a)) => v.pts.min(a.pts),
+                (Some(v), None) => v.pts,
+                (None, Some(a)) => a.pts,
+                (None, None) => continue,
+            };
+            vpkt = pending_v.take();
+            apkt = pending_a.take();
         }
-        if pts_origin == AV_NOPTS { continue; }
 
         // Video: deferred write so we can set duration = next_pts - cur_pts (C does this too)
         if let Some(ref v) = vpkt {
