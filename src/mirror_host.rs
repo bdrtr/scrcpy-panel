@@ -352,6 +352,11 @@ fn start_pump(
     let timer = slint::Timer::default();
     let live = Cell::new(false);
     let ended = Cell::new(false);
+    // The frame the window is drawing from. It cannot go back to the decoder
+    // until another has replaced it: the decoder writes into the same buffer,
+    // and writing into the one on screen would mean copying it first — which
+    // is the copy this whole arrangement exists to avoid.
+    let mut on_screen: Option<crate::media::decoder::DecodedFrame> = None;
 
     timer.start(slint::TimerMode::Repeated, PUMP_INTERVAL, move || {
         if ended.get() {
@@ -376,7 +381,7 @@ fn start_pump(
         // reported rather than silently written at the wrong stride.
         if let Some(ref sink) = v4l2 {
             if sink.matches(latest.width, latest.height) {
-                sink.write_frame(&latest.data);
+                sink.write_frame(latest.buffer.as_bytes());
             } else if (latest.width, latest.height) != frame_size.get() {
                 log::warn!(
                     "V4L2 sink {} was opened at a different size; reopen the session to follow the rotation",
@@ -401,15 +406,20 @@ fn start_pump(
         // decoded and recycled — it is simply never turned into an image or
         // drawn. A paused mirror that stopped taking frames would stall the
         // decoder and the recording behind it.
+        fps.borrow_mut().add_frame();
         if playback && !paused.get() {
             apply(MirrorUpdate::Frame(frame_to_image(&latest, flip.get())));
             if !live.get() {
                 live.set(true);
                 apply(MirrorUpdate::Live(true));
             }
+            if let Some(previous) = on_screen.replace(latest) {
+                let _ = recycle.try_send(previous);
+            }
+        } else {
+            // Nothing is drawing it, so nothing is holding it.
+            let _ = recycle.try_send(latest);
         }
-        fps.borrow_mut().add_frame();
-        let _ = recycle.try_send(latest);
     });
 
     timer

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use slint::{Rgb8Pixel, SharedPixelBuffer};
 use super::demuxer::CodecType;
 use super::demuxer::DemuxPacket;
 
@@ -12,7 +13,12 @@ use super::demuxer::DemuxPacket;
 /// used frames to a pool and the decoder fills them again.
 #[derive(Debug)]
 pub struct DecodedFrame {
-    pub data: Vec<u8>,
+    /// The pixels, in the buffer Slint will draw from.
+    ///
+    /// Slint's own type rather than a `Vec<u8>`, so that the unpadding pass
+    /// swscale needs anyway writes straight into it: handing the frame to the
+    /// window is then a refcount rather than another eight megabytes.
+    pub buffer: SharedPixelBuffer<Rgb8Pixel>,
     pub width: u32,
     pub height: u32,
 }
@@ -21,7 +27,7 @@ impl DecodedFrame {
     /// Create an empty frame (the buffer is sized on first use)
     pub fn empty() -> Self {
         Self {
-            data: Vec::new(),
+            buffer: SharedPixelBuffer::new(0, 0),
             width: 0,
             height: 0,
         }
@@ -309,11 +315,18 @@ impl VideoDecoder {
         let row_bytes = width as usize * 3;
         let src = self.rgb_frame.data(0);
 
-        output.data.resize(row_bytes * height as usize, 0);
+        // A recycled frame keeps its buffer, which is the point of recycling it;
+        // a frame of another size — the device rotated — needs a new one.
+        if output.buffer.width() != width || output.buffer.height() != height {
+            output.buffer = SharedPixelBuffer::new(width, height);
+        }
+        // This copies if the window is still holding the buffer, which is what
+        // the pump's one-frame delay before recycling is there to avoid.
+        let dst = output.buffer.make_mut_bytes();
         for y in 0..height as usize {
             let src_start = y * src_stride;
             let dst_start = y * row_bytes;
-            output.data[dst_start..dst_start + row_bytes]
+            dst[dst_start..dst_start + row_bytes]
                 .copy_from_slice(&src[src_start..src_start + row_bytes]);
         }
         output.width = width;

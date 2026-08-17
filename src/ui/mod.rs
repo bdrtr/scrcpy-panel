@@ -108,28 +108,27 @@ pub fn display_aspect(frame_width: u32, frame_height: u32, orientation: Orientat
     }
 }
 
-/// Wrap a decoded RGB frame in a Slint image.
+/// Hand a decoded frame to Slint as an image.
 ///
-/// The decoder hands us tightly packed RGB8, so this is a single bulk copy into
-/// the pixel buffer Slint owns. A zero-copy GPU path would import the decoded
-/// surface as a texture instead — see the roadmap in the README.
+/// The decoder wrote into Slint's own buffer, so the usual case is a refcount:
+/// no copy at all, where there used to be one of about eight megabytes a frame.
 ///
 /// `flip` is the horizontal mirror of `--display-orientation=flipN`. Slint can
 /// rotate an image but not mirror one, and the rotation is a property either
-/// way, so the flip happens here — a second pass over the frame, and only when
-/// it is asked for.
+/// way, so the flip happens here — and it is the one case that still costs a
+/// pass over the frame, because a mirror cannot be done in the buffer the
+/// window is already reading from.
 pub fn frame_to_image(frame: &DecodedFrame, flip: bool) -> Image {
-    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(frame.width, frame.height);
-    let expected = frame.width as usize * frame.height as usize * 3;
-    let bytes = buffer.make_mut_bytes();
-    let n = expected.min(frame.data.len()).min(bytes.len());
-
-    if flip {
-        mirror_rows(&frame.data[..n], frame.width as usize, &mut bytes[..n]);
-    } else {
-        bytes[..n].copy_from_slice(&frame.data[..n]);
+    if !flip {
+        return Image::from_rgb8(frame.buffer.clone());
     }
-    Image::from_rgb8(buffer)
+
+    let mut mirrored = SharedPixelBuffer::<Rgb8Pixel>::new(frame.width, frame.height);
+    let source = frame.buffer.as_bytes();
+    let bytes = mirrored.make_mut_bytes();
+    let n = source.len().min(bytes.len());
+    mirror_rows(&source[..n], frame.width as usize, &mut bytes[..n]);
+    Image::from_rgb8(mirrored)
 }
 
 /// Copy packed RGB8 rows into `target`, each row reversed.

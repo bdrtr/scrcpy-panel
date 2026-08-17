@@ -90,6 +90,7 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | SCAN_FILE after a push | accepted — a POWER keycode sent straight after it still reached the device, so the control channel survived the message |
 | Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
 | `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
+| One copy per frame instead of two | measured — the handover to the window averaged 1.6 ms a frame at 1080x2400 and now averages nothing; the picture still refreshes, two screenshots two seconds apart differing by 310 RMSE against a noise floor of about 100 |
 | `--otg` | works — the device is found on the bus with no adb at all, a keyboard and a mouse are registered over USB, and the pointer's motion comes out of the phone's kernel as `REL_X`/`REL_Y` while the window has it |
 | `--keyboard=aoa` | works — the AOA keyboard registers over USB during a session and is given back at the end. `cargo test -- --ignored aoa`, with `AOA_SERIAL` set, registers one and types an "a": `KEY_A DOWN`/`UP` came out of the phone's kernel with no adb, no server and no control socket in the way |
 | `--mouse=uhid` | works — the device it adds has REL_X, REL_Y and the two wheels; a report of 30,30 came out of the phone's kernel as `REL_X 0x1e`, `REL_Y 0x1e`, and a click as `BTN_MOUSE DOWN`/`UP`. The pointer moving on this desk arrived the same way, 655 relative events in fourteen seconds |
@@ -287,8 +288,15 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   audio decoder was carrying two buffers nothing wrote to, and the sample rate and channel
   count it reports were read by nobody — the session checks them against the 48 kHz stereo
   the player is built for now, and says so if a device ever disagrees.
-- Each frame is copied twice on the way to the screen (swscale output → packed buffer →
-  Slint pixel buffer). Fine at 1080p60, but a GPU texture path would remove both.
+- **A frame is copied once on its way to the screen now, not twice.** swscale writes with
+  its own row padding and the window wants rows packed, so one pass is unavoidable without
+  a stride-aware sink — but that pass now writes straight into the buffer Slint will draw
+  from, so handing the frame over is a refcount rather than another eight megabytes.
+  Measured on the Redmi at 1080x2400, in a release build: the handover averaged 1.6 ms a
+  frame before and 0 µs after. What makes it safe is that the frame on screen no longer
+  goes back to the decoder's pool until another has replaced it — writing into the buffer
+  the window is reading from would have copied it anyway, which is exactly the copy that
+  was removed. The remaining step, uploading that buffer as a GPU texture, is Slint's.
 
 ## Changes from upstream
 
@@ -352,7 +360,9 @@ curl -L -o target/release/scrcpy-server \
 5. ~~Get input parity back: UHID keyboard and mouse, gamepads, AOA and OTG~~ — done, bar a
    gamepad to try the gamepads on
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
-7. GPU frame path (Slint's `unstable-wgpu-29` texture import) to remove the per-frame copies
+7. GPU frame path: ~~the second CPU copy~~ — gone, the decoder writes into Slint's own
+   buffer; what is left is importing that as a wgpu texture, and converting from YUV on the
+   GPU rather than in swscale
 8. ~~Fill in what upstream left out: virtual display (`--new-display`), the rest of camera,
    OTG~~ — done
 

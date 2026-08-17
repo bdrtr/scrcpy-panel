@@ -292,7 +292,7 @@ fn run_windowless(opts: &Options, video: session::VideoStream) -> Result<()> {
                     // A loopback device is told its size once, so a rotation
                     // has to be reported rather than silently dropped.
                     if sink.matches(frame.width, frame.height) {
-                        sink.write_frame(&frame.data);
+                        sink.write_frame(frame.buffer.as_bytes());
                     } else if (frame.width, frame.height) != size {
                         log::warn!(
                             "V4L2 sink {} was opened at a different size; reopen the \
