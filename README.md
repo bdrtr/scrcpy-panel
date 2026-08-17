@@ -90,6 +90,7 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | SCAN_FILE after a push | accepted — a POWER keycode sent straight after it still reached the device, so the control channel survived the message |
 | Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
 | `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
+| Hardware decoding initialises | works — VAAPI opens on this machine's second render node, which the fixed per-platform list and the node search are for. Its output matches the software decoder's to a mean of 0.81 of 255 |
 | No copies per frame instead of two | measured at 1080x2400 — 0.70 ms of conversion plus 1.10 of copying became 1.17 ms of conversion and nothing else; the picture still refreshes, two screenshots two seconds apart differing by thousands of RMSE against a still-mirror floor of about 100 |
 | `--otg` | works — the device is found on the bus with no adb at all, a keyboard and a mouse are registered over USB, and the pointer's motion comes out of the phone's kernel as `REL_X`/`REL_Y` while the window has it |
 | `--keyboard=aoa` | works — the AOA keyboard registers over USB during a session and is given back at the end. `cargo test -- --ignored aoa`, with `AOA_SERIAL` set, registers one and types an "a": `KEY_A DOWN`/`UP` came out of the phone's kernel with no adb, no server and no control socket in the way |
@@ -303,6 +304,29 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   pixels a row brings it back to 0.90 ms, but the padding would then have to be clipped in
   the UI and skipped row by row on the way to `--v4l2-sink`, and 0.27 ms a frame is not
   worth two places where a stride can be got wrong.
+- **Hardware decoding could not work on this platform, and now can.** The list of hardware
+  types to try was D3D11VA, DXVA2, CUDA — two Windows APIs and one that needs an NVIDIA
+  card — so on a Linux desktop with any other GPU nothing could ever match, and the CUDA
+  probe printed "no CUDA-capable device is detected" at error level on every launch, which
+  reads like a fault and is not one. The list is per-platform now, VAAPI leads it here, and
+  the probe is quiet. VAAPI's default device is the first DRM render node, which on a
+  machine with two GPUs may be the wrong one — on this one `renderD128` refuses and
+  `renderD129` answers — so the nodes are tried in turn.
+- Whether that is *faster* depends on the machine, which is why `--hwaccel off` exists.
+  Measured here on a 1080x2400 recording from the phone: VAAPI decodes in about 3.0 ms a
+  frame including the trip back to system memory, the single-threaded software decoder in
+  4.1, and a multi-threaded one would do 1.6. The pictures agree — hardware and software
+  frames differ by a mean of 0.81 of 255, which is two roundings of the same arithmetic
+  rather than a colour range gone wrong. What has *not* been measured is the whole client
+  end to end with hardware decoding on: the phone left the cable first, and swscale would
+  be converting NV12 rather than YUV420P.
+- The software decoder is single-threaded on purpose, and says so now rather than
+  inheriting it from libavcodec's default. Frame threading is the fast kind for H.264 and
+  holds back a frame per thread before letting the first one out: fifty milliseconds at
+  four threads and sixty frames a second, added to every touch, on a window whose purpose
+  is to be touched. Slice threading has no such delay and no such gain either, since the
+  server's encoder writes one slice a frame. At 4.1 ms a frame the one thread carries 240
+  frames a second, and the stream arrives at sixty.
 - The flip is the one thing that still costs a pass, and cannot stop: a mirror cannot be
   done in the buffer the window is reading from, so `--display-orientation=flipN` builds a
   second one.

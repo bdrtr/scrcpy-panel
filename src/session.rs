@@ -337,10 +337,11 @@ impl Session {
 
         let codec = info.codec;
         let (width, height) = (info.width, info.height);
+        let hardware = opts.hwaccel != "off";
         self.decoder_thread = Some(
             thread::Builder::new()
                 .name("scrcpy-decoder".into())
-                .spawn(move || run_decoder(codec, width, height, packet_rx, frame_tx, recycle_rx))
+                .spawn(move || run_decoder(codec, width, height, hardware, packet_rx, frame_tx, recycle_rx))
                 .context("Failed to start decoder thread")?,
         );
 
@@ -717,15 +718,18 @@ fn run_demuxer(
 }
 
 /// Decodes packets into RGB frames, reusing the pool's buffers.
+#[allow(clippy::too_many_arguments)]
 fn run_decoder(
     codec_type: demuxer::CodecType,
     width: u32,
     height: u32,
+    // --hwaccel: whether the GPU is asked to decode at all.
+    hardware: bool,
     packet_rx: Receiver<DemuxPacket>,
     frame_tx: Sender<DecodedFrame>,
     recycle_rx: Receiver<DecodedFrame>,
 ) {
-    let mut decoder = match VideoDecoder::new(codec_type, width, height) {
+    let mut decoder = match VideoDecoder::new(codec_type, width, height, hardware) {
         Ok(decoder) => decoder,
         Err(e) => {
             log::error!("Failed to create decoder: {}", e);

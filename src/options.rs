@@ -287,6 +287,13 @@ pub struct Options {
     #[arg(long)]
     pub camera_zoom: Option<String>,
 
+    /// Hardware decoding: auto or off
+    ///
+    /// Off is worth having: a machine whose GPU decodes slower than its CPU
+    /// exists, and the frames have to come back to system memory either way.
+    #[arg(long, default_value = "auto", value_parser = ["auto", "off"])]
+    pub hwaccel: String,
+
     /// Input only, over USB: no adb, no server, no picture
     ///
     /// The computer's keyboard and mouse become the device's, through AOA, and
