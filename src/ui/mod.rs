@@ -7,6 +7,9 @@
 
 slint::include_modules!();
 
+#[cfg(feature = "wgpu")]
+pub mod yuv;
+
 use slint::{Image, Rgb8Pixel, SharedPixelBuffer};
 
 use crate::media::decoder::DecodedFrame;

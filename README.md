@@ -384,19 +384,33 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
 - **The window costs more than the decoder, which this file did not know.** Everything above
   measures the decoder, and the decoder was never the expensive half. Slint takes the whole
   frame to the card every time it changes, and at 1080x2400 that is eight megabytes and
-  3.87 ms — against 2.96 for decoding and converting the same frame. Handing back the same
-  buffer instead costs 0.02, so it is the traffic and not the drawing. It scales with the
-  bytes and nothing else: 7.8 MB costs 3.87 ms, 3.9 costs 2.14, 0.5 costs 0.42. That is
-  what makes the shader worth writing — YUV420P planes are 3.9 MB where the RGB is 7.8, so
-  the upload halves and the conversion goes altogether. `cargo run --release --example
-  frame_cost` measures it, six buffers deep because that is the session's frame pool, and
-  `frame_cost 1080x1200` is the half-size figure: the same byte count as a 1080x2400 frame
-  in YUV420P, which is the closest this can get to the answer without writing the thing.
-  Two renderers linked in changes what the default one is, so the comparisons here name
-  theirs — `SLINT_BACKEND=winit-femtovg` against `WGPU=1`.
-  What it does not measure: three plane uploads have three lots of per-call overhead where
-  this has one, and the shader costs GPU time this does not count. 2.3 ms a frame is
-  therefore the ceiling on the prize, not a promise.
+  3.98 ms — against 2.96 for decoding and converting the same frame. Handing back the same
+  buffer instead costs 0.02, so it is the traffic and not the drawing. `cargo run --release
+  --example frame_cost` measures it, six buffers deep because that is the session's frame
+  pool. Two renderers linked in changes what the default one is, so the comparisons here
+  name theirs — `SLINT_BACKEND=winit-femtovg` against `WGPU=1`.
+- **And most of that eight megabytes is not the traffic either.** Three bytes a pixel is not
+  a texture format any card has, so somebody pads it out to four, every frame, on the CPU.
+  Handing Slint the same picture already RGBA — 10.4 MB rather than 7.8, a third more to
+  carry — costs 0.94 ms a frame against 3.98. swscale converts into RGBA for 0.48 where
+  RGB24 costs 0.58, because four-byte writes suit it better than three. That is 3.14 ms a
+  frame for a change of pixel format, and it needs no shader, no WGPU and no unstable API.
+- **The shader is written and measured, and does not earn its keep.** `src/ui/yuv.rs`
+  uploads the YUV420P planes as three R8 textures and converts them in one pass, which comes
+  to 1.25 ms a frame — 0.56 uploading and converting, 0.69 drawing. Against the fourth
+  byte's 1.42 that is 0.17 ms, for Slint's WGPU renderer, its `unstable-wgpu-29` texture
+  import, and a `wgpu` dependency. So it stays behind `--features wgpu`, where
+  `frame_cost` uses it and the client does not. It is correct: its picture matches
+  swscale's to a mean of 0.703 of 255, worst 3, read back off the card, and to 0.123 as the
+  window draws it — the same fixed-point-against-floating-point difference this file already
+  found between swscale's own two paths. `CHECK=1` runs all of that.
+- Two things that check said and should not have. Slint's own `take_snapshot` returns a
+  blank buffer rather than an error on the OpenGL renderer here — and two blanks compare
+  equal, so the first version of the check reported a perfect match between paths it had not
+  drawn. It refuses anything uniform now, and the on-screen comparisons are run on the
+  software and WGPU renderers, which do take snapshots: RGBA against packed RGB is 0.000 of
+  255 on both, byte for byte the same picture. And the WGPU renderer is only better at the
+  thing it is for — the same RGBA upload costs 2.52 ms there against 0.94 on OpenGL.
 - **The renderer the shader needs is not free, and is not linked in by default.** Slint's
   texture import wants its WGPU renderer, and asking for it changes what every frame costs,
   not only the ones a shader would touch: drawing a window where nothing changed costs 0.68
@@ -473,16 +487,16 @@ curl -L -o target/release/scrcpy-server \
 5. ~~Get input parity back: UHID keyboard and mouse, gamepads, AOA and OTG~~ — done, bar a
    gamepad to try the gamepads on
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
-7. GPU frame path: ~~the CPU copies~~ — gone, swscale writes into Slint's own buffer. What
-   is left is bigger than this list used to say, and most of it is not the conversion.
-   Taking eight megabytes of packed RGB to the card costs 3.90 ms a frame at 1080x2400
-   against the conversion's 0.59; the same path carrying the 3.9 MB a YUV420P frame would
-   be costs 1.91 on Slint's WGPU renderer. So the ledger is 4.49 ms a frame today against
-   about 1.91, and the prize is ~2.6 — not the 0.59 the conversion is. The gate is open:
-   WGPU renders here, and a `wgpu::Texture` made outside Slint draws in a Slint `Image`.
-   `cargo run --release --example frame_cost` is the measurement, `--features wgpu` and
-   `WGPU=1` the other renderer. Still to find out: what three plane uploads cost against
-   one, and what the shader costs on the GPU side, neither of which this measures
+7. GPU frame path: ~~the CPU copies~~ — gone, swscale writes into Slint's own buffer. The
+   rest of it turned out to be a fourth byte rather than a shader. Packed RGB is not a
+   texture format any card has, so something pads it out every frame, and at 1080x2400 that
+   costs 3.98 ms against 0.94 for handing Slint the same picture already RGBA — more bytes,
+   a quarter of the time. swscale is cheaper into RGBA too, 0.48 against 0.58. So the ledger
+   on the renderer this ships with is 4.56 ms a frame today against 1.42, and the shader —
+   written, measured and correct — comes to 1.25 on Slint's WGPU renderer. **The fourth byte
+   is worth 3.14 ms a frame and the shader 0.17 more**, so the shader is not wired in and
+   `--features wgpu` is where it lives. `cargo run --release --example frame_cost` is the
+   measurement
 8. ~~Fill in what upstream left out: virtual display (`--new-display`), the rest of camera,
    OTG~~ — done
 
