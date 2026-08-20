@@ -90,7 +90,8 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | SCAN_FILE after a push | accepted — a POWER keycode sent straight after it still reached the device, so the control channel survived the message |
 | Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
 | `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
-| Hardware decoding initialises | works — VAAPI opens on this machine's second render node, which the fixed per-platform list and the node search are for. Its output matches the software decoder's to a mean of 0.81 of 255 |
+| Hardware decoding | works, and is off by default because it is slower here — VAAPI opens on this machine's second render node, which the fixed per-platform list and the node search are for. In a live session on the Redmi, screen busy, it cost 6.49 ms a frame against the software path's 5.40, and 5.43 of that was the trip back from the GPU alone. Its picture is the software decoder's byte for byte — mean 0.0000 of 255, worst single byte 0, over 568 frames |
+| swscale writing past the window's buffer | fixed — it writes 24 bytes past the last row at 1080x2400, 21 at 1081x2400 and nothing at all at 1080x2399, so which of three writes the client uses is measured on the first frame of each size rather than assumed. `cargo test` checks the one chosen against a whole-picture conversion at six sizes, byte for byte |
 | No copies per frame instead of two | measured at 1080x2400 — 0.70 ms of conversion plus 1.10 of copying became 1.17 ms of conversion and nothing else; the picture still refreshes, two screenshots two seconds apart differing by thousands of RMSE against a still-mirror floor of about 100 |
 | `--otg` | works — the device is found on the bus with no adb at all, a keyboard and a mouse are registered over USB, and the pointer's motion comes out of the phone's kernel as `REL_X`/`REL_Y` while the window has it |
 | `--keyboard=aoa` | works — the AOA keyboard registers over USB during a session and is given back at the end. `cargo test -- --ignored aoa`, with `AOA_SERIAL` set, registers one and types an "a": `KEY_A DOWN`/`UP` came out of the phone's kernel with no adb, no server and no control socket in the way |
@@ -312,21 +313,74 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   the probe is quiet. VAAPI's default device is the first DRM render node, which on a
   machine with two GPUs may be the wrong one — on this one `renderD128` refuses and
   `renderD129` answers — so the nodes are tried in turn.
-- Whether that is *faster* depends on the machine, which is why `--hwaccel off` exists.
-  Measured here on a 1080x2400 recording from the phone: VAAPI decodes in about 3.0 ms a
-  frame including the trip back to system memory, the single-threaded software decoder in
-  4.1, and a multi-threaded one would do 1.6. The pictures agree — hardware and software
-  frames differ by a mean of 0.81 of 255, which is two roundings of the same arithmetic
-  rather than a colour range gone wrong. What has *not* been measured is the whole client
-  end to end with hardware decoding on: the phone left the cable first, and swscale would
-  be converting NV12 rather than YUV420P.
+- **Asking the GPU for the right layout was worth more than the GPU.** A hardware frame
+  comes back in the GPU's own NV12, and swscale has a hand-written path from YUV420P to
+  packed RGB and none from NV12: at 1080x2400, into this client's buffer, that conversion
+  costs 5.07 ms a frame against 0.59 — eight and a half times over, and more than
+  everything else in the path put together. This GPU will hand back sixteen formats and YUV420P is one of
+  them, so the transfer asks for that one now. A driver that refuses is asked once, told so
+  in the log, and never asked again. `REC=<a recording> cargo test --release -- --ignored
+  --nocapture layout` is that measurement.
+- That also settles an older claim in this file. The hardware and software pictures were
+  said to differ by a mean of 0.81 of 255 — "two roundings of the same arithmetic". It was
+  not the decoders: it was the two swscale paths, and 0.81 is what the NV12 and YUV420P
+  conversions of *the same frame* differ by. Converting both from YUV420P, the two decoders
+  agree bit for bit over 568 frames — mean 0.0000, worst single byte 0.
+- Whether hardware is *faster* is now measured, and on this machine it is not, so
+  `--hwaccel` defaults to `off`. The frames have to come back to system memory for swscale
+  either way, and that trip is the whole story. In a live session on the Redmi, screen busy,
+  release build: 6.49 ms a frame with the GPU against 5.40 for the whole software path, and
+  5.43 of the hardware figure was the readback alone — as much as the software path costs
+  end to end, though 5.43 against 5.40 is close enough to be one run's luck. Through a
+  recording off the same device it is not close: 568 frames at 1080x2400, 4.90 against 2.96,
+  and 0.59 of each is a colour conversion both paths pay, so decoding on the GPU and
+  fetching the result is 4.31 ms a frame where the CPU decodes in 2.37. `--hwaccel auto` is
+  still there for a machine where that comes out the other way, which is the only reason the
+  flag exists.
+- **swscale was writing past the end of the window's buffer, and the client now measures
+  whether it will.** Pointing swscale straight at Slint's buffer is what saved the copy a
+  frame above, but its hand-written YUV420P path converts a block of pixels at a time and
+  writes the whole last block: it fills the row out to a multiple of sixteen pixels, so
+  1080 wide spills 24 bytes past the end of every row, 1081 spills 21, and 64 spills none.
+  Every row's spill but the last lands in the row below, which is written next and covers
+  it; the last row's lands past the end of a buffer that is exactly `width * height * 3`
+  bytes, in memory the client does not own. That is not a theoretical complaint: made to
+  write straight in at 1080x2400 anyway, this client does not survive the first frame —
+  glibc fails an assertion in `sysmalloc` and the process takes SIGABRT. So the last rows are converted into a buffer
+  with room to spare and copied in — one or two of them: two when the height is even,
+  because a 4:2:0 chroma plane cannot begin on an odd row, which is 6480 bytes of memcpy a
+  frame at 1080 wide.
+- What cannot be assumed is that this is needed, or even that it is safe. One row shorter,
+  at 1080x2399, swscale takes a different converter for the odd height: it writes nothing
+  past the picture at all, and it interpolates chroma down the frame, so cutting the tail
+  off there would have left the two rows above the cut wrong by up to 255 of 255. Rather
+  than reason about which converter swscale picked, the client converts the first frame of
+  each size into a buffer with room to spare, reads the room back to see how far past it
+  wrote, and — if it wrote anything — checks the split against that same whole picture
+  before using it. Nothing past means write straight in; something past and a matching
+  split means the split; something past and a split that does not match means the whole
+  picture goes through a buffer and is copied in, which nothing this client decodes has
+  needed. `cargo test` checks the write actually chosen against a whole-picture conversion
+  at six sizes, odd widths and odd heights included.
+- The room is filled and read back twice, with a different byte each time, and that is not
+  belt and braces. What swscale writes past the picture is picture, and a picture can be any
+  byte: a frame whose last rows convert to 0xAA leaves a buffer filled with 0xAA looking
+  untouched, and the client would then write out of bounds for as long as that session ran.
+  A byte it wrote can match only one of two fillings, so a byte both runs left alone was
+  left alone. There is a test that builds exactly that frame — black but for a corner of the
+  grey that converts to 0xAA — and it does slip past one filling and not past two.
+- The figures above come from two harnesses and are not interchangeable. The same colour
+  conversion is 0.59 ms a frame through the recording and 0.92 in this session's live run,
+  against the 1.17 the bullet further up measured live in its own. Every comparison here is
+  between two numbers from the same harness.
 - The software decoder is single-threaded on purpose, and says so now rather than
   inheriting it from libavcodec's default. Frame threading is the fast kind for H.264 and
   holds back a frame per thread before letting the first one out: fifty milliseconds at
   four threads and sixty frames a second, added to every touch, on a window whose purpose
   is to be touched. Slice threading has no such delay and no such gain either, since the
-  server's encoder writes one slice a frame. At 4.1 ms a frame the one thread carries 240
-  frames a second, and the stream arrives at sixty.
+  server's encoder writes one slice a frame. At 2.96 ms a frame — decode and colour
+  conversion together — the one thread carries 338 frames a second, and the stream arrives
+  at sixty.
 - The flip is the one thing that still costs a pass, and cannot stop: a mirror cannot be
   done in the buffer the window is reading from, so `--display-orientation=flipN` builds a
   second one.

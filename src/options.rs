@@ -287,11 +287,16 @@ pub struct Options {
     #[arg(long)]
     pub camera_zoom: Option<String>,
 
-    /// Hardware decoding: auto or off
+    /// Hardware decoding: off or auto
     ///
-    /// Off is worth having: a machine whose GPU decodes slower than its CPU
-    /// exists, and the frames have to come back to system memory either way.
-    #[arg(long, default_value = "auto", value_parser = ["auto", "off"])]
+    /// Off by default, which is a measurement rather than a preference. The
+    /// frames have to come back to system memory for swscale either way, and on
+    /// this machine that trip alone costs more than decoding on the CPU: over
+    /// 568 frames at 1080x2400, decoding on the GPU and fetching the result
+    /// took 4.31 ms a frame where the CPU decoded in 2.37, and both then paid
+    /// the same 0.59 to convert. `auto` is there for a machine where that comes
+    /// out the other way.
+    #[arg(long, default_value = "off", value_parser = ["auto", "off"])]
     pub hwaccel: String,
 
     /// Input only, over USB: no adb, no server, no picture
