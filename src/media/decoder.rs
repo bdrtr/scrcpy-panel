@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use slint::{Rgb8Pixel, SharedPixelBuffer};
+use slint::{Rgba8Pixel, SharedPixelBuffer};
 use std::ptr::null_mut;
 use super::demuxer::CodecType;
 use super::demuxer::DemuxPacket;
@@ -19,7 +19,7 @@ impl Drop for QuietLog {
     }
 }
 
-/// A decoded video frame: tightly packed RGB8, stride = `width * 3`.
+/// A decoded video frame: tightly packed RGBA8, stride = `width * 4`.
 ///
 /// The SDL renderer this client used to have uploaded YUV planes and let the
 /// GPU convert them. Slint takes RGB pixel buffers, so the conversion happens
@@ -34,7 +34,14 @@ pub struct DecodedFrame {
     /// Slint's own type rather than a `Vec<u8>`, so that the unpadding pass
     /// swscale needs anyway writes straight into it: handing the frame to the
     /// window is then a refcount rather than another eight megabytes.
-    pub buffer: SharedPixelBuffer<Rgb8Pixel>,
+    ///
+    /// RGBA rather than RGB, which is a quarter more bytes and four times
+    /// faster. Three bytes a pixel is not a texture format any card has, so
+    /// Slint pads it out on the way to one — every frame, on the CPU: at
+    /// 1080x2400 that is 3.98 ms a frame against 0.94 for a buffer that already
+    /// has the fourth byte. swscale is cheaper into RGBA too, 0.48 against
+    /// 0.58, four-byte writes suiting it better than three. See the README.
+    pub buffer: SharedPixelBuffer<Rgba8Pixel>,
     pub width: u32,
     pub height: u32,
 }
@@ -111,7 +118,7 @@ enum Write {
 /// says so in the log if it is ever not enough.
 const SLACK: usize = 4096;
 
-/// swscale, pointed at plain bytes with a packed RGB stride.
+/// swscale, pointed at plain bytes with a packed RGBA stride.
 ///
 /// `first_row` is where in the picture the rows begin: every plane is offset to
 /// it, the chroma ones to `first_row >> chroma_shift` because they hold one row
@@ -531,7 +538,7 @@ impl VideoDecoder {
         Ok(())
     }
 
-    /// Convert a frame to packed RGB8 and fill the output.
+    /// Convert a frame to packed RGBA8 and fill the output.
     ///
     /// `frame_ptr` is a raw pointer because the source frame lives in `self`
     /// while `self.scaler` is borrowed mutably.
@@ -546,7 +553,7 @@ impl VideoDecoder {
         if width == 0 || height == 0 {
             bail!("Decoded frame has zero size");
         }
-        let row_bytes = width as usize * 3;
+        let row_bytes = width as usize * 4;
         let needed = row_bytes * height as usize;
 
         // Where the tail begins, for the write that has one. It is converted as
@@ -575,7 +582,7 @@ impl VideoDecoder {
                     frame.format(),
                     width,
                     rows,
-                    ffmpeg_next::format::Pixel::RGB24,
+                    ffmpeg_next::format::Pixel::RGBA,
                     width,
                     rows,
                     ffmpeg_next::software::scaling::Flags::BILINEAR,
@@ -589,7 +596,7 @@ impl VideoDecoder {
             self.write =
                 self.choose_write(frame, row_bytes, needed, tail_start, tail_rows, chroma_shift);
             log::debug!(
-                "Scaler: {:?} {width}x{height} → RGB24, written {:?}",
+                "Scaler: {:?} {width}x{height} → RGBA, written {:?}",
                 frame.format(),
                 self.write,
             );
@@ -963,14 +970,14 @@ mod tests {
                 }
             }
 
-            let row_bytes = width as usize * 3;
+            let row_bytes = width as usize * 4;
             let needed = row_bytes * height as usize;
             let mut whole = vec![0xAAu8; needed + SLACK];
             let mut scaler = ffmpeg_next::software::scaling::Context::get(
                 Pixel::YUV420P,
                 width,
                 height,
-                Pixel::RGB24,
+                Pixel::RGBA,
                 width,
                 height,
                 ffmpeg_next::software::scaling::Flags::BILINEAR,
@@ -1033,13 +1040,19 @@ mod tests {
     }
 
     /// A picture can be any byte, including the one the probe fills its spare
-    /// room with, and `choose_write` has to see the overrun anyway. This frame
-    /// is black but for the bottom right corner, which is set to the grey that
-    /// converts to 0xAA in all three channels — so filling the room with 0xAA
-    /// and looking for a change finds nothing, while swscale wrote 24 bytes of
-    /// it. Two fillings are the whole reason the client is not fooled: a
-    /// session that opened on a frame like this one would otherwise have gone
-    /// on writing past the end of the window's buffer for as long as it ran.
+    /// room with, and `choose_write` has to see the overrun anyway. The frame
+    /// here is black but for the bottom right corner, set to the grey that
+    /// converts to 0xAA — so a probe that filled its room with 0xAA and looked
+    /// for a change would find none, while swscale had written 24 bytes of it.
+    /// Two fillings are why the client is not fooled: a session that opened on a
+    /// frame like this one would otherwise have written past the end of the
+    /// window's buffer for as long as it ran, and it does not survive that.
+    ///
+    /// The client's own destination is RGBA now, and every fourth byte of an
+    /// overrun is therefore an opaque 255, which matches neither filling. That
+    /// closes this particular door by luck rather than by design, so the frame
+    /// below is put through a packed RGB24 conversion, where the door is still
+    /// open, and the RGBA path is then held to finding its own overrun.
     #[test]
     fn a_picture_the_colour_of_the_canary_is_still_an_overrun() {
         use ffmpeg_next::format::Pixel;
@@ -1065,19 +1078,19 @@ mod tests {
             }
         }
 
-        let row_bytes = width as usize * 3;
-        let needed = row_bytes * height as usize;
-        let mut scaler = ffmpeg_next::software::scaling::Context::get(
-            Pixel::YUV420P,
-            width,
-            height,
-            Pixel::RGB24,
-            width,
-            height,
-            ffmpeg_next::software::scaling::Flags::BILINEAR,
-        )
-        .unwrap();
-        let mut past = |canary: u8| {
+        let past = |format: Pixel, bytes_per_pixel: usize, canary: u8| {
+            let row_bytes = width as usize * bytes_per_pixel;
+            let needed = row_bytes * height as usize;
+            let mut scaler = ffmpeg_next::software::scaling::Context::get(
+                Pixel::YUV420P,
+                width,
+                height,
+                format,
+                width,
+                height,
+                ffmpeg_next::software::scaling::Flags::BILINEAR,
+            )
+            .unwrap();
             let mut room = vec![canary; needed + SLACK];
             unsafe {
                 scale_into(
@@ -1095,8 +1108,19 @@ mod tests {
                 .rposition(|byte| *byte != canary)
                 .map_or(0, |at| at + 1)
         };
-        assert_eq!(past(0xAA), 0, "this frame was meant to hide behind 0xAA");
-        assert_eq!(past(0x55), 24, "and to have written 24 bytes past all along");
+        assert_eq!(
+            past(Pixel::RGB24, 3, 0xAA),
+            0,
+            "this frame was meant to hide behind 0xAA"
+        );
+        assert_eq!(
+            past(Pixel::RGB24, 3, 0x55),
+            24,
+            "and to have written 24 bytes past all along"
+        );
+        // The same frame into the format the client actually uses: nothing hides
+        // there, because the fourth byte of every pixel is 255.
+        assert_ne!(past(Pixel::RGBA, 4, 0xAA), 0);
 
         let mut decoder =
             VideoDecoder::new(CodecType::H264, width, height, false).expect("a decoder");
@@ -1107,7 +1131,7 @@ mod tests {
         assert_eq!(
             decoder.write,
             Write::Tail,
-            "one filling would have called this a converter that writes nothing past"
+            "the probe did not find an overrun this frame really has"
         );
     }
 

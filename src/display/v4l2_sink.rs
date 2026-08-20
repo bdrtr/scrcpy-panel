@@ -88,6 +88,18 @@ mod linux {
             as libc::c_ulong
     }
 
+    /// Drop every fourth byte, reusing `out`'s allocation.
+    ///
+    /// The fourth byte is the alpha the decoder now carries — see
+    /// `V4l2Sink::write_rgba_frame` for why it is there and why it goes here.
+    pub(super) fn pack_rgba_into_rgb(rgba: &[u8], out: &mut Vec<u8>) {
+        out.clear();
+        out.reserve(rgba.len() / 4 * 3);
+        for pixel in rgba.chunks_exact(4) {
+            out.extend_from_slice(&pixel[..3]);
+        }
+    }
+
     /// A frame waiting out `--v4l2-buffer`.
     struct Delayed {
         due: std::time::Instant,
@@ -104,6 +116,9 @@ mod linux {
         /// consumers that are behind the mirror window.
         delay: std::time::Duration,
         queue: std::cell::RefCell<std::collections::VecDeque<Delayed>>,
+        /// Where a frame's fourth byte is dropped on the way here — see
+        /// `write_rgba_frame`. Kept rather than allocated a frame at a time.
+        packed: std::cell::RefCell<Vec<u8>>,
     }
 
     impl V4l2Sink {
@@ -154,6 +169,7 @@ mod linux {
                 height,
                 delay: std::time::Duration::from_millis(buffer_ms as u64),
                 queue: std::cell::RefCell::new(std::collections::VecDeque::new()),
+                packed: std::cell::RefCell::new(Vec::new()),
             })
         }
 
@@ -167,6 +183,24 @@ mod linux {
 
         pub fn device(&self) -> &str {
             &self.device
+        }
+
+        /// Publish one frame as the decoder has it, which is RGBA.
+        ///
+        /// V4L2 is told RGB24 and the decoder now works in RGBA, because that
+        /// is four times faster into the window — so the fourth byte is dropped
+        /// here instead. It is a pass over the frame, which is what the window
+        /// path no longer does; a sink is off by default and this is the one
+        /// place still paying for three bytes a pixel.
+        pub fn write_rgba_frame(&self, rgba: &[u8]) -> bool {
+            let packed = {
+                let mut packed = self.packed.borrow_mut();
+                pack_rgba_into_rgb(rgba, &mut packed);
+                std::mem::take(&mut *packed)
+            };
+            let published = self.write_frame(&packed);
+            *self.packed.borrow_mut() = packed;
+            published
         }
 
         /// Publish one packed RGB24 frame, honouring `--v4l2-buffer`.
@@ -262,6 +296,32 @@ mod linux {
 #[cfg(target_os = "linux")]
 pub use linux::V4l2Sink;
 
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    /// The fourth byte is dropped, not the first — a channel order got the wrong
+    /// way round here would show up as a blue-looking camera and nothing else.
+    #[test]
+    fn packing_rgba_down_to_rgb_keeps_the_colour_and_drops_the_alpha() {
+        let rgba: Vec<u8> = vec![
+            1, 2, 3, 255, //
+            4, 5, 6, 128, //
+            7, 8, 9, 0,
+        ];
+        let mut packed = vec![0xFF; 7];
+        super::linux::pack_rgba_into_rgb(&rgba, &mut packed);
+        assert_eq!(packed, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    }
+
+    /// A ragged tail is dropped rather than half-copied, the same way the
+    /// mirror pass in the window treats one.
+    #[test]
+    fn a_pixel_that_is_not_all_there_is_left_out() {
+        let mut packed = Vec::new();
+        super::linux::pack_rgba_into_rgb(&[1, 2, 3, 255, 4, 5], &mut packed);
+        assert_eq!(packed, vec![1, 2, 3]);
+    }
+}
+
 #[cfg(not(target_os = "linux"))]
 mod other {
     use anyhow::{bail, Result};
@@ -276,6 +336,9 @@ mod other {
         }
         pub fn matches(&self, _width: u32, _height: u32) -> bool {
             true
+        }
+        pub fn write_rgba_frame(&self, _rgba: &[u8]) -> bool {
+            false
         }
         pub fn device(&self) -> &str {
             ""

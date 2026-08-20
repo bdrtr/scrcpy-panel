@@ -367,12 +367,21 @@ fn main() {
 fn swscale_both_ways(width: u32, height: u32, count: u32) {
     use ffmpeg_next::format::Pixel;
     ffmpeg_next::init().expect("ffmpeg");
-    let mut source = ffmpeg_next::frame::Video::new(Pixel::YUV420P, width, height);
-    for plane in 0..source.planes() {
-        for (i, byte) in source.data_mut(plane).iter_mut().enumerate() {
-            *byte = (i.wrapping_mul(37 + plane) % 251) as u8;
-        }
-    }
+    // Six source frames rather than one, because a decoder hands over a
+    // different frame every time and one sitting in cache is not that.
+    let mut sources: Vec<ffmpeg_next::frame::Video> = (0..6u32)
+        .map(|n| {
+            let mut frame =
+                ffmpeg_next::frame::Video::new(Pixel::YUV420P, width, height);
+            for plane in 0..frame.planes() {
+                for (i, byte) in frame.data_mut(plane).iter_mut().enumerate() {
+                    *byte =
+                        (i.wrapping_mul(37 + plane).wrapping_add(n as usize * 11) % 251) as u8;
+                }
+            }
+            frame
+        })
+        .collect();
     for (format, bytes_per_pixel, name) in
         [(Pixel::RGB24, 3usize, "RGB24"), (Pixel::RGBA, 4, "RGBA ")]
     {
@@ -391,7 +400,8 @@ fn swscale_both_ways(width: u32, height: u32, count: u32) {
         )
         .expect("a scaler");
         let started = Instant::now();
-        for _ in 0..count {
+        for round in 0..count {
+            let source = &mut sources[round as usize % 6];
             unsafe {
                 let mut planes: [*mut u8; 4] = [
                     out.as_mut_ptr(),

@@ -10,7 +10,7 @@ slint::include_modules!();
 #[cfg(feature = "wgpu")]
 pub mod yuv;
 
-use slint::{Image, Rgb8Pixel, SharedPixelBuffer};
+use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::media::decoder::DecodedFrame;
 
@@ -123,23 +123,24 @@ pub fn display_aspect(frame_width: u32, frame_height: u32, orientation: Orientat
 /// window is already reading from.
 pub fn frame_to_image(frame: &DecodedFrame, flip: bool) -> Image {
     if !flip {
-        return Image::from_rgb8(frame.buffer.clone());
+        return Image::from_rgba8(frame.buffer.clone());
     }
 
-    let mut mirrored = SharedPixelBuffer::<Rgb8Pixel>::new(frame.width, frame.height);
+    let mut mirrored = SharedPixelBuffer::<Rgba8Pixel>::new(frame.width, frame.height);
     let source = frame.buffer.as_bytes();
     let bytes = mirrored.make_mut_bytes();
     let n = source.len().min(bytes.len());
     mirror_rows(&source[..n], frame.width as usize, &mut bytes[..n]);
-    Image::from_rgb8(mirrored)
+    Image::from_rgba8(mirrored)
 }
 
-/// Copy packed RGB8 rows into `target`, each row reversed.
+/// Copy packed RGBA8 rows into `target`, each row reversed.
 ///
 /// Ragged tails are left alone rather than guessed at: a short frame is a
 /// decoder that went wrong, and half a mirrored row is no better than none.
 fn mirror_rows(source: &[u8], width: usize, target: &mut [u8]) {
-    let stride = width * 3;
+    const PIXEL: usize = 4;
+    let stride = width * PIXEL;
     if stride == 0 {
         return;
     }
@@ -147,9 +148,9 @@ fn mirror_rows(source: &[u8], width: usize, target: &mut [u8]) {
         let Some(line) = source.get(row * stride..(row + 1) * stride) else {
             break;
         };
-        for (x, pixel) in out.chunks_exact_mut(3).enumerate() {
-            let mirrored = (width - 1 - x) * 3;
-            pixel.copy_from_slice(&line[mirrored..mirrored + 3]);
+        for (x, pixel) in out.chunks_exact_mut(PIXEL).enumerate() {
+            let mirrored = (width - 1 - x) * PIXEL;
+            pixel.copy_from_slice(&line[mirrored..mirrored + PIXEL]);
         }
     }
 }
@@ -162,18 +163,19 @@ mod tests {
     /// and each one is reversed pixel by pixel, not byte by byte.
     #[test]
     fn a_flip_reverses_pixels_within_a_row() {
-        // Two rows of three pixels, each pixel a distinct colour.
+        // Two rows of three pixels, each pixel a distinct colour, and the
+        // fourth byte along for the ride — the frame is RGBA now.
         let source: Vec<u8> = vec![
-            1, 1, 1, 2, 2, 2, 3, 3, 3, // row 0
-            4, 4, 4, 5, 5, 5, 6, 6, 6, // row 1
+            1, 1, 1, 255, 2, 2, 2, 255, 3, 3, 3, 255, // row 0
+            4, 4, 4, 255, 5, 5, 5, 255, 6, 6, 6, 255, // row 1
         ];
         let mut target = vec![0u8; source.len()];
         mirror_rows(&source, 3, &mut target);
         assert_eq!(
             target,
             vec![
-                3, 3, 3, 2, 2, 2, 1, 1, 1, //
-                6, 6, 6, 5, 5, 5, 4, 4, 4,
+                3, 3, 3, 255, 2, 2, 2, 255, 1, 1, 1, 255, //
+                6, 6, 6, 255, 5, 5, 5, 255, 4, 4, 4, 255,
             ]
         );
     }
@@ -182,7 +184,8 @@ mod tests {
     /// mapping has no off-by-one in it.
     #[test]
     fn flipping_twice_is_the_original() {
-        let source: Vec<u8> = (0..(4 * 3 * 3) as u8).collect();
+        // Three rows of four RGBA pixels.
+        let source: Vec<u8> = (0..(3 * 4 * 4) as u8).collect();
         let mut once = vec![0u8; source.len()];
         mirror_rows(&source, 4, &mut once);
         let mut twice = vec![0u8; source.len()];
@@ -193,9 +196,9 @@ mod tests {
     #[test]
     fn a_short_frame_does_not_panic() {
         let source = vec![9u8; 5];
-        let mut target = vec![0u8; 12];
+        let mut target = vec![0u8; 16];
         mirror_rows(&source, 2, &mut target);
-        assert_eq!(target, vec![0u8; 12], "nothing was copied from a short row");
+        assert_eq!(target, vec![0u8; 16], "nothing was copied from a short row");
     }
 
     /// The window hands over a point inside the visible rectangle; the device

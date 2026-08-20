@@ -381,7 +381,7 @@ fn start_pump(
         // reported rather than silently written at the wrong stride.
         if let Some(ref sink) = v4l2 {
             if sink.matches(latest.width, latest.height) {
-                sink.write_frame(latest.buffer.as_bytes());
+                sink.write_rgba_frame(latest.buffer.as_bytes());
             } else if (latest.width, latest.height) != frame_size.get() {
                 log::warn!(
                     "V4L2 sink {} was opened at a different size; reopen the session to follow the rotation",

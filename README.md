@@ -91,6 +91,7 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
 | `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
 | Hardware decoding | works, and is off by default because it is slower here — VAAPI opens on this machine's second render node, which the fixed per-platform list and the node search are for. In a live session on the Redmi, screen busy, it cost 6.49 ms a frame against the software path's 5.40, and 5.43 of that was the trip back from the GPU alone. Its picture is the software decoder's byte for byte — mean 0.0000 of 255, worst single byte 0, over 568 frames |
+| A fourth byte a pixel | works, and is worth 3 ms a frame — a live session on the Redmi with the screen scrolling spent 4.04 ms a draw over 1500 draws before the change and 0.98 over 1520 after, the same probe on the same window. The picture is the same one: RGBA against packed RGB differs by 0.000 of 255 on the two renderers whose snapshots can be trusted, and the hardware decoder, the mirror and `--display-orientation=flipN` all ran clean |
 | swscale writing past the window's buffer | fixed — it writes 24 bytes past the last row at 1080x2400, 21 at 1081x2400 and nothing at all at 1080x2399, so which of three writes the client uses is measured on the first frame of each size rather than assumed. `cargo test` checks the one chosen against a whole-picture conversion at six sizes, byte for byte |
 | No copies per frame instead of two | measured at 1080x2400 — 0.70 ms of conversion plus 1.10 of copying became 1.17 ms of conversion and nothing else; the picture still refreshes, two screenshots two seconds apart differing by thousands of RMSE against a still-mirror floor of about 100 |
 | `--otg` | works — the device is found on the bus with no adb at all, a keyboard and a mouse are registered over USB, and the pointer's motion comes out of the phone's kernel as `REL_X`/`REL_Y` while the window has it |
@@ -389,12 +390,23 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   --example frame_cost` measures it, six buffers deep because that is the session's frame
   pool. Two renderers linked in changes what the default one is, so the comparisons here
   name theirs — `SLINT_BACKEND=winit-femtovg` against `WGPU=1`.
-- **And most of that eight megabytes is not the traffic either.** Three bytes a pixel is not
-  a texture format any card has, so somebody pads it out to four, every frame, on the CPU.
-  Handing Slint the same picture already RGBA — 10.4 MB rather than 7.8, a third more to
-  carry — costs 0.94 ms a frame against 3.98. swscale converts into RGBA for 0.48 where
-  RGB24 costs 0.58, because four-byte writes suit it better than three. That is 3.14 ms a
-  frame for a change of pixel format, and it needs no shader, no WGPU and no unstable API.
+- **And most of that eight megabytes is not the traffic either — it is the fourth byte.**
+  Three bytes a pixel is not a texture format any card has, so somebody pads it out, every
+  frame, on the CPU. Handing Slint the same picture already RGBA — 10.4 MB rather than 7.8,
+  a third more to carry — costs 0.94 ms a frame against 3.98. swscale converts into RGBA for
+  0.48 where RGB24 costs 0.59, four-byte writes suiting it better than three, and the
+  decoder's own total is unchanged: switching the destination format inside one binary and
+  running it both ways gives 3.1 ms a frame either way, six runs of 568 frames. So this is
+  the change the client has made, and it needs no shader, no WGPU and no unstable API.
+- And it is not only the harness saying so. The same probe put on the mirror window's own
+  renderer, in a live session on the Redmi with the screen scrolling: 4.04 ms a draw over
+  1500 draws before the change, 0.98 over 1520 after. The before figure came from a build of
+  the commit prior to it, made in a worktree so the two differed by nothing else.
+- Two things still pay for three bytes a pixel, and both are off by default. `--v4l2-sink`
+  publishes RGB24, which V4L2 has a fourcc for, so the fourth byte is dropped on the way
+  there — a pass over the frame, in the one place that still wants one.
+  `--display-orientation=flipN` mirrors rows four bytes at a time now instead of three,
+  which costs the same as it did.
 - **The shader is written and measured, and does not earn its keep.** `src/ui/yuv.rs`
   uploads the YUV420P planes as three R8 textures and converts them in one pass, which comes
   to 1.25 ms a frame — 0.56 uploading and converting, 0.69 drawing. Against the fourth
@@ -437,8 +449,9 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
 - **Replaced the SDL2 window and renderer with Slint.** `display/screen.rs` and
   `input/manager.rs` are gone; `ui/mirror.slint` draws the mirror and
   `input/slint_input.rs` turns pointer and key events into control messages.
-- The decoder now emits packed RGB8 instead of YUV420P planes, because Slint takes pixel
-  buffers where SDL took YUV textures. Its scaler is also rebuilt when the stream changes
+- The decoder now emits packed RGBA8 instead of YUV420P planes, because Slint takes pixel
+  buffers where SDL took YUV textures — RGBA rather than RGB because three bytes a pixel is
+  not a texture format and Slint was padding every frame out to four on the CPU. Its scaler is also rebuilt when the stream changes
   size or format, which upstream never did — the device rotating used to feed the old
   scaler.
 - Ctrl-C and SIGTERM leave the event loop and unwind the pipeline in order. Without this
@@ -487,16 +500,18 @@ curl -L -o target/release/scrcpy-server \
 5. ~~Get input parity back: UHID keyboard and mouse, gamepads, AOA and OTG~~ — done, bar a
    gamepad to try the gamepads on
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
-7. GPU frame path: ~~the CPU copies~~ — gone, swscale writes into Slint's own buffer. The
-   rest of it turned out to be a fourth byte rather than a shader. Packed RGB is not a
-   texture format any card has, so something pads it out every frame, and at 1080x2400 that
-   costs 3.98 ms against 0.94 for handing Slint the same picture already RGBA — more bytes,
-   a quarter of the time. swscale is cheaper into RGBA too, 0.48 against 0.58. So the ledger
-   on the renderer this ships with is 4.56 ms a frame today against 1.42, and the shader —
-   written, measured and correct — comes to 1.25 on Slint's WGPU renderer. **The fourth byte
-   is worth 3.14 ms a frame and the shader 0.17 more**, so the shader is not wired in and
-   `--features wgpu` is where it lives. `cargo run --release --example frame_cost` is the
-   measurement
+7. ~~GPU frame path~~ — done, and it turned out not to want a GPU. The CPU copies went when
+   swscale was pointed at Slint's own buffer; the rest of it was a fourth byte. Packed RGB
+   is not a texture format any card has, so something padded it out every frame: at
+   1080x2400 that cost 3.98 ms a frame against 0.94 for handing Slint the same picture
+   already RGBA — a third more bytes, a quarter of the time. The decoder converts into RGBA
+   now, which swscale does for 0.48 against RGB24's 0.59 and which leaves the decoder's own
+   cost where it was, 3.1 ms a frame either way. **3.0 ms a frame, off the thread that draws
+   and takes input** — 4.04 ms a draw against 0.98 in a live session on the Redmi, measured
+   both ways with the same probe. The shader that was meant to be this item is written and measured and
+   comes to 1.25 ms against the fourth byte's 1.42 — 0.17 for a WGPU renderer and an
+   unstable API — so it lives behind `--features wgpu` and the client does not use it.
+   `cargo run --release --example frame_cost` is the measurement
 8. ~~Fill in what upstream left out: virtual display (`--new-display`), the rest of camera,
    OTG~~ — done
 
