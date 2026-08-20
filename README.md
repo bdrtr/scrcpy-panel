@@ -392,9 +392,21 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   frame_cost` measures it, six buffers deep because that is the session's frame pool, and
   `frame_cost 1080x1200` is the half-size figure: the same byte count as a 1080x2400 frame
   in YUV420P, which is the closest this can get to the answer without writing the thing.
+  Two renderers linked in changes what the default one is, so the comparisons here name
+  theirs — `SLINT_BACKEND=winit-femtovg` against `WGPU=1`.
   What it does not measure: three plane uploads have three lots of per-call overhead where
   this has one, and the shader costs GPU time this does not count. 2.3 ms a frame is
   therefore the ceiling on the prize, not a promise.
+- **The renderer the shader needs is not free, and is not linked in by default.** Slint's
+  texture import wants its WGPU renderer, and asking for it changes what every frame costs,
+  not only the ones a shader would touch: drawing a window where nothing changed costs 0.68
+  ms a frame there against 0.02 on the OpenGL renderer, and the same eight-megabyte upload
+  costs 4.09 against 3.90 — with 0.8 ms more CPU behind it, which looks like work moved onto
+  threads of its own. At the byte count that matters it comes out the other way: 3.9 MB
+  costs 1.91 ms on WGPU against 2.17 on OpenGL. So the switch pays for itself, but only
+  once the frames are smaller, and until then it is a tax. That is why `wgpu` is an optional
+  feature rather than a dependency — linking the renderer in is enough to make Slint pick
+  it, and the 0.68 ms floor arrives with it whether or not anything uses the texture import.
 - The flip is the one thing that still costs a pass, and cannot stop: a mirror cannot be
   done in the buffer the window is reading from, so `--display-orientation=flipN` builds a
   second one.
@@ -463,12 +475,14 @@ curl -L -o target/release/scrcpy-server \
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
 7. GPU frame path: ~~the CPU copies~~ — gone, swscale writes into Slint's own buffer. What
    is left is bigger than this list used to say, and most of it is not the conversion.
-   Taking eight megabytes of packed RGB to the card costs 3.87 ms a frame at 1080x2400
-   against the conversion's 0.59, and half those bytes cost 2.14 — so a shader fed the YUV
-   planes (Slint's `unstable-wgpu-29` texture import) is worth about 2.3 ms a frame, not
-   the 0.59 the conversion is. `cargo run --release --example frame_cost` is the
-   measurement. Still to find out: what three plane uploads cost against one, and what the
-   shader costs on the GPU side, neither of which this measures
+   Taking eight megabytes of packed RGB to the card costs 3.90 ms a frame at 1080x2400
+   against the conversion's 0.59; the same path carrying the 3.9 MB a YUV420P frame would
+   be costs 1.91 on Slint's WGPU renderer. So the ledger is 4.49 ms a frame today against
+   about 1.91, and the prize is ~2.6 — not the 0.59 the conversion is. The gate is open:
+   WGPU renders here, and a `wgpu::Texture` made outside Slint draws in a Slint `Image`.
+   `cargo run --release --example frame_cost` is the measurement, `--features wgpu` and
+   `WGPU=1` the other renderer. Still to find out: what three plane uploads cost against
+   one, and what the shader costs on the GPU side, neither of which this measures
 8. ~~Fill in what upstream left out: virtual display (`--new-display`), the rest of camera,
    OTG~~ — done
 

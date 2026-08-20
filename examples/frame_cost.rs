@@ -105,6 +105,22 @@ fn main() {
         (width as usize * height as usize * 3) as f64 / 1e6
     );
 
+    // Built with `--features wgpu`, `WGPU=1` puts the same measurement through
+    // Slint's WGPU renderer instead of its OpenGL one — the renderer the shader
+    // path would need. `SLINT_BACKEND=winit-femtovg` picks the other one back.
+    #[cfg(feature = "wgpu")]
+    let wgpu = std::env::var("WGPU").is_ok();
+    #[cfg(not(feature = "wgpu"))]
+    let wgpu = false;
+    #[cfg(feature = "wgpu")]
+    if wgpu {
+        slint::BackendSelector::new()
+            .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::default())
+            .select()
+            .expect("a wgpu backend");
+    }
+    println!("renderer: {}", if wgpu { "wgpu" } else { "whatever is linked in" });
+
     let window = Bench::new().expect("a window");
     window.set_frame(Image::from_rgb8(ring[0].clone()));
 

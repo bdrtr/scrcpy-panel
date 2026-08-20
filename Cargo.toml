@@ -32,6 +32,13 @@ serde_json = "1"
 gilrs = "0.11.2"
 rusb = "0.9.4"
 
+[features]
+# Slint's WGPU renderer and its texture import, for `examples/frame_cost.rs`
+# and for whatever roadmap item 7 turns into. Off by default on purpose:
+# linking the WGPU renderer in also makes Slint pick it, and that costs 0.67 ms
+# a frame before it saves anything — see the README.
+wgpu = ["slint/unstable-wgpu-29", "slint/renderer-femtovg-wgpu"]
+
 [profile.release]
 lto = true
 strip = true
