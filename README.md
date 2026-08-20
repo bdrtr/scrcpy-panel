@@ -381,6 +381,20 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   server's encoder writes one slice a frame. At 2.96 ms a frame — decode and colour
   conversion together — the one thread carries 338 frames a second, and the stream arrives
   at sixty.
+- **The window costs more than the decoder, which this file did not know.** Everything above
+  measures the decoder, and the decoder was never the expensive half. Slint takes the whole
+  frame to the card every time it changes, and at 1080x2400 that is eight megabytes and
+  3.87 ms — against 2.96 for decoding and converting the same frame. Handing back the same
+  buffer instead costs 0.02, so it is the traffic and not the drawing. It scales with the
+  bytes and nothing else: 7.8 MB costs 3.87 ms, 3.9 costs 2.14, 0.5 costs 0.42. That is
+  what makes the shader worth writing — YUV420P planes are 3.9 MB where the RGB is 7.8, so
+  the upload halves and the conversion goes altogether. `cargo run --release --example
+  frame_cost` measures it, six buffers deep because that is the session's frame pool, and
+  `frame_cost 1080x1200` is the half-size figure: the same byte count as a 1080x2400 frame
+  in YUV420P, which is the closest this can get to the answer without writing the thing.
+  What it does not measure: three plane uploads have three lots of per-call overhead where
+  this has one, and the shader costs GPU time this does not count. 2.3 ms a frame is
+  therefore the ceiling on the prize, not a promise.
 - The flip is the one thing that still costs a pass, and cannot stop: a mirror cannot be
   done in the buffer the window is reading from, so `--display-orientation=flipN` builds a
   second one.
@@ -448,9 +462,13 @@ curl -L -o target/release/scrcpy-server \
    gamepad to try the gamepads on
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
 7. GPU frame path: ~~the CPU copies~~ — gone, swscale writes into Slint's own buffer. What
-   is left is the conversion itself, 1.17 ms a frame, which means uploading YUV planes and
-   converting in a shader (Slint's `unstable-wgpu-29` texture import). That is the whole
-   prize now, and it is smaller than the copies were
+   is left is bigger than this list used to say, and most of it is not the conversion.
+   Taking eight megabytes of packed RGB to the card costs 3.87 ms a frame at 1080x2400
+   against the conversion's 0.59, and half those bytes cost 2.14 — so a shader fed the YUV
+   planes (Slint's `unstable-wgpu-29` texture import) is worth about 2.3 ms a frame, not
+   the 0.59 the conversion is. `cargo run --release --example frame_cost` is the
+   measurement. Still to find out: what three plane uploads cost against one, and what the
+   shader costs on the GPU side, neither of which this measures
 8. ~~Fill in what upstream left out: virtual display (`--new-display`), the rest of camera,
    OTG~~ — done
 
