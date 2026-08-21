@@ -686,18 +686,28 @@ fn start_audio(
     }
 
     let (samples_tx, samples_rx): (Sender<Vec<f32>>, Receiver<Vec<f32>>) = bounded(32);
+    let playing = !(opts.no_playback || opts.no_audio_playback);
     let codec = info.codec;
     let recorder = recorder.clone();
     thread::Builder::new()
         .name("scrcpy-audio".into())
-        .spawn(move || run_audio_pipeline(header_socket, codec, samples_tx, recorder, config_seen))
+        .spawn(move || {
+            run_audio_pipeline(
+                header_socket,
+                codec,
+                samples_tx,
+                recorder,
+                config_seen,
+                playing,
+            )
+        })
         .context("Failed to start audio thread")?;
 
     Ok((Some(AudioStream {
         samples: samples_rx,
         buffer_ms: opts.audio_buffer,
         output_buffer_ms: opts.audio_output_buffer,
-        playback: !(opts.no_playback || opts.no_audio_playback),
+        playback: playing,
     }), Some(codec_id)))
 }
 
@@ -816,14 +826,20 @@ fn run_decoder(
 }
 
 /// Reads audio packets, decodes them and tees the raw ones to the recorder.
+///
+/// `playback` is whether anything is going to listen. The packets reach the
+/// recorder either way; it only decides whether they are decoded for the
+/// speakers as well.
 fn run_audio_pipeline(
     socket: TcpStream,
     codec_type: demuxer::CodecType,
     samples_tx: Sender<Vec<f32>>,
     recorder: Arc<RwLock<Option<Recorder>>>,
     config_seen: Arc<Mutex<Option<Vec<u8>>>>,
+    playback: bool,
 ) {
     let mut format_checked = false;
+    let mut playing = playback;
     let mut decoder = match AudioDecoder::new(codec_type) {
         Ok(decoder) => decoder,
         Err(e) => {
@@ -847,6 +863,17 @@ fn run_audio_pipeline(
                         is_key: packet.is_key_frame,
                     });
                 }
+                // The packet has already reached the recorder above. Decoding
+                // it is only ever for the speakers, so with nothing listening
+                // there is nothing to decode it for — and a listener that goes
+                // away is not a reason to stop, because the recording is still
+                // being written from the packets. Returning here is what made
+                // --no-audio-playback quietly strip the sound out of --record,
+                // against what the flag says and against what `AudioStream`'s
+                // own comment promises.
+                if !playing {
+                    continue;
+                }
                 match decoder.decode(&packet) {
                     Ok(Some(audio)) => {
                         // The player and the regulator are built for 48 kHz
@@ -866,8 +893,8 @@ fn run_audio_pipeline(
                             }
                         }
                         if samples_tx.send(audio.samples).is_err() {
-                            log::debug!("Audio player disconnected");
-                            return;
+                            log::debug!("Nothing is listening to the audio; carrying on for the recording");
+                            playing = false;
                         }
                     }
                     Ok(None) => {} // config packet, or more data needed
