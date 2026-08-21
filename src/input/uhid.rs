@@ -118,7 +118,13 @@ impl Uhid {
             }
         }
 
-        if self.keyboard.is_none() || self.shortcut_held() {
+        // A press while the shortcut modifier is held belongs to the shortcut
+        // layer, not to the device. A *release* still has to get through: the
+        // device is holding that key down, and swallowing the release leaves it
+        // held for the rest of the session. Press A, then Alt, then let A go,
+        // and the device would type a's until something else pressed and
+        // released A with no modifier.
+        if self.keyboard.is_none() || (pressed && self.shortcut_held()) {
             return None;
         }
         hid_usage(code).map(|usage| (usage, self.modifiers))
@@ -137,6 +143,43 @@ impl Uhid {
             return false;
         }
         matches!(self.capture_key.take(), Some(down) if down == code)
+    }
+
+    /// Whether any of this is worth doing: a keyboard, a mouse, or both.
+    ///
+    /// Deliberately not "is there a controller" — see the note in
+    /// `window_event`.
+    fn has_somewhere_to_send(&self) -> bool {
+        self.keyboard.is_some() || self.mouse.is_some()
+    }
+
+    /// Let go of everything, and tell the device so.
+    ///
+    /// The releases go with the focus: Alt-Tab away from the window and the
+    /// key-up for Alt is delivered to whatever took the focus, not here. The
+    /// modifier byte would then hold Alt for good — which also makes
+    /// `shortcut_held` true for ever, and every key after it is swallowed as a
+    /// shortcut. The keyboard is dead for the rest of the session, and nothing
+    /// says why.
+    fn release_everything(&mut self) {
+        self.modifiers = 0;
+        let keyboard = self
+            .keyboard
+            .as_mut()
+            .map(|(keyboard, road)| (keyboard.release_all(), *road));
+        if let Some((report, road)) = keyboard {
+            self.deliver(HID_ID_KEYBOARD, road, &report);
+        }
+        if self.buttons != 0 {
+            self.buttons = 0;
+            let mouse = self
+                .mouse
+                .as_ref()
+                .map(|(mouse, road)| (mouse.click_report(0), *road));
+            if let Some((report, road)) = mouse {
+                self.deliver(HID_ID_MOUSE, road, &report);
+            }
+        }
     }
 
     fn shortcut_held(&self) -> bool {
@@ -415,7 +458,15 @@ impl CustomApplicationHandler for UhidHandler {
         event: &WindowEvent,
     ) -> EventResult {
         let mut uhid = self.inner.borrow_mut();
-        if uhid.controller.is_none() {
+        // Not "is there a controller": `--otg` has none — no adb, no server,
+        // no socket — and a keyboard and a mouse over the cable are the whole
+        // of what it is for. What matters is whether there is anything
+        // configured to send to; `deliver` already knows which road each of
+        // them takes, and does nothing on the socket road without a
+        // controller. Mouse motion arrives as a device event rather than a
+        // window one and never came through here, which is why OTG looked
+        // like it worked.
+        if !uhid.has_somewhere_to_send() {
             return EventResult::Propagate;
         }
 
@@ -483,6 +534,7 @@ impl CustomApplicationHandler for UhidHandler {
                 if let Some(window) = winit_window {
                     Self::apply_capture(&mut uhid, window);
                 }
+                uhid.release_everything();
             }
             _ => {
                 // Somewhere to catch up on a capture asked for before there
@@ -537,6 +589,63 @@ mod tests {
             capture_applied: false,
             capture_key: None,
         }
+    }
+
+    /// `--otg` attaches no controller — it has no adb, no server and no socket
+    /// to hold one — and a keyboard and a mouse over the cable are the whole of
+    /// what it is for. A guard that asked for a controller shut it out of its
+    /// own purpose, and only mouse *motion* still worked, because that arrives
+    /// as a device event rather than a window one.
+    #[test]
+    fn a_session_with_no_controller_still_has_somewhere_to_send() {
+        let otg = uhid("lalt");
+        assert!(otg.controller.is_none(), "this is the OTG shape");
+        assert!(otg.has_somewhere_to_send());
+
+        let mut nothing = uhid("lalt");
+        nothing.keyboard = None;
+        assert!(!nothing.has_somewhere_to_send());
+    }
+
+    /// A key already down when the shortcut modifier arrives has to be
+    /// releasable. The press belongs to the shortcut layer; the release belongs
+    /// to the device, which is holding the key.
+    #[test]
+    fn a_release_gets_through_while_the_shortcut_modifier_is_held() {
+        let mut uhid = uhid("lalt");
+        assert!(uhid.on_key(key(KeyCode::KeyA), true).is_some(), "A goes down");
+        uhid.on_key(key(KeyCode::AltLeft), true);
+        assert!(uhid.shortcut_held(), "Alt is the shortcut modifier here");
+        assert!(
+            uhid.on_key(key(KeyCode::KeyB), true).is_none(),
+            "a press while it is held is a shortcut, not a keystroke"
+        );
+        assert!(
+            uhid.on_key(key(KeyCode::KeyA), false).is_some(),
+            "but the release of a key the device is holding has to get out"
+        );
+    }
+
+    /// Losing the focus takes the releases with it: the key-up for Alt goes to
+    /// whatever took the focus. Left alone, the modifier byte holds Alt for
+    /// good, `shortcut_held` stays true, and every key after it is swallowed.
+    #[test]
+    fn losing_the_focus_lets_go_of_everything() {
+        let mut uhid = with_mouse();
+        uhid.on_key(key(KeyCode::KeyA), true);
+        uhid.on_key(key(KeyCode::AltLeft), true);
+        uhid.buttons = 1;
+        assert!(uhid.shortcut_held());
+
+        uhid.release_everything();
+
+        assert_eq!(uhid.modifiers, 0, "no modifier is still held");
+        assert!(!uhid.shortcut_held(), "so the keyboard is not dead");
+        assert_eq!(uhid.buttons, 0, "and no button is still down");
+        assert!(
+            uhid.on_key(key(KeyCode::KeyB), true).is_some(),
+            "the next key types again"
+        );
     }
 
     fn with_mouse() -> Uhid {

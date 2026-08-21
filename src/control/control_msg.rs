@@ -76,8 +76,12 @@ pub enum ControlMsg {
         y: u32,
         screen_width: u16,
         screen_height: u16,
-        hscroll: i16,   // fixed-point: sign + magnitude
-        vscroll: i16,
+        /// Notches, as a float: one wheel click is 1.0. It goes on the wire
+        /// as 16-bit fixed point, which is what the field below does — a
+        /// notch count written straight into those two bytes reaches the
+        /// device as 1/32768 of a scroll and does nothing at all.
+        hscroll: f32,
+        vscroll: f32,
         buttons: u32,
     },
     BackOrScreenOn {
@@ -142,6 +146,15 @@ pub enum ControlMsg {
     },
 }
 
+/// A float in [-1, 1] as the 16-bit fixed point the server reads: the value
+/// times 2^15, with the top of the range clamped because +1.0 would otherwise
+/// wrap to -1.0. This is `sc_float_to_i16fp` from scrcpy, and getting it wrong
+/// is silent — the message is well formed and the device simply does nothing.
+fn to_i16fp(value: f32) -> i16 {
+    let scaled = (value.clamp(-1.0, 1.0) * 32768.0) as i32;
+    scaled.clamp(i16::MIN as i32, i16::MAX as i32) as i16
+}
+
 impl ControlMsg {
     /// Serialize this control message into bytes for the wire protocol
     pub fn serialize(&self) -> io::Result<Vec<u8>> {
@@ -187,8 +200,8 @@ impl ControlMsg {
                 buf.write_u16::<BigEndian>(*screen_width)?;
                 buf.write_u16::<BigEndian>(*screen_height)?;
                 // scroll values are sent as f32 encoded as 16-bit signed fixed-point
-                buf.write_i16::<BigEndian>(*hscroll)?;
-                buf.write_i16::<BigEndian>(*vscroll)?;
+                buf.write_i16::<BigEndian>(to_i16fp(*hscroll))?;
+                buf.write_i16::<BigEndian>(to_i16fp(*vscroll))?;
                 buf.write_u32::<BigEndian>(*buttons)?;
             }
             ControlMsg::BackOrScreenOn { action } => {
@@ -307,6 +320,46 @@ mod tests {
     /// client does not send, because an id is a position in that list: leaving
     /// the camera controls out of the count is how a resize would have been
     /// numbered 18 and read as a torch.
+    /// One wheel click has to arrive as one wheel click. The field is 16-bit
+    /// fixed point, so a notch count written into it straight reaches the
+    /// device as 1/32768 of a scroll — well formed, and nothing happens.
+    #[test]
+    fn a_notch_of_scroll_is_a_whole_notch_on_the_wire() {
+        let msg = ControlMsg::InjectScroll {
+            x: 100,
+            y: 200,
+            screen_width: 1080,
+            screen_height: 2400,
+            hscroll: 0.0,
+            vscroll: 1.0,
+            buttons: 0,
+        };
+        let bytes = msg.serialize().expect("a scroll serialises");
+        // type, x, y, w, h, then the two fixed-point fields
+        let hscroll = i16::from_be_bytes([bytes[13], bytes[14]]);
+        let vscroll = i16::from_be_bytes([bytes[15], bytes[16]]);
+        assert_eq!(hscroll, 0);
+        assert_eq!(vscroll, i16::MAX, "one notch up is the top of the range");
+
+        let down = ControlMsg::InjectScroll {
+            x: 0, y: 0, screen_width: 1, screen_height: 1,
+            hscroll: -1.0, vscroll: 0.0, buttons: 0,
+        };
+        let bytes = down.serialize().expect("a scroll serialises");
+        assert_eq!(i16::from_be_bytes([bytes[13], bytes[14]]), i16::MIN);
+    }
+
+    /// The conversion itself, at the edges where it would wrap.
+    #[test]
+    fn fixed_point_does_not_wrap_at_either_end() {
+        assert_eq!(to_i16fp(0.0), 0);
+        assert_eq!(to_i16fp(1.0), i16::MAX);
+        assert_eq!(to_i16fp(-1.0), i16::MIN);
+        assert_eq!(to_i16fp(2.0), i16::MAX, "clamped rather than wrapped");
+        assert_eq!(to_i16fp(-2.0), i16::MIN);
+        assert_eq!(to_i16fp(0.5), 16384);
+    }
+
     #[test]
     fn the_message_ids_match_scrcpy() {
         let scrcpy = [

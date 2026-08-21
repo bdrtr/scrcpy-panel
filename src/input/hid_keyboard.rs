@@ -67,9 +67,6 @@ impl HidKeyboard {
         }
     }
 
-    /// Send UHID_CREATE to register the virtual keyboard on the device
-
-
     /// Send a HID report for one key transition.
     ///
     /// `hid_usage` is a USB HID keyboard usage id and `modifiers` is the HID
@@ -124,5 +121,17 @@ impl HidKeyboard {
         }
 
         Some(report)
+    }
+
+    /// Forget every key and say so.
+    ///
+    /// A HID keyboard is a state rather than a stream of events: a key the
+    /// device saw go down and never come up stays down. The report with no
+    /// modifiers and no keys in it is how a keyboard says nothing is held, and
+    /// it is what the window losing focus has to send — the releases go with
+    /// the focus otherwise.
+    pub fn release_all(&mut self) -> [u8; REPORT_SIZE] {
+        self.keys = [false; NUM_KEYS];
+        [0u8; REPORT_SIZE]
     }
 }

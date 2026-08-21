@@ -483,10 +483,12 @@ impl SlintInput {
             return;
         }
         let (x, y) = self.to_frame(u, v);
-        // Slint reports scroll in pixels; the server wants discrete steps.
-        let h = dx.signum() as i16 * (dx.abs() > 0.5) as i16;
-        let vscroll = dy.signum() as i16 * (dy.abs() > 0.5) as i16;
-        if h == 0 && vscroll == 0 {
+        // Slint reports scroll in pixels; the server wants notches, as a float
+        // that the message encodes to fixed point. One notch a step, which is
+        // what a wheel click is.
+        let h = if dx.abs() > 0.5 { dx.signum() } else { 0.0 };
+        let vscroll = if dy.abs() > 0.5 { dy.signum() } else { 0.0 };
+        if h == 0.0 && vscroll == 0.0 {
             return;
         }
         controller.push_msg(ControlMsg::InjectScroll {
@@ -535,8 +537,7 @@ impl SlintInput {
         if control && !shortcut_active && !self.camera && !self.uhid && (c == 'v' || c == 'V') && !repeat {
             // Ctrl+V always types the text, which is what --legacy-paste asks
             // the shortcut to do as well.
-            let text = get_clipboard_text();
-            if !text.is_empty() {
+            if let Some(text) = clipboard_for_device() {
                 controller.push_msg(ControlMsg::InjectText { text });
             }
             return WindowAction::None;
@@ -707,14 +708,9 @@ impl SlintInput {
                 log::info!("Clipboard cut: device → host");
             }
             ShortcutAction::PasteFromPC => {
-                if !crate::control::clipboard::allows_to_device() {
-                    log::info!("Paste refused: --clipboard-direction is to-pc");
+                let Some(text) = clipboard_for_device() else {
                     return WindowAction::None;
-                }
-                let text = get_clipboard_text();
-                if text.is_empty() {
-                    return WindowAction::None;
-                }
+                };
                 if self.legacy_paste {
                     // Type it instead of setting the device clipboard, for
                     // apps that ignore a paste they did not ask for.
@@ -734,12 +730,7 @@ impl SlintInput {
                 controller.push_msg(ControlMsg::OpenHardKeyboardSettings);
             }
             ShortcutAction::PasteAsText => {
-                if !crate::control::clipboard::allows_to_device() {
-                    log::info!("Paste refused: --clipboard-direction is to-pc");
-                    return WindowAction::None;
-                }
-                let text = get_clipboard_text();
-                if !text.is_empty() {
+                if let Some(text) = clipboard_for_device() {
                     controller.push_msg(ControlMsg::InjectText { text });
                     log::info!("Clipboard: host → device (typed)");
                 }
@@ -979,6 +970,24 @@ fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> Result<T, arboar
 }
 
 /// Read the host clipboard.
+/// The host's clipboard, if it is allowed to leave the host.
+///
+/// Every way of pasting into the device goes through here rather than reading
+/// the clipboard directly, because there are three of them — Ctrl+V, MOD+V and
+/// MOD+Shift+V — and `--clipboard-direction=to-pc` has to stop all three. It
+/// stopped two, which is worse than not having the flag: the shortcut refused
+/// and the plainer way of doing the very same thing did not.
+///
+/// Empty comes back as `None` too: there is nothing to send either way.
+pub fn clipboard_for_device() -> Option<String> {
+    if !crate::control::clipboard::allows_to_device() {
+        log::info!("Paste refused: --clipboard-direction is to-pc");
+        return None;
+    }
+    let text = get_clipboard_text();
+    if text.is_empty() { None } else { Some(text) }
+}
+
 pub fn get_clipboard_text() -> String {
     with_clipboard(|clipboard| clipboard.get_text()).unwrap_or_default()
 }
@@ -991,6 +1000,22 @@ pub fn set_clipboard_text(text: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    /// `--clipboard-direction=to-pc` has to stop every way of pasting into the
+    /// device, and there are three of them. It used to stop two: the shortcut
+    /// refused and plain Ctrl+V did the very same thing anyway, which is worse
+    /// than not having the flag. They all go through one door now, and this is
+    /// the door. The refusal returns before the host's clipboard is read, so
+    /// this touches nothing outside the process.
+    #[test]
+    fn to_pc_refuses_to_hand_the_clipboard_over() {
+        crate::control::clipboard::set_direction("to-pc");
+        assert!(
+            super::clipboard_for_device().is_none(),
+            "the host's clipboard must not leave the host"
+        );
+        crate::control::clipboard::set_direction("both");
+    }
     use super::*;
 
     #[test]
