@@ -838,6 +838,19 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
                 if let Some(profile) = profiles.get(index as usize) {
                     write_config(&window, &profile.config);
                     drop(profiles);
+                    // A profile remembers flags, not which phone was plugged in
+                    // the day it was saved — but `serial` is one of its fields,
+                    // so writing it back pointed the next launch at that old
+                    // device while the ticked row, the label and the count all
+                    // still said otherwise. The ticked rows are the authority.
+                    let ticked = panel
+                        .selected
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .first()
+                        .cloned()
+                        .unwrap_or_default();
+                    window.global::<Cfg>().set_serial(ticked.as_str().into());
                     refresh_command(&window);
                     // Applying is not editing: a later save makes a new profile.
                     panel.editing_profile.set(None);
@@ -2411,6 +2424,11 @@ fn autostart_if_wanted(panel: &Rc<Panel>, window: &PanelWindow, ready: Option<&s
     };
 
     write_config(window, &config);
+    // Rewriting the form is not editing the profile it came from. Every other
+    // path that replaces these fields clears this; without it, a "Düzenle"
+    // started before a device was plugged in stayed pointing at its profile,
+    // and the next "Kaydet" wrote profile one's flags over profile three.
+    panel.editing_profile.set(None);
     window.global::<Cfg>().set_serial(serial.into());
     window.global::<App>().set_selection_label(serial.into());
     refresh_command(window);
