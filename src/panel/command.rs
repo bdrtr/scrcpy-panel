@@ -669,6 +669,7 @@ mod tests {
 
         let mut compared = 0;
         let mut wrong = Vec::new();
+        let mut missing = Vec::new();
         for line in global.lines() {
             // A trailing `// both | toDevice | toPc` is documentation, not part
             // of the value.
@@ -684,7 +685,12 @@ mod tests {
             };
             let field = name.replace('-', "_");
             let Some(here) = declared.get(&field) else {
-                continue; // in the UI but not in the form's struct
+                // In the UI and not in the form's struct at all. This used to be
+                // skipped, which left the guard blind to the very drift it is
+                // for: a field added to `Cfg` and forgotten in `PanelConfig`
+                // never reaches the command line and nothing says so.
+                missing.push(field);
+                continue;
             };
             let ui = match (kind, initialiser) {
                 ("string", Some(value)) => {
@@ -709,6 +715,11 @@ mod tests {
         assert!(
             compared > 50,
             "only {compared} fields were compared, so this is guarding nothing"
+        );
+        assert!(
+            missing.is_empty(),
+            "in ui/state.slint and not in PanelConfig, so they can never be sent:\n  {}",
+            missing.join("\n  ")
         );
         assert!(wrong.is_empty(), "{compared} fields compared:\n  {}", wrong.join("\n  "));
     }

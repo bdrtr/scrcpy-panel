@@ -450,15 +450,21 @@ impl Session {
         Ok(())
     }
 
-    /// Stop a recording without ending the session.
-    /// Stop a recording and wait for the file to be finished.
+    /// Stop a recording without ending the session, and wait for the file.
     ///
     /// Waiting is the point: the trailer is written after the last packet, and
     /// an mp4 without one does not open. This used to return the moment the
     /// recorder was told to stop, so a caller said "recording stopped" over a
     /// file that was not yet one.
     pub fn stop_recording(&self) -> bool {
-        match self.recorder.write().expect("recorder lock").take() {
+        // Taken out from under the lock on its own line, so the write guard is
+        // gone before the wait begins. Held across it — which is what a `match`
+        // on the guard does, since the temporary lives to the end of the
+        // statement — the demuxers block on their next packet, because they
+        // take this same lock for every one, and the mirror stops for as long
+        // as the file takes to finish.
+        let recorder = self.recorder.write().expect("recorder lock").take();
+        match recorder {
             Some(recorder) => {
                 recorder.stop();
                 self.wait_for_the_file();
@@ -521,7 +527,11 @@ impl Session {
             }
         }
 
-        if let Some(recorder) = self.recorder.write().expect("recorder lock").take() {
+        // Same care as `stop_recording`: out from under the lock first. Nothing
+        // is reading it by this point — the demuxers were joined above — but the
+        // two want to look the same, because the reason is the same.
+        let recorder = self.recorder.write().expect("recorder lock").take();
+        if let Some(recorder) = recorder {
             recorder.stop();
             self.wait_for_the_file();
         }
