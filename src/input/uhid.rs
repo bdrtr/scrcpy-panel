@@ -234,27 +234,45 @@ impl Uhid {
         (h != 0 || v != 0).then_some((v, h))
     }
 
-    /// Make a HID device at the far end, whichever way it is reached.
-    fn create(&mut self, id: u16, road: Road, report_desc: &'static [u8]) {
+    /// Make a HID device at the far end, whichever way it is reached, and say
+    /// whether it was made.
+    ///
+    /// Saying so matters: a registration that failed used to be logged and
+    /// swallowed, and the caller then recorded the keyboard anyway and
+    /// announced it as open. Every key after that went into a report nobody
+    /// could deliver — and because a keyboard was on the books, the ordinary
+    /// way of sending keystrokes stayed switched off. The device had no
+    /// keyboard at all and the log said the opposite.
+    fn create(&mut self, id: u16, road: Road, report_desc: &'static [u8]) -> bool {
         match road {
             Road::Socket => {
-                if let Some(controller) = self.controller.as_ref() {
-                    controller.push_msg(ControlMsg::UhidCreate {
-                        id,
-                        vendor_id: 0,
-                        product_id: 0,
-                        name: None,
-                        report_desc: report_desc.to_vec(),
-                    });
-                }
-            }
-            Road::Usb => {
-                if let Some(aoa) = self.aoa.as_mut() {
-                    if let Err(e) = aoa.register(id, report_desc) {
-                        log::warn!("AOA HID {id} could not be registered: {e:#}");
+                // Queued rather than confirmed: the device makes the node when
+                // the message reaches it. Without a controller there is nowhere
+                // to queue it, which is a failure.
+                match self.controller.as_ref() {
+                    Some(controller) => {
+                        controller.push_msg(ControlMsg::UhidCreate {
+                            id,
+                            vendor_id: 0,
+                            product_id: 0,
+                            name: None,
+                            report_desc: report_desc.to_vec(),
+                        });
+                        true
                     }
+                    None => false,
                 }
             }
+            Road::Usb => match self.aoa.as_mut() {
+                Some(aoa) => match aoa.register(id, report_desc) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        log::warn!("AOA HID {id} could not be registered: {e:#}");
+                        false
+                    }
+                },
+                None => false,
+            },
         }
     }
 
@@ -362,17 +380,28 @@ impl UhidInput {
         }
 
         if let Some(road) = keyboard_road {
-            uhid.create(HID_ID_KEYBOARD, road, crate::input::hid_keyboard::REPORT_DESC);
-            uhid.keyboard = Some((HidKeyboard::new(), road));
-            log::info!("Keyboard opened over {road:?}: the device applies its own layout");
+            if uhid.create(HID_ID_KEYBOARD, road, crate::input::hid_keyboard::REPORT_DESC) {
+                uhid.keyboard = Some((HidKeyboard::new(), road));
+                log::info!("Keyboard opened over {road:?}: the device applies its own layout");
+            } else {
+                // Left unset on purpose: with no keyboard on the books the
+                // ordinary keycode path takes the keys again, which is worth
+                // more than a HID device that is not there.
+                log::warn!("No keyboard over {road:?}; keys go the ordinary way instead");
+            }
         }
         if let Some(road) = mouse_road {
-            uhid.create(HID_ID_MOUSE, road, crate::input::hid_mouse::REPORT_DESC);
-            uhid.mouse = Some((HidMouse::new(), road));
-            // Captured from the start, as scrcpy does: a relative mouse with
-            // nothing to move is no mouse at all.
-            uhid.captured = true;
-            log::info!("Mouse opened over {road:?}, pointer captured; LAlt or Super gives it back");
+            if uhid.create(HID_ID_MOUSE, road, crate::input::hid_mouse::REPORT_DESC) {
+                uhid.mouse = Some((HidMouse::new(), road));
+                // Captured from the start, as scrcpy does: a relative mouse with
+                // nothing to move is no mouse at all.
+                uhid.captured = true;
+                log::info!(
+                    "Mouse opened over {road:?}, pointer captured; LAlt or Super gives it back"
+                );
+            } else {
+                log::warn!("No mouse over {road:?}; the pointer goes the ordinary way instead");
+            }
         }
     }
 
@@ -589,6 +618,33 @@ mod tests {
             capture_applied: false,
             capture_key: None,
         }
+    }
+
+    /// A HID device that could not be made must not be recorded as made.
+    ///
+    /// A failed AOA registration was logged and swallowed, and the keyboard was
+    /// put on the books anyway. Every key after that went into a report nobody
+    /// could deliver — and because a keyboard was on the books, the ordinary
+    /// keycode path stayed switched off, so the device had no keyboard at all
+    /// while the log said it had one.
+    #[test]
+    fn a_device_that_could_not_be_made_is_not_claimed() {
+        let mut nowhere = uhid("lalt");
+        nowhere.keyboard = None;
+        // No controller and no AOA: neither road leads anywhere.
+        assert!(nowhere.controller.is_none() && nowhere.aoa.is_none());
+        assert!(
+            !nowhere.create(HID_ID_KEYBOARD, Road::Socket, crate::input::hid_keyboard::REPORT_DESC),
+            "there is no socket to queue it on"
+        );
+        assert!(
+            !nowhere.create(HID_ID_KEYBOARD, Road::Usb, crate::input::hid_keyboard::REPORT_DESC),
+            "there is no cable to register it over"
+        );
+        assert!(
+            nowhere.keyboard.is_none(),
+            "nothing was made, so nothing should be on the books"
+        );
     }
 
     /// `--otg` attaches no controller — it has no adb, no server and no socket

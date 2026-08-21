@@ -138,6 +138,14 @@ impl AoaHid {
         )
         .with_context(|| format!("The device refused a HID registration for id {id}"))?;
 
+        // Recorded here rather than at the end, because from this line the
+        // device believes a HID device exists and it has to be given back
+        // whatever happens next. A descriptor that fails part way used to
+        // return without ever reaching the push below, so the id was never on
+        // the list `Drop` gives back — and the phone went on believing a
+        // keyboard was plugged into it until the cable came out.
+        self.registered.push(id);
+
         // A descriptor longer than a packet goes in pieces, and each piece has
         // to say where it belongs: wIndex is the offset, not a spare zero. The
         // keyboard's 63 bytes fit in one and hid this for as long as the mouse
@@ -147,7 +155,6 @@ impl AoaHid {
             self.control(ACCESSORY_SET_HID_REPORT_DESC, id, offset, chunk)
                 .with_context(|| format!("The device refused the report descriptor for {id}"))?;
         }
-        self.registered.push(id);
         // The device builds the HID device from the descriptor after it has
         // answered, and an event that arrives before it is finished is refused
         // with a stall — the first keypress of a session, every time, until
