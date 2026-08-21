@@ -91,6 +91,7 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | Camera sessions refuse what a camera cannot answer | works — Home, copy, paste and Power sent nothing, and the torch that followed still arrived |
 | `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
 | Hardware decoding | works, and is off by default because it is slower here — VAAPI opens on this machine's second render node, which the fixed per-platform list and the node search are for. In a live session on the Redmi, screen busy, it cost 6.49 ms a frame against the software path's 5.40, and 5.43 of that was the trip back from the GPU alone. Its picture is the software decoder's byte for byte — mean 0.0000 of 255, worst single byte 0, over 568 frames |
+| `--v4l2-sink`, and the whole path through it | works — with the phone attached and the mirror publishing to a `v4l2loopback` at 1080x2400, a frame read back out with `ffmpeg -f v4l2` matches the phone's own `screencap` to an RMSE of 558 of 65535, 0.85%. The same comparison with the loopback frame's red and blue exchanged is 5306, ten times worse, so the channel order is right rather than lucky. That is the device's screen, encoded on the device, decoded here into RGBA, packed back down to RGB24 and published, all held against what the phone says it was showing |
 | A fourth byte a pixel | works, and is worth 3 ms a frame — a live session on the Redmi with the screen scrolling spent 4.04 ms a draw over 1500 draws before the change and 0.98 over 1520 after, the same probe on the same window. The picture is the same one: RGBA against packed RGB differs by 0.000 of 255 on the two renderers whose snapshots can be trusted, and the hardware decoder, the mirror and `--display-orientation=flipN` all ran clean |
 | swscale writing past the window's buffer | fixed — it fills the row out to a multiple of sixteen pixels, which into RGBA is 32 bytes past the last row at 1080x2400 and 28 at 1081x2400, and nothing at all at 1080x2399 where a different converter runs. Which of three writes the client uses is measured on the first frame of each size rather than assumed, and `cargo test` checks the one chosen against a whole-picture conversion at six sizes, byte for byte |
 | No copies per frame instead of two | measured at 1080x2400 — 0.70 ms of conversion plus 1.10 of copying became 1.17 ms of conversion and nothing else; the picture still refreshes, two screenshots two seconds apart differing by thousands of RMSE against a still-mirror floor of about 100 |
@@ -411,12 +412,23 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   difference, and `SWS=1 cargo run --release --example frame_cost` prints both.
   `--display-orientation=flipN` mirrors rows four bytes at a time now instead of three,
   which costs the same as it did.
-- The sink is also the one thing the fourth byte touched that has not been run since. The
-  dropping itself is unit-tested, but the whole path ends in a loopback device and there is
-  no `v4l2loopback` loaded on this machine, so the frame has never been read back out of one
-  as RGB24. The test that would do it is written and waiting on the module:
-  `V4L2_DEVICE=/dev/video9 cargo test --release -- --ignored v4l2`, after
-  `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
+- The sink has been run since, both ways. `V4L2_DEVICE=/dev/video9 cargo test --release --
+  --ignored v4l2` writes a frame in as RGBA and reads it back out of the loopback as RGB24,
+  building the picture it expects itself rather than with the function under test — and
+  dropping the wrong byte on purpose makes it fail, which is how that was checked to have
+  teeth. Both want the module: `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy
+  exclusive_caps=1`.
+- Which also gives this machine the one way it has of seeing what the client produces. There
+  is no screenshot tool here that can photograph a Slint window — `grim`, `spectacle` and
+  `scrot` are absent and ImageMagick's `import -window root` captures nothing — so a claim
+  about the pixels normally has to come from Slint's own `take_snapshot`, which returns a
+  blank buffer on the OpenGL renderer. A loopback does not: publish the mirror to one, read
+  a frame with `ffmpeg -f v4l2`, and compare it against `adb exec-out screencap -p`.
+  Cut to the last four rows — the ones `Write::Tail` converts separately, and the only place
+  a mistake would hide — that comparison is 744 of 65535 against 475 for four rows out of
+  the middle and 393 for the first four. All three are the same order, which is the encoder
+  rather than the conversion; what proves the tail exactly is the test that holds it to a
+  whole-picture conversion at six sizes, byte for byte.
 - **The shader is written and measured, and does not earn its keep.** `src/ui/yuv.rs`
   uploads the YUV420P planes as three R8 textures and converts them in one pass, which comes
   to 1.25 ms a frame — 0.56 uploading and converting, 0.69 drawing. Against the fourth
