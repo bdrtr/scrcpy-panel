@@ -436,7 +436,12 @@ pub fn start_audio(audio: AudioStream) -> Option<crate::audio::player::AudioPlay
     }
 
     let mut regulator =
-        crate::audio::regulator::AudioRegulator::new(48000, 2, Some(audio.buffer_ms));
+        crate::audio::regulator::AudioRegulator::new(
+            48000,
+            2,
+            Some(audio.buffer_ms),
+            audio.output_buffer_ms,
+        );
     let consumer = regulator.consumer_state();
 
     let player = match crate::audio::player::AudioPlayer::new_regulated(consumer, audio.output_buffer_ms) {
