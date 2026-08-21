@@ -400,7 +400,10 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   a third more to carry — costs 0.94 ms a frame against 3.98. swscale converts into RGBA for
   0.48 where RGB24 costs 0.59, four-byte writes suiting it better than three, and the
   decoder's own total is unchanged: switching the destination format inside one binary and
-  running it both ways gives 3.1 ms a frame either way, six runs of 568 frames. So this is
+  running it both ways gives 3.1 ms a frame either way, six runs of 568 frames. That
+  absolute drifts between sittings — 2.8 to 3.3 over this session — which is why the two
+  arms were run back to back in one; what is being claimed is that they move together, not
+  the figure. So this is
   the change the client has made, and it needs no shader, no WGPU and no unstable API.
 - And it is not only the harness saying so. The same probe put on the mirror window's own
   renderer, in a live session on the Redmi with the screen scrolling: 4.04 ms a draw over
@@ -446,13 +449,15 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   drawn. It refuses anything uniform now, and the on-screen comparisons are run on the
   software and WGPU renderers, which do take snapshots: RGBA against packed RGB is 0.000 of
   255 on both, byte for byte the same picture. And the WGPU renderer is only better at the
-  thing it is for — the same RGBA upload costs 2.52 ms there against 0.94 on OpenGL.
+  thing it is for — the same RGBA upload costs 2.52 ms there against 0.85 on the OpenGL
+  renderer of the same build, and 0.94 on the shipping one.
 - **The renderer the shader needs is not free, and is not linked in by default.** Slint's
   texture import wants its WGPU renderer, and asking for it changes what every frame costs,
   not only the ones a shader would touch: drawing a window where nothing changed costs 0.68
   ms a frame there against 0.02 on the OpenGL renderer, and the same eight-megabyte upload
-  costs 4.09 against 3.90 — with 0.8 ms more CPU behind it, which looks like work moved onto
-  threads of its own. At the byte count that matters it comes out the other way: 3.9 MB
+  costs 4.09 against 3.90 — both from the build that has both renderers linked in, which is
+  why 3.90 rather than the 3.98 the shipping one reads — with 0.8 ms more CPU behind it,
+  which looks like work moved onto threads of its own. At the byte count that matters it comes out the other way: 3.9 MB
   costs 1.91 ms on WGPU against 2.17 on OpenGL. So the switch pays for itself, but only
   once the frames are smaller, and until then it is a tax. That is why `wgpu` is an optional
   feature rather than a dependency — linking the renderer in is enough to make Slint pick
