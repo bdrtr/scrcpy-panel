@@ -520,10 +520,7 @@ impl PanelConfig {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        match self.record_path.rsplit_once('.') {
-            Some((stem, extension)) => format!("{stem}-{stamp}.{extension}"),
-            None => format!("{}-{stamp}", self.record_path),
-        }
+        tag_file_name(&self.record_path, &stamp.to_string())
     }
 
     /// The command as one line, for the bar at the bottom and for the clipboard.
@@ -592,8 +589,55 @@ impl PanelConfig {
     }
 }
 
+/// Put `tag` into a path's file name, just before the extension.
+///
+/// On the file name, not on the path: this used to split at the last dot of the
+/// whole string, so a recording folder with a dot in its name —
+/// `~/Videos/scrcpy 2.0/capture` — had the tag inserted into the *directory* and
+/// the client was pointed somewhere that does not exist.
+pub fn tag_file_name(path: &str, tag: &str) -> String {
+    if path.is_empty() || tag.is_empty() {
+        return path.to_string();
+    }
+    let path = std::path::Path::new(path);
+    let tagged = match (
+        path.file_stem().and_then(|s| s.to_str()),
+        path.extension().and_then(|e| e.to_str()),
+    ) {
+        (Some(stem), Some(extension)) => format!("{stem}-{tag}.{extension}"),
+        (Some(stem), None) => format!("{stem}-{tag}"),
+        // No file name at all — a path ending in a separator. Nothing sensible
+        // to tag, so it is left as it is and the client says what it thinks.
+        (None, _) => return path.to_string_lossy().into_owned(),
+    };
+    path.with_file_name(tagged).to_string_lossy().into_owned()
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// The tag goes into the file name, not into the path.
+    ///
+    /// This used to split at the last dot of the whole string, so a recording
+    /// folder with a dot in its name had the tag inserted into the *directory*
+    /// and the client was pointed at somewhere that does not exist.
+    #[test]
+    fn a_tag_goes_into_the_name_and_not_the_folder() {
+        assert_eq!(tag_file_name("scrcpy.mp4", "42"), "scrcpy-42.mp4");
+        assert_eq!(tag_file_name("/home/b/Videos/scrcpy.mp4", "42"), "/home/b/Videos/scrcpy-42.mp4");
+        assert_eq!(
+            tag_file_name("/home/b/Videos/scrcpy 2.0/capture", "42"),
+            "/home/b/Videos/scrcpy 2.0/capture-42",
+            "the dot in the folder is not an extension"
+        );
+        assert_eq!(
+            tag_file_name("/home/b/scrcpy 2.0/capture.mp4", "a1683d6b0013"),
+            "/home/b/scrcpy 2.0/capture-a1683d6b0013.mp4"
+        );
+        assert_eq!(tag_file_name("capture", "42"), "capture-42", "no extension");
+        assert_eq!(tag_file_name("", "42"), "", "nothing to tag");
+        assert_eq!(tag_file_name("scrcpy.mp4", ""), "scrcpy.mp4", "no tag to add");
+    }
     use super::*;
 
     #[test]

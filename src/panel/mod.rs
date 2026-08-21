@@ -1565,6 +1565,16 @@ fn start_windowed(
         // than every window landing on the same phone.
         args.retain(|flag| !flag.starts_with("--serial="));
         args.push(format!("--serial={serial}"));
+        // And one file each. Every client used to be handed the same --record
+        // path, so two ticked devices wrote the same file and each ruined the
+        // other's — and the timestamp option did not save it either, being a
+        // whole number of seconds and the same one for clients started in the
+        // same loop.
+        for flag in args.iter_mut() {
+            if let Some(path) = flag.strip_prefix("--record=") {
+                *flag = format!("--record={}", command::tag_file_name(path, serial));
+            }
+        }
     }
 
     let exe = match std::env::current_exe() {
