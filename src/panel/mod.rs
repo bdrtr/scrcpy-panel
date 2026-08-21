@@ -393,6 +393,10 @@ fn refresh_adb_settings(window: &PanelWindow) {
         path: s.get_adb_path().trim().to_string(),
         port: s.get_adb_port().trim().to_string(),
     };
+    // The same two values, where the client's own adb calls can find them.
+    // They used to be pushed into this process's environment instead, which is
+    // not a safe thing to do once threads exist — see `crate::adb::settings`.
+    crate::adb::settings::set(&next.path, &next.port);
     *adb_settings().write().unwrap_or_else(|e| e.into_inner()) = next;
 }
 
@@ -417,38 +421,28 @@ fn apply_adb_port(command: &mut Command, port: &str) {
     }
 }
 
-/// Put the stored adb preferences into this process's own environment.
+/// Put the stored adb preferences where everything that needs them can read.
 ///
 /// `adb()` covers everything the panel runs itself, but a session runs `adb` of
 /// its own — src/session.rs shells out for the wireless connect and for the
-/// kill-server on close — through code that knows nothing about the panel. The
-/// environment is the one channel the two share: the server port through adb's
-/// own variable, the executable by putting its directory first on PATH.
+/// kill-server on close — through code that knows nothing about the panel, and
+/// `src/adb/protocol.rs` needs the daemon's port. That used to be shared
+/// through this process's own environment: the port through adb's variable, the
+/// executable by putting its directory first on PATH.
 ///
-/// It does not reach everything. The session's device work goes through
-/// src/adb, which speaks the daemon's protocol on 127.0.0.1:5037 directly and
-/// so ignores both settings; `run` says as much in the log when the port is not
-/// the default one.
+/// It is shared through `crate::adb::settings` now, which is a lock and an
+/// atomic rather than the environment. The environment was only safe to write
+/// before any thread existed — this function's own doc used to say exactly that
+/// — and it was being written on every keystroke in the Ayarlar tab, while a
+/// device scan or a file push could be inside `Command::spawn` reading it.
 ///
-/// Called at the very top of `run`, before the window and before any thread
-/// exists, because that is the only point where writing to the environment is
-/// unambiguously safe. A path or port edited later applies to what the panel
-/// runs straight away, and to child processes from the next launch.
+/// Child processes are told separately and always were, on the command that
+/// starts them: see `client_command`.
 fn export_adb_env() {
     let Some(stored) = load_stored_settings() else {
         return;
     };
-    let port = stored.adb_port.trim();
-    if !port.is_empty() && port != "5037" {
-        std::env::set_var("ANDROID_ADB_SERVER_PORT", port);
-    } else {
-        // Back to the default has to clear it, or a port set earlier in this
-        // process would outlive the setting that asked for it.
-        std::env::remove_var("ANDROID_ADB_SERVER_PORT");
-    }
-    if let Some(dirs) = path_with_adb_first(stored.adb_path.trim()) {
-        std::env::set_var("PATH", dirs);
-    }
+    crate::adb::settings::set(stored.adb_path.trim(), stored.adb_port.trim());
 }
 
 /// PATH with the chosen adb's own directory in front of it, when the setting
@@ -691,12 +685,12 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
                 save_settings(&window);
                 // A new adb path or port applies to the next command the panel
                 // runs, not only to the next launch of the panel.
+                // This reaches an embedded session too: it puts the values in
+                // `crate::adb::settings`, which is where the session's own adb
+                // calls and the daemon port both read them from. They used to
+                // go into this process's environment on every keystroke, which
+                // races anything that is spawning adb at the time.
                 refresh_adb_settings(&window);
-                // And to this process's own environment, which is what
-                // src/session.rs resolves its bare `adb` calls through — without
-                // this, an edited path reached the panel's commands but not an
-                // embedded session's until a restart.
-                export_adb_env();
                 apply_language(&window);
                 with_panel(|panel| sync_tray_presence(&window, panel));
             }

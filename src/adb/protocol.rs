@@ -16,6 +16,12 @@ const DEFAULT_ADB_PORT: u16 = 5037;
 /// that reason. Ignoring it here is what used to make a session talk to a
 /// different daemon than the device list it was started from.
 fn adb_port() -> u16 {
+    // What the panel asked for, if it asked — kept behind an atomic rather than
+    // written into this process's environment, which is not a safe thing to do
+    // once there are threads. See `crate::adb::settings`.
+    if let Some(port) = crate::adb::settings::port() {
+        return port;
+    }
     std::env::var("ANDROID_ADB_SERVER_PORT")
         .ok()
         .and_then(|value| value.trim().parse::<u16>().ok())

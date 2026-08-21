@@ -537,7 +537,7 @@ impl Session {
 
         if self.kill_adb_on_close {
             log::info!("Killing ADB server...");
-            let _ = std::process::Command::new("adb").arg("kill-server").status();
+            let _ = crate::adb::settings::command().arg("kill-server").status();
         }
         // The tunnel closes as it drops.
     }
@@ -587,7 +587,7 @@ pub fn run_list_query(opts: &Options) -> Result<bool> {
          com.genymobile.scrcpy.Server {} {}=true",
         SCRCPY_SERVER_VERSION, list_what
     );
-    let output = std::process::Command::new("adb")
+    let output = crate::adb::settings::command()
         .args(["-s", &serial, "shell", &shell_cmd])
         .output()
         .context("Failed to run adb shell for list query")?;
@@ -615,12 +615,12 @@ fn connect_tcpip_if_requested(opts: &Options) -> Result<()> {
     log::info!("Setting up wireless ADB: {}", addr);
 
     // Switch a USB-connected device over first; harmless if it is already wireless.
-    let _ = std::process::Command::new("adb")
+    let _ = crate::adb::settings::command()
         .args(["tcpip", "5555"])
         .status();
     thread::sleep(Duration::from_secs(2));
 
-    let status = std::process::Command::new("adb")
+    let status = crate::adb::settings::command()
         .args(["connect", &addr])
         .status()
         .context("Failed to run adb connect")?;
