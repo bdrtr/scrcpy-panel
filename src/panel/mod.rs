@@ -19,7 +19,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
 mod failure;
@@ -201,9 +200,10 @@ pub fn run(opts: &Options) -> Result<()> {
     // Both paths to the daemon honour the setting now: adb's own command line
     // through the environment, and src/adb/protocol.rs by reading the same
     // variable. Saying which port is in use is still worth a line.
-    let port = adb_snapshot().port;
-    if !port.is_empty() && port != "5037" {
-        panel.info(&tr!("adb sunucu portu {} kullanılıyor.", port));
+    if let Some(port) = crate::adb::settings::port() {
+        if port != 5037 {
+            panel.info(&tr!("adb sunucu portu {} kullanılıyor.", port));
+        }
     }
 
     // "Başlangıçta scrcpy-server sürümünü denetle". Looking for it is a handful
@@ -362,63 +362,16 @@ impl Panel {
 // adb
 // =====================================================================
 
-/// `Settings.adb-path` and `Settings.adb-port`, as plain Rust.
-///
-/// The device scan and its follow-up queries run on worker threads, where Slint
-/// globals cannot be touched at all, so the values are read once on the event
-/// loop and kept here for everyone to use.
-#[derive(Clone, Default)]
-struct AdbSettings {
-    path: String,
-    port: String,
-}
-
-fn adb_settings() -> &'static RwLock<AdbSettings> {
-    static CACHE: OnceLock<RwLock<AdbSettings>> = OnceLock::new();
-    CACHE.get_or_init(RwLock::default)
-}
-
-fn adb_snapshot() -> AdbSettings {
-    adb_settings()
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-}
-
 /// Copy the adb preferences out of the UI. Called at startup and whenever the
 /// Ayarlar tab writes.
 fn refresh_adb_settings(window: &PanelWindow) {
     let s = window.global::<Settings>();
-    let next = AdbSettings {
-        path: s.get_adb_path().trim().to_string(),
-        port: s.get_adb_port().trim().to_string(),
-    };
-    // The same two values, where the client's own adb calls can find them.
-    // They used to be pushed into this process's environment instead, which is
-    // not a safe thing to do once threads exist — see `crate::adb::settings`.
-    crate::adb::settings::set(&next.path, &next.port);
-    *adb_settings().write().unwrap_or_else(|e| e.into_inner()) = next;
-}
-
-/// Every adb the panel runs starts here.
-///
-/// An empty path falls back to `adb` on PATH, which is what the field's
-/// placeholder promises; a port that is neither empty nor the default one is
-/// passed the way adb itself expects it.
-fn adb() -> Command {
-    let settings = adb_snapshot();
-    let program = if settings.path.is_empty() { "adb" } else { settings.path.as_str() };
-    let mut command = Command::new(program);
-    apply_adb_port(&mut command, &settings.port);
-    command
-}
-
-fn apply_adb_port(command: &mut Command, port: &str) {
-    // 5037 is adb's own default; setting it changes nothing and only makes the
-    // environment of every child noisier.
-    if !port.is_empty() && port != "5037" {
-        command.env("ANDROID_ADB_SERVER_PORT", port);
-    }
+    // One place, read by everything: the panel's own commands, an embedded
+    // session's, and the daemon port the protocol dials. The panel used to keep
+    // a second copy of these two beside that one, and before that pushed them
+    // into the process environment on every keystroke — see
+    // `crate::adb::settings` for why neither was a good idea.
+    crate::adb::settings::set(s.get_adb_path().trim(), s.get_adb_port().trim());
 }
 
 /// Put the stored adb preferences where everything that needs them can read.
@@ -464,9 +417,12 @@ fn path_with_adb_first(adb_path: &str) -> Option<std::ffi::OsString> {
 /// variable, the executable by putting its directory first on PATH.
 fn client_command(exe: &std::path::Path) -> Command {
     let mut command = Command::new(exe);
-    let settings = adb_snapshot();
-    apply_adb_port(&mut command, &settings.port);
-    if let Some(dirs) = path_with_adb_first(&settings.path) {
+    // 5037 is adb's own default; setting it changes nothing and only makes the
+    // environment of every child noisier.
+    if let Some(port) = crate::adb::settings::port().filter(|port| *port != 5037) {
+        command.env("ANDROID_ADB_SERVER_PORT", port.to_string());
+    }
+    if let Some(dirs) = path_with_adb_first(&crate::adb::settings::program()) {
         command.env("PATH", dirs);
     }
     command
@@ -940,17 +896,15 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
                 // The caption under this button promises `adb tcpip 5555` runs
                 // first so a USB device can switch over; it never did.
                 let usb_serial = window.global::<Cfg>().get_serial().to_string();
-                let mut switch = adb();
-                if !usb_serial.is_empty() && !usb_serial.contains(':') {
-                    switch.args(["-s", &usb_serial]);
-                }
-                if switch.args(["tcpip", "5555"]).status().is_ok() {
-                    std::thread::sleep(Duration::from_secs(2));
+                // Only a USB device needs switching over; one already reached
+                // by address is on the network already.
+                if !usb_serial.contains(':') {
+                    let _ = crate::adb::device::enable_tcpip(&usb_serial, 5555);
                 }
 
-                match adb().args(["connect", &addr]).output() {
-                    Ok(out) => {
-                        panel.info(&String::from_utf8_lossy(&out.stdout).trim().to_string());
+                match crate::adb::device::connect(&addr) {
+                    Ok(said) => {
+                        panel.info(&said);
                         spawn_device_scan(&panel);
                     }
                     Err(e) => panel.warn(&tr!("adb connect başarısız: {}", e)),
@@ -971,9 +925,9 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
                     panel.warn(&tr!("Eşleştirme için adres ve kod gerekli."));
                     return;
                 }
-                match adb().args(["pair", &addr, &code]).output() {
-                    Ok(out) => {
-                        panel.info(&String::from_utf8_lossy(&out.stdout).trim().to_string());
+                match crate::adb::device::pair(&addr, &code) {
+                    Ok(said) => {
+                        panel.info(&said);
                         spawn_device_scan(&panel);
                     }
                     Err(e) => panel.warn(&tr!("adb pair başarısız: {}", e)),
@@ -1009,18 +963,9 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
                 .upgrade()
                 .map(|w| w.global::<Cfg>().get_serial().to_string())
                 .unwrap_or_default();
-            let mut cmd = adb();
-            if !serial.is_empty() {
-                cmd.args(["-s", &serial]);
-            }
-            match cmd.args(["shell", "input", "keyevent", keycode]).output() {
-                Ok(out) if out.status.success() => panel.info(&tr!("{} gönderildi.", keycode)),
-                Ok(out) => panel.warn(&tr!(
-                    "{} gönderilemedi: {}",
-                    keycode,
-                    String::from_utf8_lossy(&out.stderr).trim()
-                )),
-                Err(e) => panel.warn(&tr!("Tuş gönderilemedi: {}", e)),
+            match crate::adb::device::key_event(&serial, keycode) {
+                Ok(()) => panel.info(&tr!("{} gönderildi.", keycode)),
+                Err(e) => panel.warn(&tr!("{} gönderilemedi: {}", keycode, e)),
             }
         });
     }
@@ -1815,22 +1760,9 @@ fn take_screenshot(serial: &str, directory: &str) -> Result<String> {
         .unwrap_or(0);
     let path = format!("{directory}/scrcpy-{stamp}.png");
 
-    let mut command = adb();
-    if !serial.is_empty() {
-        command.args(["-s", serial]);
-    }
-    let output = command
-        .args(["exec-out", "screencap", "-p"])
-        .output()
-        .context("Failed to run adb screencap")?;
-
-    if !output.status.success() || output.stdout.is_empty() {
-        anyhow::bail!(
-            "adb screencap produced nothing: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    std::fs::write(&path, &output.stdout).with_context(|| format!("Cannot write {path}"))?;
+    let png = crate::adb::device::screencap(serial)
+        .with_context(|| tr!("Ekran görüntüsü alınamadı"))?;
+    std::fs::write(&path, &png).with_context(|| format!("Cannot write {path}"))?;
     Ok(path)
 }
 
@@ -2090,14 +2022,12 @@ fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
         failure::Remedy::None => {}
         failure::Remedy::RestartAdb => {
             panel.info(&tr!("adb sunucusu yeniden başlatılıyor…"));
-            let killed = adb().arg("kill-server").output();
-            let started = adb().arg("start-server").output();
-            match (killed, started) {
-                (Ok(_), Ok(out)) if out.status.success() => {
+            match crate::adb::device::restart_server() {
+                Ok(()) => {
                     panel.info(&tr!("adb sunucusu yeniden başlatıldı."));
                     spawn_device_scan(panel);
                 }
-                _ => panel.warn(&tr!("adb sunucusu yeniden başlatılamadı.")),
+                Err(e) => panel.warn(&tr!("adb sunucusu yeniden başlatılamadı: {}", e)),
             }
         }
         failure::Remedy::PickAdbPath => {
@@ -2175,40 +2105,16 @@ fn transfer_file(serial: &str, path: &std::path::Path, push_target: &str) -> Tra
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("apk"));
 
-    let mut command = adb();
-    if !serial.is_empty() {
-        command.args(["-s", serial]);
-    }
-    if is_apk {
-        command.arg("install").arg("-r").arg(path);
+    // Whether it worked is adb's own quirk to know: `install` reports a refused
+    // install on stdout and exits 0 anyway. That decision lives in
+    // `crate::adb::device` now, where there is a test over it.
+    let done = if is_apk {
+        crate::adb::device::install(serial, path)
     } else {
-        command.arg("push").arg(path).arg(push_target);
-    }
-
-    let output = match command.output() {
-        Ok(output) => output,
-        Err(e) => return Transfer::failed(tr!("adb çalıştırılamadı: {}", e)),
+        crate::adb::device::push(serial, path, push_target)
     };
 
-    // `adb install` reports a refused install on stdout and still exits 0, so
-    // the exit status alone would call a failed install a success.
-    let said = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let failed = !output.status.success()
-        || said.contains("Failure")
-        || said.contains("error:")
-        || said.contains("adb: ");
-
-    if failed {
-        let why = said
-            .lines()
-            .rev()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or("bilinmeyen hata")
-            .trim();
+    if let Err(why) = done {
         let what = if is_apk { tr!("Kurulamadı") } else { tr!("Gönderilemedi") };
         Transfer::failed(format!("{what}: {name} — {why}"))
     } else if is_apk {
@@ -2331,38 +2237,21 @@ fn query_device(weak: &slint::Weak<PanelWindow>, panel: &Rc<Panel>, flag: &str) 
 /// The scan runs on its own thread, so it hands back plain Rust strings: Slint's
 /// SharedString and model types are not `Send`, and the rows only become
 /// `DeviceRow`s once we are back on the event loop.
-struct ScannedDevice {
-    name: String,
-    serial: String,
-    conn: String,
-    android: String,
-    screen: String,
-    state: String,
-}
-
 fn spawn_device_scan(panel: &Rc<Panel>) {
     let weak = panel.window.clone();
     let selected = panel.selected.clone();
 
     std::thread::spawn(move || {
-        let output = adb().args(["devices", "-l"]).output();
-        let (rows, error) = match output {
-            Ok(out) if out.status.success() => (
-                parse_devices(&String::from_utf8_lossy(&out.stdout)),
-                String::new(),
-            ),
-            Ok(out) => (
-                Vec::new(),
-                String::from_utf8_lossy(&out.stderr).trim().to_string(),
-            ),
-            Err(e) => (Vec::new(), tr!("adb çalıştırılamadı: {}", e)),
+        let (rows, error) = match crate::adb::device::list_detailed() {
+            Ok(rows) => (rows, String::new()),
+            Err(e) => (Vec::new(), format!("{e:#}")),
         };
         let status = adb_status();
         // Autostart hangs off a device being *usable*; anything unauthorised or
         // offline would only produce a failed session.
         let ready = rows
             .iter()
-            .find(|device| device.state == "device")
+            .find(|device| device.is_usable())
             .map(|device| device.serial.clone());
 
         let _ = slint::invoke_from_event_loop(move || {
@@ -2458,83 +2347,15 @@ fn autostart_if_wanted(panel: &Rc<Panel>, window: &PanelWindow, ready: Option<&s
     start_session(window, panel);
 }
 
-fn parse_devices(stdout: &str) -> Vec<ScannedDevice> {
-    let mut rows = Vec::new();
-    for line in stdout.lines().skip(1) {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let Some(serial) = parts.next() else { continue };
-        let state = parts.next().unwrap_or("unknown");
-
-        let mut model = String::new();
-        let mut conn = if serial.contains(':') { "tcp/ip" } else { "usb" }.to_string();
-        for token in parts {
-            if let Some(value) = token.strip_prefix("model:") {
-                model = value.replace('_', " ");
-            } else if token.starts_with("usb:") {
-                conn = "usb".into();
-            }
-        }
-
-        // Offline or unauthorised devices will not answer a shell, so skip the
-        // follow-up queries rather than blocking on an adb timeout for each.
-        let (android, screen) = if state == "device" {
-            (
-                device_property(serial, "ro.build.version.release"),
-                device_screen(serial),
-            )
-        } else {
-            (String::new(), String::new())
-        };
-
-        rows.push(ScannedDevice {
-            name: if model.is_empty() { serial.to_string() } else { model },
-            serial: serial.to_string(),
-            conn,
-            android,
-            screen,
-            state: state.to_string(),
-        });
-    }
-    rows
-}
-
-fn device_property(serial: &str, property: &str) -> String {
-    adb()
-        .args(["-s", serial, "shell", "getprop", property])
-        .output()
-        .ok()
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .unwrap_or_default()
-}
-
-fn device_screen(serial: &str) -> String {
-    adb()
-        .args(["-s", serial, "shell", "wm", "size"])
-        .output()
-        .ok()
-        .map(|out| {
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .find_map(|l| l.split(':').nth(1).map(|s| s.trim().to_string()))
-                .unwrap_or_default()
-        })
-        .unwrap_or_default()
-}
-
 fn adb_status() -> String {
-    match adb().arg("version").output() {
-        Ok(out) => {
-            let text = String::from_utf8_lossy(&out.stdout);
+    match crate::adb::device::version() {
+        Some(text) => {
             let version = text
                 .lines()
                 .next()
                 .and_then(|l| l.rsplit(' ').next())
                 .unwrap_or("?");
-            let port = adb_snapshot().port;
+            let port = crate::adb::settings::port().map(|p| p.to_string()).unwrap_or_default();
             if port.is_empty() || port == "5037" {
                 tr!("adb {} · hazır", version)
             } else {
@@ -2545,9 +2366,9 @@ fn adb_status() -> String {
         }
         // Naming the executable turns "nothing works" into something the user
         // can act on, now that it is a setting they can get wrong.
-        Err(_) => {
-            let path = adb_snapshot().path;
-            if path.is_empty() || path == "adb" {
+        None => {
+            let path = crate::adb::settings::program();
+            if path == "adb" {
                 tr!("adb bulunamadı")
             } else {
                 tr!("adb bulunamadı: {}", path)
