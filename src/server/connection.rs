@@ -93,16 +93,6 @@ fn connect_and_read_dummy_byte(host: &str, port: u16, attempts: u32) -> Result<T
     bail!("Could not connect to server on {}:{}", host, port)
 }
 
-/// Pre-bind a listener for reverse mode. Must be called BEFORE starting the server.
-pub fn bind_listener(port: u16) -> Result<TcpListener> {
-    let addr = format!("127.0.0.1:{}", port);
-    let listener = TcpListener::bind(&addr)
-        .with_context(|| format!("Failed to bind to {}", addr))?;
-    listener.set_nonblocking(true)?;
-    log::debug!("Bound listener on {}", addr);
-    Ok(listener)
-}
-
 /// Establish all socket connections to the server
 ///
 /// For reverse mode, pass a pre-bound listener (created before server start).

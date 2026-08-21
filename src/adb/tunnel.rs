@@ -1,7 +1,25 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::net::TcpListener;
 
 use crate::adb::commands;
+
+/// Take a port on the loopback, ready for the device to connect back to.
+///
+/// Non-blocking because the accept that follows is polled with a timeout rather
+/// than waited on: see `server::connection::accept_with_timeout`.
+///
+/// It lives here rather than in `server::connection`, where it used to, because
+/// the tunnel is its only caller and a module this low reaching up into that one
+/// was the single edge in this crate's dependency graph that pointed the wrong
+/// way. There is nothing about the scrcpy server in it — it is a socket.
+fn bind_listener(port: u16) -> Result<TcpListener> {
+    let address = format!("127.0.0.1:{port}");
+    let listener = TcpListener::bind(&address)
+        .with_context(|| format!("Failed to bind to {address}"))?;
+    listener.set_nonblocking(true)?;
+    log::debug!("Bound listener on {address}");
+    Ok(listener)
+}
 
 /// Socket name prefix used by scrcpy server
 const SOCKET_NAME_PREFIX: &str = "scrcpy_";
@@ -31,7 +49,7 @@ pub struct AdbTunnel {
 /// rest are never touched.
 fn bindable_ports(range: (u16, u16)) -> impl Iterator<Item = (u16, TcpListener)> {
     (range.0..=range.1).filter_map(|port| {
-        match crate::server::connection::bind_listener(port) {
+        match bind_listener(port) {
             Ok(listener) => Some((port, listener)),
             Err(e) => {
                 log::debug!("Port {port} is not ours to listen on ({e:#})");
