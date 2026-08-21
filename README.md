@@ -92,7 +92,7 @@ Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless ad
 | `--keyboard=uhid` | works — a new input device called "scrcpy" appears in `getevent -pl` while the session runs, and goes when it ends |
 | Hardware decoding | works, and is off by default because it is slower here — VAAPI opens on this machine's second render node, which the fixed per-platform list and the node search are for. In a live session on the Redmi, screen busy, it cost 6.49 ms a frame against the software path's 5.40, and 5.43 of that was the trip back from the GPU alone. Its picture is the software decoder's byte for byte — mean 0.0000 of 255, worst single byte 0, over 568 frames |
 | A fourth byte a pixel | works, and is worth 3 ms a frame — a live session on the Redmi with the screen scrolling spent 4.04 ms a draw over 1500 draws before the change and 0.98 over 1520 after, the same probe on the same window. The picture is the same one: RGBA against packed RGB differs by 0.000 of 255 on the two renderers whose snapshots can be trusted, and the hardware decoder, the mirror and `--display-orientation=flipN` all ran clean |
-| swscale writing past the window's buffer | fixed — it writes 24 bytes past the last row at 1080x2400, 21 at 1081x2400 and nothing at all at 1080x2399, so which of three writes the client uses is measured on the first frame of each size rather than assumed. `cargo test` checks the one chosen against a whole-picture conversion at six sizes, byte for byte |
+| swscale writing past the window's buffer | fixed — it fills the row out to a multiple of sixteen pixels, which into RGBA is 32 bytes past the last row at 1080x2400 and 28 at 1081x2400, and nothing at all at 1080x2399 where a different converter runs. Which of three writes the client uses is measured on the first frame of each size rather than assumed, and `cargo test` checks the one chosen against a whole-picture conversion at six sizes, byte for byte |
 | No copies per frame instead of two | measured at 1080x2400 — 0.70 ms of conversion plus 1.10 of copying became 1.17 ms of conversion and nothing else; the picture still refreshes, two screenshots two seconds apart differing by thousands of RMSE against a still-mirror floor of about 100 |
 | `--otg` | works — the device is found on the bus with no adb at all, a keyboard and a mouse are registered over USB, and the pointer's motion comes out of the phone's kernel as `REL_X`/`REL_Y` while the window has it |
 | `--keyboard=aoa` | works — the AOA keyboard registers over USB during a session and is given back at the end. `cargo test -- --ignored aoa`, with `AOA_SERIAL` set, registers one and types an "a": `KEY_A DOWN`/`UP` came out of the phone's kernel with no adb, no server and no control socket in the way |
@@ -342,14 +342,15 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   whether it will.** Pointing swscale straight at Slint's buffer is what saved the copy a
   frame above, but its hand-written YUV420P path converts a block of pixels at a time and
   writes the whole last block: it fills the row out to a multiple of sixteen pixels, so
-  1080 wide spills 24 bytes past the end of every row, 1081 spills 21, and 64 spills none.
-  Every row's spill but the last lands in the row below, which is written next and covers
-  it; the last row's lands past the end of a buffer that is exactly `width * height * 3`
-  bytes, in memory the client does not own. That is not a theoretical complaint: made to
+  1080 wide spills eight pixels past the end of every row and 1081 spills seven, while 64
+  spills none — 24 bytes and 21 when this was measured into packed RGB, 32 and 28 now that
+  the destination is RGBA. Every row's spill but the last lands in the row below, which is
+  written next and covers it; the last row's lands past the end of a buffer that is exactly
+  `width * height * 4` bytes, in memory the client does not own. That is not a theoretical complaint: made to
   write straight in at 1080x2400 anyway, this client does not survive the first frame —
   glibc fails an assertion in `sysmalloc` and the process takes SIGABRT. So the last rows are converted into a buffer
   with room to spare and copied in — one or two of them: two when the height is even,
-  because a 4:2:0 chroma plane cannot begin on an odd row, which is 6480 bytes of memcpy a
+  because a 4:2:0 chroma plane cannot begin on an odd row, which is 8640 bytes of memcpy a
   frame at 1080 wide.
 - What cannot be assumed is that this is needed, or even that it is safe. One row shorter,
   at 1080x2399, swscale takes a different converter for the odd height: it writes nothing
@@ -404,9 +405,18 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
   the commit prior to it, made in a worktree so the two differed by nothing else.
 - Two things still pay for three bytes a pixel, and both are off by default. `--v4l2-sink`
   publishes RGB24, which V4L2 has a fourcc for, so the fourth byte is dropped on the way
-  there — a pass over the frame, in the one place that still wants one.
+  there — 1.25 ms a frame at 1080x2400, on the thread that pumps frames, and the one place
+  left that wants a pass over the picture. It was 1.42 written the obvious way, a pixel at
+  a time into a growing buffer; sizing the buffer once and writing over it is the
+  difference, and `SWS=1 cargo run --release --example frame_cost` prints both.
   `--display-orientation=flipN` mirrors rows four bytes at a time now instead of three,
   which costs the same as it did.
+- The sink is also the one thing the fourth byte touched that has not been run since. The
+  dropping itself is unit-tested, but the whole path ends in a loopback device and there is
+  no `v4l2loopback` loaded on this machine, so the frame has never been read back out of one
+  as RGB24. The test that would do it is written and waiting on the module:
+  `V4L2_DEVICE=/dev/video9 cargo test --release -- --ignored v4l2`, after
+  `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
 - **The shader is written and measured, and does not earn its keep.** `src/ui/yuv.rs`
   uploads the YUV420P planes as three R8 textures and converts them in one pass, which comes
   to 1.25 ms a frame — 0.56 uploading and converting, 0.69 drawing. Against the fourth

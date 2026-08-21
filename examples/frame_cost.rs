@@ -426,6 +426,25 @@ fn swscale_both_ways(width: u32, height: u32, count: u32) {
             started.elapsed().as_secs_f64() * 1000.0 / count as f64,
         );
     }
+
+    // And what dropping the fourth byte costs, which is what `--v4l2-sink` pays
+    // now that the frame arrives with one. The same loop the sink runs.
+    let pixels = width as usize * height as usize;
+    let rgba: Vec<u8> = (0..pixels * 4).map(|i| (i % 251) as u8).collect();
+    let mut packed = Vec::with_capacity(pixels * 3);
+    let started = Instant::now();
+    for _ in 0..count {
+        // The same loop `pack_rgba_into_rgb` runs.
+        packed.clear();
+        packed.resize(rgba.len() / 4 * 3, 0);
+        for (out, pixel) in packed.chunks_exact_mut(3).zip(rgba.chunks_exact(4)) {
+            out.copy_from_slice(&pixel[..3]);
+        }
+    }
+    println!(
+        "RGBA → RGB24 for --v4l2-sink: {:.2} ms a frame over {count} frames at {width}x{height}",
+        started.elapsed().as_secs_f64() * 1000.0 / count as f64,
+    );
 }
 
 /// Whether every byte is the same one, which is what a renderer that cannot

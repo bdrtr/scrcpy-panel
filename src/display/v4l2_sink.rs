@@ -92,11 +92,17 @@ mod linux {
     ///
     /// The fourth byte is the alpha the decoder now carries — see
     /// `V4l2Sink::write_rgba_frame` for why it is there and why it goes here.
+    ///
+    /// Sized once and then written over, rather than extended a pixel at a
+    /// time: 1.25 ms a frame at 1080x2400 against 1.42, a growth check for
+    /// every three bytes being worth that much. A pixel that is not all there
+    /// is left out of both, which is what the `chunks_exact` on either side is
+    /// doing. `SWS=1 cargo run --release --example frame_cost` prints it.
     pub(super) fn pack_rgba_into_rgb(rgba: &[u8], out: &mut Vec<u8>) {
         out.clear();
-        out.reserve(rgba.len() / 4 * 3);
-        for pixel in rgba.chunks_exact(4) {
-            out.extend_from_slice(&pixel[..3]);
+        out.resize(rgba.len() / 4 * 3, 0);
+        for (packed, pixel) in out.chunks_exact_mut(3).zip(rgba.chunks_exact(4)) {
+            packed.copy_from_slice(&pixel[..3]);
         }
     }
 
@@ -320,6 +326,56 @@ mod tests {
         super::linux::pack_rgba_into_rgb(&[1, 2, 3, 255, 4, 5], &mut packed);
         assert_eq!(packed, vec![1, 2, 3]);
     }
+
+    /// The sink end to end, against a real loopback: a frame goes in as the
+    /// RGBA the decoder now produces and has to come back out as the RGB24 a
+    /// consumer of the webcam sees. This is the one path the fourth byte
+    /// touched that a unit test cannot reach, because it ends in a device.
+    ///
+    /// Needs the module, so it is not run by default:
+    ///
+    ///     sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1
+    ///     V4L2_DEVICE=/dev/video9 cargo test --release -- --ignored v4l2
+    #[test]
+    #[ignore]
+    fn a_frame_written_as_rgba_arrives_as_rgb() {
+        use std::io::Read;
+        let device = std::env::var("V4L2_DEVICE").expect("V4L2_DEVICE=/dev/videoN");
+        let (width, height) = (64u32, 48u32);
+        let sink = super::linux::V4l2Sink::open(&device, width, height, 0)
+            .expect("the loopback opens");
+
+        // Every channel of every pixel a different number, so a row read at the
+        // wrong stride or the wrong byte dropped from each pixel shows up as a
+        // mismatch rather than as a picture that happens to look plausible.
+        let pixels = (width * height) as usize;
+        let mut rgba = Vec::with_capacity(pixels * 4);
+        for i in 0..pixels {
+            rgba.extend_from_slice(&[
+                (i % 251) as u8,
+                (i % 241) as u8,
+                (i % 239) as u8,
+                255,
+            ]);
+        }
+        assert!(sink.write_rgba_frame(&rgba), "the frame was published");
+
+        let mut consumer = std::fs::File::open(&device).expect("the loopback reads back");
+        let mut back = vec![0u8; pixels * 3];
+        consumer.read_exact(&mut back).expect("a frame comes back");
+
+        // Built here rather than by the function under test, which would pass
+        // whatever that function did.
+        let mut expected = Vec::with_capacity(pixels * 3);
+        for i in 0..pixels {
+            expected.extend_from_slice(&[
+                (i % 251) as u8,
+                (i % 241) as u8,
+                (i % 239) as u8,
+            ]);
+        }
+        assert_eq!(back, expected, "the picture changed on the way through");
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -331,7 +387,15 @@ mod other {
     pub struct V4l2Sink;
 
     impl V4l2Sink {
-        pub fn open(_device: &str, _width: u32, _height: u32) -> Result<Self> {
+        /// The same shape as the Linux one, `--v4l2-buffer` and all: a stub
+        /// that takes different arguments is a stub that does not compile, and
+        /// this one had drifted a parameter behind its callers.
+        pub fn open(
+            _device: &str,
+            _width: u32,
+            _height: u32,
+            _buffer_ms: u32,
+        ) -> Result<Self> {
             bail!("--v4l2-sink is only available on Linux")
         }
         pub fn matches(&self, _width: u32, _height: u32) -> bool {

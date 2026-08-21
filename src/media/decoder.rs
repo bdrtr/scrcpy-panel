@@ -113,9 +113,9 @@ enum Write {
 }
 
 /// Room past the last row of a scratch buffer for swscale to overrun into. It
-/// fills the row out to a multiple of sixteen pixels, which is 24 bytes past at
-/// 1080 wide and 21 at 1081; this is that with a wide margin, and `choose_write`
-/// says so in the log if it is ever not enough.
+/// fills the row out to a multiple of sixteen pixels, which into RGBA is 32 bytes
+/// past at 1080 wide and 28 at 1081; this is that with a wide margin, and
+/// `choose_write` says so in the log if it is ever not enough.
 const SLACK: usize = 4096;
 
 /// swscale, pointed at plain bytes with a packed RGBA stride.
@@ -712,10 +712,11 @@ impl VideoDecoder {
     ///
     /// Both cases are real on this machine, one row apart. At 1080x2400 swscale
     /// takes its hand-written YUV420P path, fills each row out to a multiple of
-    /// sixteen pixels — 24 bytes past the end of a 1080-wide row, 21 past a
-    /// 1081-wide one — and splits exactly. At 1080x2399 the odd height gets a
-    /// different converter, which writes nothing past the picture at all and
-    /// would have had the two rows above the split wrong by up to 255.
+    /// sixteen pixels — into RGBA that is 32 bytes past the end of a 1080-wide
+    /// row and 28 past a 1081-wide one — and splits exactly. At 1080x2399 the
+    /// odd height gets a different converter, which writes nothing past the
+    /// picture at all and would have had the two rows above the split wrong by
+    /// up to 255.
     fn choose_write(
         &mut self,
         frame: &ffmpeg_next::frame::Video,
