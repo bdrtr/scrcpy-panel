@@ -176,7 +176,11 @@ impl Default for PanelConfig {
             mouse_bind: "++++".into(),
 
             new_display_enabled: false,
-            new_display: "1920x1080/420".into(),
+            // Empty, as the UI has it: the box shows "1920x1080/420" as a
+            // placeholder and a bare --new-display lets the device choose. A
+            // default that disagreed meant "Varsayılanlara dön" typed a
+            // resolution into a box that had been empty, and asked for it.
+            new_display: String::new(),
             start_app: String::new(),
             no_vd_destroy_content: false,
             no_vd_system_decorations: false,
@@ -615,6 +619,78 @@ pub fn tag_file_name(path: &str, tag: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The defaults here and the defaults in `ui/state.slint` have to agree.
+    ///
+    /// This module's own header has cited this test for as long as it has
+    /// existed, and the test did not: `defaults_match_the_ui` was a name in a
+    /// comment and nothing else. It matters because a value equal to its
+    /// default emits no flag, so a field that disagrees either sends a flag
+    /// nobody asked for or swallows one that was asked for — and pressing
+    /// "Varsayılanlara dön" types the Rust default into a box the UI had left
+    /// empty.
+    ///
+    /// The Slint file is read at compile time and the struct through serde, so
+    /// this needs no window and no reflection.
+    #[test]
+    fn defaults_match_the_ui() {
+        let source = include_str!("../../ui/state.slint");
+        let global = source
+            .split_once("global Cfg {")
+            .expect("a Cfg global")
+            .1
+            .split_once("\n}")
+            .expect("its end")
+            .0;
+
+        let declared = serde_json::to_value(PanelConfig::default()).expect("it serialises");
+        let declared = declared.as_object().expect("an object");
+
+        let mut compared = 0;
+        let mut wrong = Vec::new();
+        for line in global.lines() {
+            // A trailing `// both | toDevice | toPc` is documentation, not part
+            // of the value.
+            let line = line.split("//").next().unwrap_or(line).trim();
+            let Some(rest) = line.strip_prefix("in-out property <") else {
+                continue;
+            };
+            let Some((kind, rest)) = rest.split_once('>') else { continue };
+            let rest = rest.trim().trim_end_matches(';');
+            let (name, initialiser) = match rest.split_once(':') {
+                Some((name, value)) => (name.trim(), Some(value.trim())),
+                None => (rest.trim(), None),
+            };
+            let field = name.replace('-', "_");
+            let Some(here) = declared.get(&field) else {
+                continue; // in the UI but not in the form's struct
+            };
+            let ui = match (kind, initialiser) {
+                ("string", Some(value)) => {
+                    serde_json::Value::String(value.trim_matches('"').to_string())
+                }
+                ("string", None) => serde_json::Value::String(String::new()),
+                ("bool", Some(value)) => serde_json::Value::Bool(value == "true"),
+                ("bool", None) => serde_json::Value::Bool(false),
+                ("int", Some(value)) => match value.parse::<i64>() {
+                    Ok(number) => serde_json::Value::from(number),
+                    Err(_) => continue,
+                },
+                ("int", None) => serde_json::Value::from(0),
+                _ => continue,
+            };
+            compared += 1;
+            if here != &ui {
+                wrong.push(format!("{field}: the form says {here}, the UI says {ui}"));
+            }
+        }
+
+        assert!(
+            compared > 50,
+            "only {compared} fields were compared, so this is guarding nothing"
+        );
+        assert!(wrong.is_empty(), "{compared} fields compared:\n  {}", wrong.join("\n  "));
+    }
 
     /// The tag goes into the file name, not into the path.
     ///
