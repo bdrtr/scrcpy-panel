@@ -1255,7 +1255,20 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
 // =====================================================================
 
 fn refresh_command(window: &PanelWindow) {
-    refresh_command_for(window, &[]);
+    // With the ticked devices, not without them. This passed an empty list
+    // whatever was selected, and only `apply_selection` ever passed the real
+    // one — so ticking two devices put the loop in the bar and the very next
+    // keystroke in the form replaced it with a single-device command that was
+    // not what Başlat would run.
+    let mut serials = Vec::new();
+    with_panel(|panel| {
+        serials = panel
+            .selected
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+    });
+    refresh_command_for(window, &serials);
 }
 
 /// Recompute the command bar.
@@ -2383,7 +2396,16 @@ fn spawn_device_scan(panel: &Rc<Panel>) {
             app.set_devices_loading(false);
             app.set_adb_status(status.as_str().into());
 
-            with_panel(|panel| autostart_if_wanted(panel, &window, ready.as_deref()));
+            with_panel(|panel| {
+                // The rows are new and the selection has just been pruned of
+                // whatever went away, so the label, the count and `Cfg.serial`
+                // have to be taken from it again. They used to be left as they
+                // were: the panel went on naming a device that had left the bus
+                // and Başlat went looking for it. `apply_selection` is the one
+                // place that keeps those four in step.
+                apply_selection(&window, panel);
+                autostart_if_wanted(panel, &window, ready.as_deref());
+            });
         });
     });
 }
