@@ -161,6 +161,17 @@ impl Recorder {
 // Internal recorder logic
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Whether to take another packet from a stream's queue this time round.
+///
+/// Once the origin is known, always: the packet is written straight away. Before
+/// it, only if nothing is already being held aside for that stream — a second
+/// packet would have nowhere to go, and dropping it costs either twenty
+/// milliseconds of audio or the delta frame after the keyframe, which is
+/// macroblocks until the next one.
+fn should_pop(origin_known: bool, holding_one: bool) -> bool {
+    origin_known || !holding_one
+}
+
 fn run_recorder(
     state: Arc<(Mutex<RecorderState>, Condvar)>,
     filename: &str,
@@ -208,6 +219,36 @@ fn run_recorder(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Frees the muxer, and closes the file it opened, however the function that
+/// made it leaves.
+///
+/// Every error path after `avformat_alloc_output_context2` used to walk out
+/// past both — a codec the container will not hold, a stream that could not be
+/// created, a header that would not write. The context went, and after
+/// `avio_open` a file descriptor with it, which a panel starting and stopping
+/// recordings does over and over.
+///
+/// Not covered by a test: proving the descriptor half needs
+/// `avformat_write_header` to refuse *after* `avio_open` has already made the
+/// file, and a combination that does that reliably did not turn up in the time
+/// it was worth spending. The guard is right by construction instead — there is
+/// one way out of the function and it goes through here.
+struct Muxer(*mut ffi::AVFormatContext);
+
+impl Drop for Muxer {
+    fn drop(&mut self) {
+        unsafe {
+            if self.0.is_null() {
+                return;
+            }
+            if !(*self.0).pb.is_null() {
+                ffi::avio_closep(&mut (*self.0).pb);
+            }
+            ffi::avformat_free_context(self.0);
+        }
+    }
+}
+
 unsafe fn open_and_record(
     lock: &Mutex<RecorderState>,
     cvar: &Condvar,
@@ -251,6 +292,8 @@ unsafe fn open_and_record(
     if ret < 0 || ctx.is_null() {
         anyhow::bail!("avformat_alloc_output_context2 failed ({})", ret);
     }
+    // From here on, every way out of this function goes through `Muxer`.
+    let muxer = Muxer(ctx);
 
     // Add video stream (if video enabled)
     let vid_idx: c_int = if has_video {
@@ -390,8 +433,22 @@ unsafe fn open_and_record(
                 if ready || s.stopped { break; }
                 s = cvar.wait(s).unwrap();
             }
-            let v = s.video_queue.pop_front();
-            let a = if aud_idx >= 0 { s.audio_queue.pop_front() } else { None };
+            // Only what can be kept. While the origin is still unknown each
+            // stream holds one packet aside, and a second one popped on top of
+            // it has nowhere to go: it used to stay in the local and be
+            // overwritten a few lines below by the one being held, which lost
+            // it. The queue is a better place for it than the floor.
+            let origin_known = pts_origin != AV_NOPTS;
+            let v = if should_pop(origin_known, pending_v.is_some()) {
+                s.video_queue.pop_front()
+            } else {
+                None
+            };
+            let a = if aud_idx >= 0 && should_pop(origin_known, pending_a.is_some()) {
+                s.audio_queue.pop_front()
+            } else {
+                None
+            };
             (v, a, s.stopped)
         };
 
@@ -456,8 +513,7 @@ unsafe fn open_and_record(
     }
 
     ffi::av_write_trailer(ctx);
-    ffi::avio_close((*ctx).pb);
-    ffi::avformat_free_context(ctx);
+    drop(muxer);
 
     Ok(())
 }
@@ -567,6 +623,107 @@ unsafe fn write_pkt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A packet with nowhere to go must not be taken out of the queue.
+    ///
+    /// Before the origin is known each stream holds one packet aside. A second
+    /// one popped on top of it used to stay in a local that was overwritten a
+    /// few lines later by the one being held — silently losing either twenty
+    /// milliseconds of audio or the delta frame after the keyframe, which shows
+    /// as macroblocks until the next one.
+    #[test]
+    fn a_stream_already_holding_a_packet_is_not_popped_again() {
+        assert!(should_pop(false, false), "nothing held yet: take one");
+        assert!(!should_pop(false, true), "one already held: leave it in the queue");
+        assert!(should_pop(true, false), "origin known: everything is written");
+        assert!(should_pop(true, true), "origin known: the held one is already gone");
+    }
+
+    /// The same rule, end to end: every packet pushed in has to come back out
+    /// of the file. The interleaving here is the one that used to lose one —
+    /// audio arrives first and is held aside, then a config packet is discarded
+    /// and a second audio packet is popped on top of the held one.
+    ///
+    /// Raw PCM because it needs no extradata to mux; what is being counted is
+    /// packets, not sound.
+    #[test]
+    fn no_packet_is_lost_while_the_origin_is_being_found() {
+        const PCM_S16LE: u32 = 65536; // AV_CODEC_ID_PCM_S16LE
+        let path = std::env::temp_dir().join(format!(
+            "scrcpy-slint-origin-{}.mkv",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let recorder = Recorder::new();
+        recorder.set_video_codec(VideoCodecInfo {
+            codec_id: 27, // H.264
+            width: 64,
+            height: 48,
+        });
+        recorder.set_audio_codec(PCM_S16LE, false);
+
+        // Everything is queued before the thread starts, so the loop meets both
+        // queues full and the interleaving is the same every run. Pushed
+        // afterwards it is a race, and the run that happens to feed the loop one
+        // packet at a time never loses anything.
+        let audio = |pts: i64| RecPacket { data: vec![0u8; 64], pts, is_key: true };
+        let video = |pts: i64| RecPacket { data: vec![0u8; 64], pts, is_key: true };
+        let config = || RecPacket { data: vec![0u8; 8], pts: AV_NOPTS, is_key: false };
+        // Audio first, so it is what gets held aside.
+        recorder.push_audio(audio(0));
+        // Two config packets: the first is taken for the stream's extradata
+        // before the loop begins, and the second reaches the loop and is
+        // discarded there — which is what leaves video with nothing to offer
+        // for one turn while audio has more than one packet waiting. A
+        // rotation mid-session produces exactly that.
+        recorder.push_video(config());
+        recorder.push_video(config());
+        recorder.push_audio(audio(20_000));
+        recorder.push_video(video(0));
+        recorder.push_audio(audio(40_000));
+        recorder.push_video(video(33_000));
+
+        let handle = recorder.spawn(
+            path.to_string_lossy().into_owned(),
+            Some("mkv".to_string()),
+            true,
+            Some(PCM_S16LE),
+            0,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        recorder.stop();
+        let _ = handle.join();
+
+        let written = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        assert!(written > 0, "nothing was written at all");
+        let counted = count_packets(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(counted.1, 3, "an audio packet went missing: {counted:?}");
+    }
+
+    /// (video, audio) packet counts in a file, by demuxing it.
+    fn count_packets(path: &std::path::Path) -> (usize, usize) {
+        ffmpeg_next::init().expect("ffmpeg");
+        let mut input = match ffmpeg_next::format::input(path) {
+            Ok(input) => input,
+            Err(e) => panic!("the recording does not open: {e}"),
+        };
+        let audio_index = input
+            .streams()
+            .best(ffmpeg_next::media::Type::Audio)
+            .map(|s| s.index());
+        let mut video = 0;
+        let mut audio = 0;
+        for (stream, _packet) in input.packets() {
+            if Some(stream.index()) == audio_index {
+                audio += 1;
+            } else {
+                video += 1;
+            }
+        }
+        (video, audio)
+    }
 
     /// A recorder told there is no audio must not wait for audio.
     ///
