@@ -16,7 +16,7 @@ use std::time::Duration;
 use crate::control::controller::Controller;
 use crate::display::fps_counter::FpsCounter;
 use crate::display::v4l2_sink::V4l2Sink;
-use crate::input::slint_input::{SlintInput, WindowAction};
+use crate::input::slint_input::{Mods, SlintInput, WindowAction};
 use crate::options::{rgb_from_hex, Options};
 use crate::session::{AudioStream, VideoStream};
 use crate::ui::{display_aspect, frame_to_image, render_fit, Mirror, Orientation};
@@ -265,9 +265,10 @@ fn wire_input(
         let input = input.clone();
         let controller = controller.clone();
         mirror.on_pointer_down(move |u, v, button, alt, control, shift| {
-            input
-                .borrow_mut()
-                .pointer_down(u, v, button, alt, control, shift, &controller);
+            // Slint reports no Meta for pointer events, and the pointer path
+            // does not consult it.
+            let mods = Mods { alt, control, shift, ..Mods::NONE };
+            input.borrow_mut().pointer_down(u, v, button, mods, &controller);
         });
     }
     {
@@ -302,10 +303,7 @@ fn wire_input(
             input.borrow_mut().set_orientation(orientation.get());
             let action = input.borrow_mut().key_down(
                 text.as_str(),
-                alt,
-                control,
-                shift,
-                meta,
+                Mods { alt, control, shift, meta },
                 repeat,
                 &controller,
             );
@@ -320,7 +318,7 @@ fn wire_input(
         mirror.on_key_up(move |text, alt, control, shift, meta| {
             input
                 .borrow_mut()
-                .key_up(text.as_str(), alt, control, shift, meta, &controller);
+                .key_up(text.as_str(), Mods { alt, control, shift, meta }, &controller);
         });
     }
 }
@@ -330,6 +328,11 @@ fn wire_input(
 /// Only the newest frame is drawn; the ones skipped go straight back to the
 /// decoder's pool, which keeps a slow compositor from building a queue of stale
 /// frames.
+// Eleven arguments, all of them state the pump shares with the window it
+// draws into, handed over once at the only call site. `flip` and `paused` are
+// the two to read twice — same type, next to each other — which is why each
+// carries its own line and comment below.
+#[allow(clippy::too_many_arguments)]
 fn start_pump(
     video: VideoStream,
     input: Rc<RefCell<SlintInput>>,

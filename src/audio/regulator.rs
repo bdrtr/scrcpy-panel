@@ -77,8 +77,8 @@ impl AudioBuffer {
         let available = self.capacity - self.count;
         let to_write = samples.len().min(available);
 
-        for i in 0..to_write {
-            self.data[self.write_pos] = samples[i];
+        for &sample in &samples[..to_write] {
+            self.data[self.write_pos] = sample;
             self.write_pos = (self.write_pos + 1) % self.capacity;
         }
         self.count += to_write;
@@ -89,8 +89,8 @@ impl AudioBuffer {
     pub fn read(&mut self, out: &mut [f32]) -> usize {
         let to_read = out.len().min(self.count);
 
-        for i in 0..to_read {
-            out[i] = self.data[self.read_pos];
+        for slot in &mut out[..to_read] {
+            *slot = self.data[self.read_pos];
             self.read_pos = (self.read_pos + 1) % self.capacity;
         }
         self.count -= to_read;

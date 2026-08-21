@@ -143,6 +143,19 @@ now been seen against a real device, three times in one session: `--flex-display
 the device's display while it runs, and each resize came back as a session header with the
 client-resized flag set. This paragraph used to say it had only ever been unit-tested.
 
+Every adb call the client makes now goes through one module, `src/adb/device.rs`, and that
+move is verified in two halves as well. Reading adb's output is tested against the bytes it
+writes — a device list with a mix of `device`, `offline` and `unauthorized` rows, an empty
+one, an install that reports `Failure` on stdout and exits zero anyway. Running the commands
+is tested against the real adb with nothing plugged in: `cargo test --release -- --ignored
+what_adb_says` asks for the list and gets an empty one rather than an error or a phantom
+row, reads the version banner back, connects to a closed port and gets a refusal, and
+queries a device that is not there without hanging. What that cannot cover is the other
+half — no adb operation has been run through the new module against a phone yet, so
+`tcpip`, `pair`, `install`, `push` and `screencap` are, for now, only as good as their
+arguments look.
+
+
 ## Known issues
 
 - **The server version is pinned exactly.** The server refuses to start unless the client

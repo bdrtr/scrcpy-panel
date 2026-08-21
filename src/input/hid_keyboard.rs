@@ -85,7 +85,7 @@ impl HidKeyboard {
 
         // Modifier keys (0xE0-0xE7) are handled via the modifier byte,
         // not the key array. But we still need to send a report.
-        let is_modifier = hid_scancode >= 0xE0 && hid_scancode <= 0xE7;
+        let is_modifier = (0xE0..=0xE7).contains(&hid_scancode);
 
         if !is_modifier {
             if hid_scancode >= NUM_KEYS as u8 {
@@ -110,9 +110,8 @@ impl HidKeyboard {
             if self.keys[i] {
                 if count >= MAX_KEYS {
                     // Phantom state: too many keys pressed
-                    for j in 2..REPORT_SIZE {
-                        report[j] = 0x01; // Error Roll Over
-                    }
+                    // Error Roll Over
+                    report[2..REPORT_SIZE].fill(0x01);
                     break;
                 }
                 report[2 + count] = i as u8;

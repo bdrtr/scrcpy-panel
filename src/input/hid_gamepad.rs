@@ -262,12 +262,7 @@ impl HidGamepad {
     }
 
     fn find_slot(&self, gamepad_id: Option<u32>) -> Option<usize> {
-        for i in 0..MAX_GAMEPADS {
-            if self.slots[i].gamepad_id == gamepad_id {
-                return Some(i);
-            }
-        }
-        None
+        self.slots.iter().position(|slot| slot.gamepad_id == gamepad_id)
     }
 }
 

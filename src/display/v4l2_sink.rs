@@ -22,7 +22,7 @@ mod linux {
     /// `V4L2_BUF_TYPE_VIDEO_OUTPUT`
     const BUF_TYPE_VIDEO_OUTPUT: u32 = 2;
     /// `V4L2_PIX_FMT_RGB24`, the fourcc 'R' 'G' 'B' '3'
-    const PIX_FMT_RGB24: u32 = u32::from_le_bytes([b'R', b'G', b'B', b'3']);
+    const PIX_FMT_RGB24: u32 = u32::from_le_bytes(*b"RGB3");
     /// `V4L2_FIELD_NONE` — progressive, no interlacing
     const FIELD_NONE: u32 = 1;
     /// `V4L2_COLORSPACE_SRGB`

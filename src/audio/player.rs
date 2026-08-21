@@ -47,7 +47,7 @@ impl AudioPlayer {
 
         let stream = device
             .build_output_stream(
-                config.clone(),
+                config,
                 move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     consumer.pull(out);
                 },

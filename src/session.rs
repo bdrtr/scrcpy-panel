@@ -192,8 +192,12 @@ impl Session {
             .context("Failed to start server")?;
 
         log::info!("Connecting to server...");
-        let (video_socket, audio_socket, control_socket, device_info) =
-            server::connection::connect_sockets(
+        let server::connection::Sockets {
+            video: video_socket,
+            audio: audio_socket,
+            control: control_socket,
+            info: device_info,
+        } = server::connection::connect_sockets(
                 &tunnel_host,
                 port,
                 is_reverse,

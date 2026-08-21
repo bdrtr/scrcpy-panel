@@ -172,6 +172,39 @@ mod key {
     pub const MENU: char = '\u{F735}';
 }
 
+/// The modifier keys as the window reported them.
+///
+/// Passed as one value rather than as four `bool` parameters in a row: at a
+/// call site those are four chances to transpose two of them and still
+/// compile. `alt` is the MOD key this client's shortcuts hang off.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Mods {
+    pub alt: bool,
+    pub control: bool,
+    pub shift: bool,
+    pub meta: bool,
+}
+
+impl Mods {
+    /// Nothing held.
+    pub const NONE: Self = Self { alt: false, control: false, shift: false, meta: false };
+    /// MOD alone — the prefix every shortcut starts with.
+    ///
+    /// This and `and_shift` are how a modifier set is written by hand, which
+    /// today only the tests do: the window hands the live flags over as four
+    /// booleans and they go straight into the struct. They are kept because
+    /// `Mods::MOD.and_shift()` is what the shortcut table reads as, and
+    /// `Mods { alt: true, control: false, shift: true, meta: false }` is not.
+    #[allow(dead_code)]
+    pub const MOD: Self = Self { alt: true, control: false, shift: false, meta: false };
+
+    /// The same with Shift added, for the MOD+Shift half of the table.
+    #[allow(dead_code)]
+    pub const fn and_shift(self) -> Self {
+        Self { alt: self.alt, control: self.control, shift: true, meta: self.meta }
+    }
+}
+
 /// Which modifier opens the shortcut layer.
 ///
 /// Slint reports modifiers as one flag per side-agnostic key, so `lalt` and
@@ -360,7 +393,20 @@ impl SlintInput {
         )
     }
 
-    fn touch(&self, action: u8, pointer_id: u64, x: u32, y: u32, pressure: u16, action_button: u32, buttons: u32) -> ControlMsg {
+    /// A touch for the device, with this frame's size filled in.
+    ///
+    /// Pressure is worked out here rather than passed in. It was a parameter,
+    /// and every one of the nine call sites gave the same answer: full while
+    /// a pointer is touching the glass, zero when it is not. Written out by
+    /// hand nine times it is nine chances to write it wrong — and the rule is
+    /// not the obvious one. `HOVER_MOVE` is a mouse crossing the screen with
+    /// no button held; it reads as a move, but nothing is pressed, and giving
+    /// it full pressure would send the device a drag.
+    fn touch(&self, action: u8, pointer_id: u64, x: u32, y: u32, action_button: u32, buttons: u32) -> ControlMsg {
+        let pressure: u16 = match action {
+            AMOTION_ACTION_DOWN | AMOTION_ACTION_MOVE => 0xFFFF,
+            _ => 0,
+        };
         ControlMsg::InjectTouch {
             action,
             pointer_id,
@@ -383,11 +429,10 @@ impl SlintInput {
         u: f32,
         v: f32,
         button: i32,
-        alt: bool,
-        control: bool,
-        shift: bool,
+        mods: Mods,
         controller: &Controller,
     ) {
+        let Mods { alt, control, shift, .. } = mods;
         self.alt_held = alt;
         // A camera has nothing to touch, and the server ends the control
         // channel over a touch it did not expect. A UHID pointer is already on
@@ -414,12 +459,12 @@ impl SlintInput {
             self.vfinger_invert = (control ^ shift, control);
             let (mx, my) = self.mirrored(x, y);
             controller.push_msg(self.touch(
-                AMOTION_ACTION_DOWN, POINTER_ID_FINGER, mx, my, 0xFFFF, 0, 0,
+                AMOTION_ACTION_DOWN, POINTER_ID_FINGER, mx, my, 0, 0,
             ));
             self.vfinger_down = true;
         }
         controller.push_msg(self.touch(
-            AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, 0xFFFF, 1, 1,
+            AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, 1, 1,
         ));
     }
 
@@ -450,10 +495,10 @@ impl SlintInput {
                 // own window to prove it.
                 let pressed = android_button(button);
                 controller.push_msg(self.touch(
-                    AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, 0xFFFF, pressed, pressed,
+                    AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, pressed, pressed,
                 ));
                 controller.push_msg(self.touch(
-                    AMOTION_ACTION_UP, POINTER_ID_MOUSE, x, y, 0, pressed, 0,
+                    AMOTION_ACTION_UP, POINTER_ID_MOUSE, x, y, pressed, 0,
                 ));
             }
             SecondaryClick::Back => {
@@ -476,10 +521,10 @@ impl SlintInput {
 
         if self.vfinger_down {
             let (mx, my) = self.mirrored(x, y);
-            controller.push_msg(self.touch(AMOTION_ACTION_UP, POINTER_ID_FINGER, mx, my, 0, 0, 0));
+            controller.push_msg(self.touch(AMOTION_ACTION_UP, POINTER_ID_FINGER, mx, my, 0, 0));
             self.vfinger_down = false;
         }
-        controller.push_msg(self.touch(AMOTION_ACTION_UP, POINTER_ID_MOUSE, x, y, 0, 1, 0));
+        controller.push_msg(self.touch(AMOTION_ACTION_UP, POINTER_ID_MOUSE, x, y, 1, 0));
     }
 
     pub fn pointer_moved(&mut self, u: f32, v: f32, pressed: bool, controller: &Controller) {
@@ -490,17 +535,17 @@ impl SlintInput {
 
         if pressed {
             controller.push_msg(self.touch(
-                AMOTION_ACTION_MOVE, POINTER_ID_MOUSE, x, y, 0xFFFF, 0, 1,
+                AMOTION_ACTION_MOVE, POINTER_ID_MOUSE, x, y, 0, 1,
             ));
             if self.vfinger_down {
                 let (mx, my) = self.mirrored(x, y);
                 controller.push_msg(self.touch(
-                    AMOTION_ACTION_MOVE, POINTER_ID_FINGER, mx, my, 0xFFFF, 0, 0,
+                    AMOTION_ACTION_MOVE, POINTER_ID_FINGER, mx, my, 0, 0,
                 ));
             }
         } else {
             controller.push_msg(self.touch(
-                AMOTION_ACTION_HOVER_MOVE, POINTER_ID_MOUSE, x, y, 0, 0, 0,
+                AMOTION_ACTION_HOVER_MOVE, POINTER_ID_MOUSE, x, y, 0, 0,
             ));
         }
     }
@@ -536,13 +581,11 @@ impl SlintInput {
     pub fn key_down(
         &mut self,
         text: &str,
-        alt: bool,
-        control: bool,
-        shift: bool,
-        meta: bool,
+        mods: Mods,
         repeat: bool,
         controller: &Controller,
     ) -> WindowAction {
+        let Mods { alt, control, shift, meta } = mods;
         self.alt_held = alt;
         let Some(c) = text.chars().next() else {
             return WindowAction::None;
@@ -647,12 +690,10 @@ impl SlintInput {
     pub fn key_up(
         &mut self,
         text: &str,
-        alt: bool,
-        control: bool,
-        shift: bool,
-        meta: bool,
+        mods: Mods,
         controller: &Controller,
     ) {
+        let Mods { alt, control, shift, meta } = mods;
         self.alt_held = alt;
         let Some(c) = text.chars().next() else { return };
         if self.camera
@@ -1140,17 +1181,17 @@ mod tests {
         let (controller, messages) = Controller::collecting();
         let mut input = input();
 
-        input.key_down("a", false, false, false, false, true, &controller);
+        input.key_down("a", Mods::NONE, true, &controller);
         assert!(messages.try_recv().is_ok(), "repeats travel by default");
 
         input.set_event_filters(false, true);
-        input.key_down("a", false, false, false, false, false, &controller);
+        input.key_down("a", Mods::NONE, false, &controller);
         assert!(matches!(
             messages.try_recv(),
             Ok(ControlMsg::InjectKeycode { repeat: 0, .. })
         ), "the first press must still travel");
 
-        input.key_down("a", false, false, false, false, true, &controller);
+        input.key_down("a", Mods::NONE, true, &controller);
         assert!(messages.try_recv().is_err(), "the repeat must not");
     }
 
@@ -1224,7 +1265,7 @@ mod tests {
         let (controller, messages) = Controller::collecting();
         let mut input = input();
         assert_eq!(
-            input.key_down(&key::F11.to_string(), false, false, false, false, false, &controller),
+            input.key_down(&key::F11.to_string(), Mods::NONE, false, &controller),
             WindowAction::ToggleFullscreen
         );
         assert!(messages.try_recv().is_err(), "F11 is the window's, not the device's");
@@ -1244,7 +1285,7 @@ mod tests {
         ] {
             let (controller, messages) = Controller::collecting();
             let mut input = input();
-            input.pointer_down(0.25, 0.25, BUTTON_LEFT, false, control, shift, &controller);
+            input.pointer_down(0.25, 0.25, BUTTON_LEFT, Mods { control, shift, ..Mods::NONE }, &controller);
 
             let first = messages.try_recv().expect("a touch");
             match (expected, first) {
@@ -1260,6 +1301,30 @@ mod tests {
         }
     }
 
+    /// Pressure follows the action, and the awkward one is hover.
+    ///
+    /// It used to be a parameter, written out at each of nine call sites. The
+    /// obvious rule for folding it in — full unless the pointer has lifted —
+    /// is wrong: `HOVER_MOVE` is a mouse crossing the screen with no button
+    /// held, and full pressure there turns every mouse move into a drag.
+    #[test]
+    fn a_hovering_mouse_is_not_pressing_on_anything() {
+        let input = input();
+        for (action, expected, what) in [
+            (AMOTION_ACTION_DOWN, 0xFFFF, "a finger going down"),
+            (AMOTION_ACTION_MOVE, 0xFFFF, "one already down, moving"),
+            (AMOTION_ACTION_UP, 0, "one lifting"),
+            (AMOTION_ACTION_HOVER_MOVE, 0, "a mouse over the glass, touching nothing"),
+        ] {
+            match input.touch(action, POINTER_ID_MOUSE, 1, 1, 0, 0) {
+                ControlMsg::InjectTouch { pressure, .. } => {
+                    assert_eq!(pressure, expected, "{what}");
+                }
+                other => panic!("expected a touch, got {other:?}"),
+            }
+        }
+    }
+
     /// The server ends the control channel over a message a camera session
     /// cannot answer, so the client has to know which ones those are.
     #[test]
@@ -1268,29 +1333,29 @@ mod tests {
         let mut input = input();
         input.set_camera(true);
 
-        input.pointer_down(0.5, 0.5, BUTTON_LEFT, false, false, false, &controller);
+        input.pointer_down(0.5, 0.5, BUTTON_LEFT, Mods::NONE, &controller);
         input.pointer_moved(0.5, 0.5, true, &controller);
         input.pointer_up(0.5, 0.5, BUTTON_LEFT, &controller);
         input.pointer_scroll(0.5, 0.5, 0.0, -3.0, &controller);
-        input.key_down("a", false, false, false, false, false, &controller);
-        input.key_up("a", false, false, false, false, &controller);
-        input.key_down("h", true, false, false, false, false, &controller); // MOD+h
+        input.key_down("a", Mods::NONE, false, &controller);
+        input.key_up("a", Mods::NONE, &controller);
+        input.key_down("h", Mods::MOD, false, &controller); // MOD+h
         assert!(messages.try_recv().is_err(), "nothing of that reaches a camera");
 
         // What it does take.
-        input.key_down("t", true, false, false, false, false, &controller);
+        input.key_down("t", Mods::MOD, false, &controller);
         assert!(matches!(
             messages.try_recv(),
             Ok(ControlMsg::CameraSetTorch { on: true })
         ));
-        input.key_down("\u{F700}", true, false, false, false, false, &controller);
+        input.key_down("\u{F700}", Mods::MOD, false, &controller);
         assert!(matches!(messages.try_recv(), Ok(ControlMsg::CameraZoomIn)));
-        input.key_down("r", true, false, true, false, false, &controller);
+        input.key_down("r", Mods::MOD.and_shift(), false, &controller);
         assert!(matches!(messages.try_recv(), Ok(ControlMsg::ResetVideo)));
 
         // And the window's own actions, which never leave this machine.
         assert_eq!(
-            input.key_down("f", true, false, false, false, false, &controller),
+            input.key_down("f", Mods::MOD, false, &controller),
             WindowAction::ToggleFullscreen
         );
         assert!(messages.try_recv().is_err());
@@ -1301,7 +1366,7 @@ mod tests {
     fn a_display_session_still_takes_a_touch() {
         let (controller, messages) = Controller::collecting();
         let mut input = input();
-        input.pointer_down(0.5, 0.5, BUTTON_LEFT, false, false, false, &controller);
+        input.pointer_down(0.5, 0.5, BUTTON_LEFT, Mods::NONE, &controller);
         assert!(matches!(messages.try_recv(), Ok(ControlMsg::InjectTouch { .. })));
     }
 
@@ -1315,11 +1380,11 @@ mod tests {
         input.set_event_filters(false, true);
 
         assert_eq!(
-            input.key_down("f", true, false, false, false, false, &controller),
+            input.key_down("f", Mods::MOD, false, &controller),
             WindowAction::ToggleFullscreen
         );
         assert_eq!(
-            input.key_down("f", true, false, false, false, true, &controller),
+            input.key_down("f", Mods::MOD, true, &controller),
             WindowAction::None,
             "a held shortcut fires once, as it always did"
         );

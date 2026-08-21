@@ -363,7 +363,7 @@ impl VideoDecoder {
             }
 
             // Create codec context and set hw device
-            let mut context = ffmpeg_next::codec::Context::new_with_codec(codec.clone());
+            let mut context = ffmpeg_next::codec::Context::new_with_codec(*codec);
 
             unsafe {
                 let ctx = context.as_mut_ptr();
@@ -409,7 +409,7 @@ impl VideoDecoder {
         // phone, one thread decodes and converts in 2.96 ms a frame, which is
         // 338 frames a second for a stream that arrives at sixty.
         log::debug!("No hardware acceleration available, using software decoder");
-        let mut context = ffmpeg_next::codec::Context::new_with_codec(codec.clone());
+        let mut context = ffmpeg_next::codec::Context::new_with_codec(*codec);
         context.set_threading(ffmpeg_next::codec::threading::Config {
             kind: ffmpeg_next::codec::threading::Type::None,
             count: 1,

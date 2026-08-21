@@ -436,8 +436,6 @@ impl PanelConfig {
         };
         opt("--clipboard-direction", direction, &d.clipboard_direction);
 
-        drop(opt);
-
         // Flags that are their own switch rather than a value.
         let mut flag = |on: bool, name: &str| {
             if on {
@@ -480,8 +478,6 @@ impl PanelConfig {
         flag(self.select_tcpip, "--select-tcpip");
         flag(self.kill_adb_on_close, "--kill-adb-on-close");
         flag(self.no_cleanup, "--no-cleanup");
-        drop(flag);
-
         // Switches that carry a value only when they are on.
         // The mockup has no switch for the V4L2 sink: naming a device turns it
         // on, which is also how scrcpy's own flag behaves.
@@ -758,10 +754,12 @@ mod tests {
 
     #[test]
     fn only_changed_values_become_flags() {
-        let mut cfg = PanelConfig::default();
-        cfg.video_codec = "h265".into();
-        cfg.max_size = "1024".into();
-        cfg.stay_awake = true;
+        let cfg = PanelConfig {
+            video_codec: "h265".into(),
+            max_size: "1024".into(),
+            stay_awake: true,
+            ..Default::default()
+        };
 
         let flags = cfg.to_flags();
         assert!(flags.contains(&"--video-codec=h265".to_string()));
@@ -772,9 +770,11 @@ mod tests {
 
     #[test]
     fn camera_flags_only_appear_for_the_camera_source() {
-        let mut cfg = PanelConfig::default();
-        cfg.camera_id = "1".into();
-        cfg.camera_high_speed = true;
+        let mut cfg = PanelConfig {
+            camera_id: "1".into(),
+            camera_high_speed: true,
+            ..Default::default()
+        };
         assert!(cfg.to_flags().is_empty(), "camera settings are inert while mirroring the display");
 
         cfg.video_source = "camera".into();
@@ -785,9 +785,11 @@ mod tests {
 
     #[test]
     fn switches_that_carry_a_value_stay_silent_until_enabled() {
-        let mut cfg = PanelConfig::default();
-        cfg.record_path = "/tmp/out.mp4".into();
-        cfg.new_display = "800x600".into();
+        let mut cfg = PanelConfig {
+            record_path: "/tmp/out.mp4".into(),
+            new_display: "800x600".into(),
+            ..Default::default()
+        };
         assert!(cfg.to_flags().is_empty(), "a path alone is not a session");
 
         cfg.record_enabled = true;
@@ -803,10 +805,12 @@ mod tests {
 
     #[test]
     fn unsupported_flags_are_reported_rather_than_passed_on() {
-        let mut cfg = PanelConfig::default();
-        cfg.max_size = "800".into();          // supported
-        cfg.otg = true;                    // a mode of its own, not a session to host
-        cfg.gamepad = "uhid".into();       // read by gilrs since the port grew a source
+        let cfg = PanelConfig {
+            max_size: "800".into(), // supported
+            otg: true,              // a mode of its own, not a session to host
+            gamepad: "uhid".into(), // read by gilrs since the port grew a source
+            ..Default::default()
+        };
 
         let (accepted, dropped) = cfg.to_client_args();
         assert_eq!(accepted.len(), 2, "{accepted:?}");
@@ -817,9 +821,11 @@ mod tests {
 
     #[test]
     fn the_timestamp_checkbox_reaches_the_filename() {
-        let mut cfg = PanelConfig::default();
-        cfg.record_enabled = true;
-        cfg.record_path = "/tmp/session.mp4".into();
+        let mut cfg = PanelConfig {
+            record_enabled: true,
+            record_path: "/tmp/session.mp4".into(),
+            ..Default::default()
+        };
 
         let stamped = cfg.effective_record_path();
         assert!(stamped.starts_with("/tmp/session-"), "got {stamped}");
@@ -831,8 +837,10 @@ mod tests {
 
     #[test]
     fn an_extensionless_recording_path_still_takes_a_timestamp() {
-        let mut cfg = PanelConfig::default();
-        cfg.record_path = "/tmp/capture".into();
+        let cfg = PanelConfig {
+            record_path: "/tmp/capture".into(),
+            ..Default::default()
+        };
         assert!(cfg.effective_record_path().starts_with("/tmp/capture-"));
     }
 
@@ -840,8 +848,10 @@ mod tests {
     /// place the panel tells the user which phone it is about to talk to.
     #[test]
     fn a_selected_device_reaches_the_command() {
-        let mut cfg = PanelConfig::default();
-        cfg.serial = "a1683d6b0013".into();
+        let cfg = PanelConfig {
+            serial: "a1683d6b0013".into(),
+            ..Default::default()
+        };
 
         let line = cfg.to_command_line_for(&["a1683d6b0013".to_string()]);
         assert_eq!(line, "scrcpy --serial=a1683d6b0013");
@@ -853,8 +863,10 @@ mod tests {
 
     #[test]
     fn one_device_is_one_command() {
-        let mut cfg = PanelConfig::default();
-        cfg.max_size = "1024".into();
+        let cfg = PanelConfig {
+            max_size: "1024".into(),
+            ..Default::default()
+        };
         assert_eq!(
             cfg.to_command_line_for(&["ABC123".to_string()]),
             "scrcpy --max-size=1024"
@@ -863,9 +875,11 @@ mod tests {
 
     #[test]
     fn several_devices_become_a_loop() {
-        let mut cfg = PanelConfig::default();
-        cfg.max_size = "1024".into();
-        cfg.serial = "ABC123".into();
+        let cfg = PanelConfig {
+            max_size: "1024".into(),
+            serial: "ABC123".into(),
+            ..Default::default()
+        };
 
         let line = cfg.to_command_line_for(&["ABC123".to_string(), "DEF456".to_string()]);
         assert_eq!(
@@ -887,8 +901,10 @@ mod tests {
 
     #[test]
     fn tcpip_needs_an_address_to_mean_anything() {
-        let mut cfg = PanelConfig::default();
-        cfg.tcpip_enabled = true;
+        let mut cfg = PanelConfig {
+            tcpip_enabled: true,
+            ..Default::default()
+        };
         assert!(cfg.to_flags().is_empty(), "a bare --tcpip has nothing to connect to");
 
         cfg.tcpip_addr = "192.168.1.5:5555".into();
@@ -897,9 +913,11 @@ mod tests {
 
     #[test]
     fn bit_rates_are_expanded_for_the_client_but_not_for_the_preview() {
-        let mut cfg = PanelConfig::default();
-        cfg.video_bit_rate = "12M".into();
-        cfg.audio_bit_rate = "96K".into();
+        let cfg = PanelConfig {
+            video_bit_rate: "12M".into(),
+            audio_bit_rate: "96K".into(),
+            ..Default::default()
+        };
 
         assert!(cfg.to_command_line().contains("--video-bit-rate=12M"));
         assert!(cfg.to_command_line().contains("--audio-bit-rate=96K"));
@@ -924,9 +942,11 @@ mod tests {
     /// quiet, and nothing happened. Adding one back means implementing it.
     #[test]
     fn flags_with_no_implementation_are_not_offered() {
+        // A list of one today. It is a loop, and not an assertion on a
+        // single name, so the next flag added without an implementation is
+        // one line rather than a rewrite.
+        #[allow(clippy::single_element_loop)]
         for flag in [
-            // Nothing is unimplemented-but-offered right now. The list is kept
-            // so the next flag added without an implementation lands here.
             // Implemented, but not as something the panel can host: OTG is a
             // session with no session in it — no adb, no server, no picture —
             // and the panel's model is a mirror in a tab.

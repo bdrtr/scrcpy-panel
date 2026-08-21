@@ -121,7 +121,7 @@ thread_local! {
     /// The device scan is the one that needs it: noticing a device is what
     /// autostart hangs off, and that decision needs the profiles and the log.
     static CURRENT_PANEL: RefCell<std::rc::Weak<Panel>> =
-        RefCell::new(std::rc::Weak::new());
+        const { RefCell::new(std::rc::Weak::new()) };
 }
 
 /// Run `f` with the panel, if there still is one.
@@ -2274,7 +2274,7 @@ fn spawn_device_scan(panel: &Rc<Panel>) {
                             conn: d.conn.as_str().into(),
                             android: d.android.as_str().into(),
                             screen: d.screen.as_str().into(),
-                            selected: chosen_now.iter().any(|s| *s == d.serial),
+                            selected: chosen_now.contains(&d.serial),
                             state: d.state.as_str().into(),
                         })
                         .collect::<Vec<_>>(),

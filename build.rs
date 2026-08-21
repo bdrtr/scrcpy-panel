@@ -52,7 +52,7 @@ fn generate_rust_translations() {
     // the compiler will produce, not by the escaped text going into the source.
     // `\"` sorts as a backslash here and as a quote there, which is enough to
     // put two entries out of order and make the search miss them.
-    entries.sort_by(|a, b| unescaped(&a.0).cmp(&unescaped(&b.0)));
+    entries.sort_by_key(|a| unescaped(&a.0));
     entries.dedup_by(|a, b| a.0 == b.0);
 
     let mut out = String::from(

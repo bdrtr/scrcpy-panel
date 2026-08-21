@@ -298,6 +298,54 @@ pub fn last_line(said: &str) -> String {
 mod tests {
     use super::*;
 
+    /// The half of this module that can be run without a phone, run against the
+    /// real adb binary rather than against a string.
+    ///
+    /// Parsing has its own tests above; this is the other half — that the
+    /// commands are spelled the way adb expects and that the error paths come
+    /// back as errors rather than as empty successes. It needs adb installed,
+    /// so it is not run by default:
+    /// `cargo test --release -- --ignored --nocapture adb_here`
+    #[test]
+    #[ignore]
+    fn what_adb_says_here() {
+        // The list works with nothing attached: adb prints its header and
+        // nothing else, and that has to come back as an empty list rather than
+        // as an error or a phantom row.
+        match list_detailed() {
+            Ok(devices) => {
+                println!("{} device(s): {:?}", devices.len(), devices);
+                for device in &devices {
+                    assert!(!device.serial.is_empty(), "a row with no serial");
+                    assert!(!device.name.is_empty(), "a row with nothing to show");
+                }
+            }
+            Err(e) => panic!("adb devices -l failed: {e:#}"),
+        }
+
+        let said = version().expect("adb version");
+        println!("version: {}", said.lines().next().unwrap_or(""));
+        assert!(
+            said.to_lowercase().contains("android debug bridge"),
+            "that is not adb's version banner: {said}"
+        );
+
+        // A port nothing is listening on. adb reports this its own way and the
+        // wrapper has to bring it back as an error, not as a blank success.
+        match connect("127.0.0.1:1") {
+            Ok(said) => assert!(
+                said.contains("failed") || said.contains("cannot"),
+                "connecting to a closed port came back as a plain success: {said:?}"
+            ),
+            Err(e) => println!("refused, as it should be: {e:#}"),
+        }
+
+        // Asking a device that is not there must not hang or panic; it comes
+        // back empty.
+        assert_eq!(property("no-such-device", "ro.build.version.release"), "");
+        assert_eq!(screen_size("no-such-device"), "");
+    }
+
     /// The device list, read the way adb actually writes it. This parser lived
     /// in the panel with no test; the shape of adb's output is exactly the kind
     /// of thing that changes underneath you.

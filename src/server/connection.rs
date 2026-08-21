@@ -93,6 +93,14 @@ fn connect_and_read_dummy_byte(host: &str, port: u16, attempts: u32) -> Result<T
     bail!("Could not connect to server on {}:{}", host, port)
 }
 
+/// The sockets a session runs on, in the order the server opens them.
+pub struct Sockets {
+    pub video: Option<TcpStream>,
+    pub audio: Option<TcpStream>,
+    pub control: Option<TcpStream>,
+    pub info: DeviceInfo,
+}
+
 /// Establish all socket connections to the server
 ///
 /// For reverse mode, pass a pre-bound listener (created before server start).
@@ -106,7 +114,7 @@ pub fn connect_sockets(
     video: bool,
     audio: bool,
     control: bool,
-) -> Result<(Option<TcpStream>, Option<TcpStream>, Option<TcpStream>, DeviceInfo)> {
+) -> Result<Sockets> {
     let timeout = Duration::from_secs(30);
 
     let mut socket_count = 0;
@@ -145,10 +153,15 @@ pub fn connect_sockets(
     let info = read_device_info(&mut sockets[0])?;
     log::info!("Device: {}", info.device_name);
 
-    // Assign sockets in order: video, audio, control
-    let video_socket = if video { Some(sockets.remove(0)) } else { None };
-    let audio_socket = if audio { Some(sockets.remove(0)) } else { None };
-    let control_socket = if control { Some(sockets.remove(0)) } else { None };
-
-    Ok((video_socket, audio_socket, control_socket, info))
+    // Assign sockets in order: video, audio, control. Named rather than
+    // returned as a tuple of three `Option<TcpStream>`, which is three of the
+    // same type in a row and nothing to catch two of them being swapped —
+    // audio arriving at the video demuxer looks like a corrupt stream, not
+    // like a wiring mistake.
+    Ok(Sockets {
+        video: if video { Some(sockets.remove(0)) } else { None },
+        audio: if audio { Some(sockets.remove(0)) } else { None },
+        control: if control { Some(sockets.remove(0)) } else { None },
+        info,
+    })
 }

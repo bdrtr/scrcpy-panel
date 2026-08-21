@@ -249,6 +249,10 @@ impl Drop for Muxer {
     }
 }
 
+// Ten arguments, and they stay ten: this is the whole of what the recorder
+// thread needs, handed over once at the only call site a few lines above.
+// Gathering them into a struct would move the work rather than remove it.
+#[allow(clippy::too_many_arguments)]
 unsafe fn open_and_record(
     lock: &Mutex<RecorderState>,
     cvar: &Condvar,
@@ -471,12 +475,11 @@ unsafe fn open_and_record(
 
             let have_v = vid_idx < 0 || pending_v.is_some();
             let have_a = aud_idx < 0 || pending_a.is_some();
-            if !have_v || !have_a {
-                if !stopped {
-                    continue;
-                }
-                // Stopping before both streams produced a packet: write what
-                // there is rather than nothing.
+            // Wait for both streams to offer one, so the earlier of the two
+            // can be the origin. Stopping first is the exception: write what
+            // there is rather than nothing.
+            if (!have_v || !have_a) && !stopped {
+                continue;
             }
 
             pts_origin = match (&pending_v, &pending_a) {
@@ -525,7 +528,7 @@ unsafe fn open_and_record(
 /// applies on playback. Rotating the pixels instead would mean decoding and
 /// re-encoding a stream this client otherwise only remuxes.
 unsafe fn set_rotation(codecpar: *mut ffi::AVCodecParameters, degrees: u16) {
-    if degrees % 360 == 0 {
+    if degrees.is_multiple_of(360) {
         return;
     }
 
