@@ -131,6 +131,22 @@ impl ShellHandle {
     }
 }
 
+impl Drop for ShellHandle {
+    /// Shut the socket down rather than merely letting go of this end of it.
+    ///
+    /// The reader thread holds its own dup of the same socket and sits blocked
+    /// in `read`, so dropping the handle closes one descriptor and changes
+    /// nothing: the shell stays up, and the server on the device behind it with
+    /// it. Every error path between starting that server and having a `Session`
+    /// to shut down took exactly that route. In a client that then exits it
+    /// costs nothing, since every descriptor goes at once; in the panel, which
+    /// starts sessions over and over inside one process, it is a server left on
+    /// the phone for each attempt that failed.
+    fn drop(&mut self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+    }
+}
+
 /// Start a shell command on the device.
 /// Returns a handle that logs output and can be killed.
 pub fn shell_exec(serial: &str, shell_args: &[&str]) -> Result<ShellHandle> {
@@ -165,4 +181,58 @@ pub fn shell_exec(serial: &str, shell_args: &[&str]) -> Result<ShellHandle> {
         _reader_thread: Some(reader_thread),
         stream: stream_clone,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// Letting a shell handle go has to end the shell.
+    ///
+    /// The reader thread holds a dup of the same socket and blocks on it, so
+    /// closing only the handle's end leaves the connection up — and the
+    /// device-side server with it. This stands a reader on a real socket and
+    /// waits for it to come back.
+    #[test]
+    fn dropping_a_shell_handle_lets_its_reader_go() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a port");
+        let address = listener.local_addr().expect("its address");
+        let far_end = thread::spawn(move || {
+            let (socket, _) = listener.accept().expect("a connection");
+            // Say nothing and wait: the reader below has nothing to read until
+            // the socket is shut down under it.
+            let mut buffer = [0u8; 1];
+            use std::io::Read;
+            let mut socket = socket;
+            let _ = socket.read(&mut buffer);
+        });
+
+        let stream = TcpStream::connect(address).expect("it connects");
+        let handle_end = stream.try_clone().expect("a dup");
+        let (tx, rx) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            let reader = BufReader::new(stream);
+            for line in reader.lines() {
+                if line.is_err() {
+                    break;
+                }
+            }
+            let _ = tx.send(());
+        });
+
+        let handle = ShellHandle {
+            _reader_thread: Some(reader),
+            stream: handle_end,
+        };
+        drop(handle);
+
+        assert!(
+            rx.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "the reader is still blocked, so the shell is still up"
+        );
+        let _ = far_end.join();
+    }
 }
