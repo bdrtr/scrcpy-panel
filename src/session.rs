@@ -77,6 +77,11 @@ pub struct Session {
     /// Shared with the demux threads so a recording can be started and stopped
     /// while the session runs, rather than only being decided at launch.
     recorder: Arc<RwLock<Option<Recorder>>>,
+    /// The thread writing the file, kept so that stopping a recording can wait
+    /// for it to finish rather than guess at how long that takes. The trailer —
+    /// the index that makes an mp4 open at all — is written after the last
+    /// packet, and this handle used to be thrown away.
+    recorder_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// What a recorder started later needs to know about the streams.
     video_codec: Option<VideoCodecInfo>,
     audio_codec_id: Option<u32>,
@@ -237,6 +242,7 @@ impl Session {
             demuxer_thread: None,
             decoder_thread: None,
             recorder: recorder.clone(),
+            recorder_thread: Arc::new(Mutex::new(None)),
             video_codec: None,
             audio_codec_id,
             video_config: video_config.clone(),
@@ -297,7 +303,7 @@ impl Session {
             if let Some(rec) = self.recorder.read().expect("recorder lock").as_ref() {
                 rec.set_video_codec(video_codec);
                 let path = opts.record.as_ref().expect("recorder implies --record").clone();
-                let _ = rec.spawn(
+                let thread = rec.spawn(
                     path.clone(),
                     opts.record_format.clone(),
                     opts.video_enabled(),
@@ -307,6 +313,7 @@ impl Session {
                     self.audio_codec_id,
                     opts.record_rotation(),
                 );
+                *self.recorder_thread.lock().expect("recorder thread lock") = Some(thread);
                 match opts.record_format {
                     Some(ref format) => log::info!("Recording to: {} ({})", path, format),
                     None => log::info!("Recording to: {}", path),
@@ -398,13 +405,14 @@ impl Session {
         if let Some(codec_id) = self.audio_codec_id {
             recorder.set_audio_codec(codec_id, true);
         }
-        let _ = recorder.spawn(
+        let thread = recorder.spawn(
             path.to_string(),
             format.map(str::to_string),
             true,
             self.audio_codec_id,
             self.record_rotation,
         );
+        *self.recorder_thread.lock().expect("recorder thread lock") = Some(thread);
 
         // Seed the queues with the config packets from the top of the stream,
         // before the recorder is visible to the demuxers, so they are the first
@@ -443,14 +451,50 @@ impl Session {
     }
 
     /// Stop a recording without ending the session.
+    /// Stop a recording and wait for the file to be finished.
+    ///
+    /// Waiting is the point: the trailer is written after the last packet, and
+    /// an mp4 without one does not open. This used to return the moment the
+    /// recorder was told to stop, so a caller said "recording stopped" over a
+    /// file that was not yet one.
     pub fn stop_recording(&self) -> bool {
         match self.recorder.write().expect("recorder lock").take() {
             Some(recorder) => {
                 recorder.stop();
+                self.wait_for_the_file();
                 log::info!("Recording stopped");
                 true
             }
             None => false,
+        }
+    }
+
+    /// Join the recorder's thread, within reason.
+    ///
+    /// Bounded rather than a plain join: a recorder that will not finish should
+    /// not be able to hold a session open for ever, and a warning about a
+    /// half-written file is better than a client that never closes. It replaces
+    /// a flat 500 ms sleep, which was both too long for a small file and too
+    /// short for a large one.
+    fn wait_for_the_file(&self) {
+        let Some(thread) = self
+            .recorder_thread
+            .lock()
+            .expect("recorder thread lock")
+            .take()
+        else {
+            return;
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !thread.is_finished() {
+            if std::time::Instant::now() >= deadline {
+                log::warn!("The recording is still being written; leaving it to finish");
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        if thread.join().is_err() {
+            log::warn!("Recorder thread panicked");
         }
     }
 
@@ -479,8 +523,7 @@ impl Session {
 
         if let Some(recorder) = self.recorder.write().expect("recorder lock").take() {
             recorder.stop();
-            // Give the recorder a moment to write its trailer.
-            thread::sleep(Duration::from_millis(500));
+            self.wait_for_the_file();
         }
 
         drop(self.controller.take());
