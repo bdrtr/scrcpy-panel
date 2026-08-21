@@ -33,6 +33,28 @@ Upstream's own design notes are preserved under [`docs/upstream/`](./docs/upstre
 their claims with care: the upstream commit message says "100% feature parity", which
 6,500 lines of Rust against scrcpy's ~20,000 lines of C does not support.
 
+### What the server actually does
+
+The server is not part of this repository and is not built here: it is
+`/usr/share/scrcpy/scrcpy-server` from the distribution's own scrcpy package, unmodified.
+That makes several of this client's decisions assumptions about somebody else's code, so
+they were checked against the v4.1 server's source rather than left as beliefs:
+
+| The client assumes | The server, in v4.1 |
+|---|---|
+| Scroll goes on the wire as signed 16-bit fixed point, one notch being `i16::MAX` | `Binary.i16FixedPointToFloat` is `value / 2^15`, with `0x7fff` special-cased to exactly 1.0 — so a bare notch count of 1 arrives as 0.00003, which is what it used to send |
+| Injected text is capped at 300 bytes | `ControlMessageReader.INJECT_TEXT_MAX_LENGTH = 300` |
+| A string cut to fit must be cut on a character | `DeviceMessageWriter` uses `StringUtils.getUtf8TruncationIndex` for exactly that, in the other direction |
+| A device message is at most 256 KiB | `DeviceMessageWriter.MESSAGE_MAX_SIZE = 1 << 18` |
+| An audio codec id of 0 means the device could not capture audio | `Streamer.writeDisableStream`: "code 0: it explicitly disables the stream (because it could not capture audio), scrcpy should continue mirroring video only" |
+
+All 23 control message types and all 3 device message types match by name and by id, so
+the client covers the 4.1 protocol with nothing missing and nothing invented. v4.1 is also
+the newest release upstream has, so there is no version to catch up to.
+
+Everything checked came out in the server's favour: where the two disagreed it was this
+client that was wrong, and each of those is now fixed. There is nothing to send upstream.
+
 ## Verified
 
 Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
