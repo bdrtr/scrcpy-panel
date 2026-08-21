@@ -34,6 +34,16 @@ use std::net::TcpStream;
 /// Packet header size: 8 bytes PTS+flags + 4 bytes length
 const PACKET_HEADER_SIZE: usize = 12;
 
+/// The largest a single packet may claim to be.
+///
+/// The length arrives from the socket as a 32-bit number and was used as one,
+/// so a wrong one asked for up to four gigabytes before the read that would
+/// have failed got the chance. Upstream does not bound this either; it is
+/// bounded here because a number that large is not a frame at any bitrate
+/// scrcpy will encode at — sixty-four megabytes is several seconds of the
+/// highest, arriving as one packet.
+const MAX_PACKET_BYTES: usize = 64 << 20;
+
 /// PTS flags. scrcpy 4.0 moved config and key-frame down one bit to free the
 /// most significant bit for the session flag.
 const PACKET_FLAG_SESSION: u64 = 1 << 63;
@@ -212,6 +222,9 @@ pub fn read_stream_item<R: Read>(reader: &mut R) -> Result<Option<StreamItem>> {
     if len == 0 {
         bail!("Received packet with zero length");
     }
+    if len > MAX_PACKET_BYTES {
+        bail!("Packet claims {len} bytes, which is not a frame");
+    }
 
     // Read packet data
     let mut data = vec![0u8; len];
@@ -237,6 +250,39 @@ pub fn read_stream_item<R: Read>(reader: &mut R) -> Result<Option<StreamItem>> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A length from the socket is a claim, not a fact. It used to be handed
+    /// straight to an allocation, so a wrong number asked for up to four
+    /// gigabytes before the read that would have failed got the chance. Zero
+    /// was already refused; the other end was not.
+    #[test]
+    fn a_packet_that_claims_more_than_a_frame_is_refused() {
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&0u64.to_be_bytes()); // pts, no flags
+        wire.extend_from_slice(&u32::MAX.to_be_bytes());
+        let error = read_stream_item(&mut wire.as_slice()).expect_err("it must be refused");
+        assert!(
+            error.to_string().contains("not a frame"),
+            "refused for the wrong reason: {error}"
+        );
+    }
+
+    /// One the size of a real frame still reads.
+    #[test]
+    fn a_packet_the_size_of_a_frame_still_reads() {
+        let payload = vec![7u8; 4096];
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&1234u64.to_be_bytes());
+        wire.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        wire.extend_from_slice(&payload);
+        match read_stream_item(&mut wire.as_slice()).expect("it reads") {
+            Some(StreamItem::Packet(packet)) => {
+                assert_eq!(packet.data.len(), payload.len());
+                assert_eq!(packet.pts, Some(1234));
+            }
+            other => panic!("that is not a packet: {other:?}"),
+        }
+    }
     use super::*;
 
     fn read_one(bytes: &[u8]) -> StreamItem {
