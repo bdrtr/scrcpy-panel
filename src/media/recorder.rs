@@ -119,12 +119,22 @@ impl Recorder {
     /// `rotation` is `--record-orientation`, written into the file rather than
     /// applied to the pixels: rotating a stream this client only remuxes would
     /// mean decoding and encoding it again.
+    /// Start the thread that writes the file.
+    ///
+    /// `audio` is the codec id of the audio stream the device actually gave,
+    /// not whether audio was asked for. The difference is the whole of a bug
+    /// this had: a server that declines audio — no capture permission, an
+    /// Android too old — leaves `--record` waiting for a codec that will never
+    /// arrive, while every video packet of the session piles up in a queue with
+    /// no bottom and the file is never opened at all. It is an `Option` rather
+    /// than a `bool` so that the flag cannot be handed over by mistake, which
+    /// is how it happened.
     pub fn spawn(
         &self,
         filename: String,
         format: Option<String>,
         has_video: bool,
-        has_audio: bool,
+        audio: Option<u32>,
         rotation: u16,
     ) -> thread::JoinHandle<()> {
         let state = Arc::clone(&self.state);
@@ -136,7 +146,7 @@ impl Recorder {
                     &filename,
                     format.as_deref(),
                     has_video,
-                    has_audio,
+                    audio.is_some(),
                     rotation,
                 )
                 {
@@ -552,4 +562,47 @@ unsafe fn write_pkt(
     (*av).data = std::ptr::null_mut();
     (*av).size = 0;
     ffi::av_packet_free(&mut (av as *mut _));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A recorder told there is no audio must not wait for audio.
+    ///
+    /// It used to be handed `--no-audio`'s flag rather than the codec the
+    /// device actually gave, so `--record` against a server that declines audio
+    /// — no capture permission, an Android too old — waited in step 1 for a
+    /// codec that was never coming. Nothing said so: the file was never opened,
+    /// and every video packet of the session piled up in a queue with no
+    /// bottom behind it.
+    ///
+    /// The path here cannot be opened on purpose. What is being checked is that
+    /// the thread reaches the attempt at all.
+    #[test]
+    fn no_audio_does_not_wait_for_audio() {
+        let recorder = Recorder::new();
+        recorder.set_video_codec(VideoCodecInfo {
+            codec_id: 27, // H.264
+            width: 64,
+            height: 48,
+        });
+        let handle = recorder.spawn(
+            "/proc/self/no/such/place.mp4".to_string(),
+            Some("mp4".to_string()),
+            true,
+            None,
+            0,
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = handle.join();
+            let _ = tx.send(());
+        });
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(),
+            "the recorder is still waiting for audio that is never coming"
+        );
+    }
 }

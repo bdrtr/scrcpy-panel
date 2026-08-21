@@ -153,7 +153,7 @@ impl Session {
             log::info!("--tunnel-host/--tunnel-port given, using forward mode");
         }
 
-        let tunnel = adb::tunnel::AdbTunnel::open(
+        let mut tunnel = adb::tunnel::AdbTunnel::open(
             &serial,
             scid,
             opts.port_range_parsed(),
@@ -164,9 +164,16 @@ impl Session {
         let port = opts.tunnel_port.unwrap_or_else(|| tunnel.port());
         let is_reverse = tunnel.is_reverse();
 
-        // In reverse mode the listener has to exist before the server starts.
+        // In reverse mode the listener has to exist before the server starts —
+        // and it already does: the tunnel bound it while it was choosing which
+        // port of the range it could have. Binding it here instead is what used
+        // to make two clients started together collide on the first port.
         let listener = if is_reverse {
-            Some(server::connection::bind_listener(port)?)
+            Some(
+                tunnel
+                    .take_listener()
+                    .context("a reverse tunnel with no socket to accept on")?,
+            )
         } else {
             None
         };
@@ -294,7 +301,10 @@ impl Session {
                     path.clone(),
                     opts.record_format.clone(),
                     opts.video_enabled(),
-                    opts.audio_enabled(),
+                    // What the device gave, not what was asked for: a server
+                    // that declines audio would otherwise leave this waiting
+                    // for ever with the whole stream banked up behind it.
+                    self.audio_codec_id,
                     opts.record_rotation(),
                 );
                 match opts.record_format {
@@ -392,7 +402,7 @@ impl Session {
             path.to_string(),
             format.map(str::to_string),
             true,
-            has_audio,
+            self.audio_codec_id,
             self.record_rotation,
         );
 
