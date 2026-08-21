@@ -51,7 +51,18 @@ impl AudioPlayer {
                 move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     consumer.pull(out);
                 },
-                |err| log::error!("Audio stream error: {}", err),
+                // cpal reports a device that has gone — a headset unplugged,
+                // a sink removed — here, and there is nothing on the other side
+                // of this to rebuild the stream: audio is over for the rest of
+                // the session. Saying so is the least this can do; picking the
+                // device up again would mean a supervisor outside the callback
+                // and a way to try it that can be heard, and neither is here.
+                |err| {
+                    log::error!(
+                        "Audio stream error: {err}. Sound is gone for this session; \
+                         restart it to get the device back"
+                    )
+                },
                 None,
             )
             .context("Failed to open the audio output stream")?;
