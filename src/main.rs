@@ -24,7 +24,8 @@ use input::slint_input::WindowAction;
 use input::gamepads::Gamepads;
 use input::uhid::UhidInput;
 use mirror_host::{
-    attach, optimal_window_size, start_audio, FlexDisplay, MirrorUpdate, FLEX_POLL_INTERVAL,
+    attach, optimal_window_size, start_audio, window_size, FlexDisplay, MirrorUpdate,
+    FLEX_POLL_INTERVAL,
 };
 use options::Options;
 use ui::{Mirror, MirrorWindow, Orientation};
@@ -389,7 +390,12 @@ fn run(opts: Options) -> Result<()> {
     // is the exception — it logs "Interrupted" of its own accord.
     let reason = Rc::new(Cell::new("the window closing"));
 
-    let orientation = Orientation::from_degrees(opts.orientation);
+    // The window's own rotation, not the session's. `--display-orientation`
+    // overrides `--orientation` for the window — its help text says so, and
+    // `display_rotation` is where that is decided — but the size the window
+    // opens at was taken from `--orientation` alone, so with the two
+    // disagreeing it opened the wrong shape and only came right on a frame.
+    let orientation = Orientation::from_degrees(opts.display_rotation().0);
     let (frame_w, frame_h) = (video.info.width, video.info.height);
 
     // The backend has to be chosen before any window exists, and both
@@ -408,13 +414,21 @@ fn run(opts: Options) -> Result<()> {
         if opts.fullscreen {
             w.set_fullscreen(true);
         }
-        if let (Some(x), Some(y)) = (opts.window_x, opts.window_y) {
-            w.set_position(slint::PhysicalPosition::new(x as i32, y as i32));
+        // Either on its own. scrcpy takes these four independently, and
+        // dropping one because its partner was not given is not what any of
+        // them says: `--window-x` alone used to do nothing at all.
+        if opts.window_x.is_some() || opts.window_y.is_some() {
+            let at = w.position();
+            w.set_position(slint::PhysicalPosition::new(
+                opts.window_x.map_or(at.x, |x| x as i32),
+                opts.window_y.map_or(at.y, |y| y as i32),
+            ));
         }
-        let (win_w, win_h) = match (opts.window_width, opts.window_height) {
-            (Some(ww), Some(wh)) => (ww as u32, wh as u32),
-            _ => optimal_window_size(frame_w, frame_h, orientation),
-        };
+        let (win_w, win_h) = window_size(
+            opts.window_width,
+            opts.window_height,
+            optimal_window_size(frame_w, frame_h, orientation),
+        );
         w.set_size(slint::PhysicalSize::new(win_w, win_h));
     }
 

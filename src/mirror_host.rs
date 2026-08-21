@@ -538,6 +538,35 @@ impl Default for FlexDisplay {
 
 /// Window size that shows the whole frame without exceeding a common desktop,
 /// keeping the aspect ratio. Ported from the SDL screen this replaced.
+/// What `--window-width` and `--window-height` come to, given what the window
+/// would otherwise have opened at.
+///
+/// scrcpy takes the two independently and works the missing one out from the
+/// picture's shape. Here they were read as a pair and anything else fell through
+/// to the default, so `--window-width=800` on its own did nothing whatever.
+pub fn window_size(
+    width: Option<u16>,
+    height: Option<u16>,
+    (fit_w, fit_h): (u32, u32),
+) -> (u32, u32) {
+    let shape = |from: u32, numerator: u32, denominator: u32| {
+        let scaled = from as u64 * numerator as u64 / denominator.max(1) as u64;
+        scaled.clamp(1, u32::MAX as u64) as u32
+    };
+    match (width, height) {
+        (Some(w), Some(h)) => (w.max(1) as u32, h.max(1) as u32),
+        (Some(w), None) => {
+            let w = w.max(1) as u32;
+            (w, shape(w, fit_h, fit_w))
+        }
+        (None, Some(h)) => {
+            let h = h.max(1) as u32;
+            (shape(h, fit_w, fit_h), h)
+        }
+        (None, None) => (fit_w, fit_h),
+    }
+}
+
 pub fn optimal_window_size(frame_w: u32, frame_h: u32, orientation: Orientation) -> (u32, u32) {
     /// Space to leave for panels and window decorations
     const MARGIN: u32 = 96;
@@ -566,6 +595,25 @@ pub fn optimal_window_size(frame_w: u32, frame_h: u32, orientation: Orientation)
 
 #[cfg(test)]
 mod tests {
+
+    /// scrcpy takes the four window flags independently. These two were read as
+    /// a pair, so `--window-width=800` on its own fell through to the default
+    /// and did nothing at all.
+    #[test]
+    fn one_window_dimension_on_its_own_keeps_the_shape() {
+        let fit = (960u32, 400u32); // what it would have opened at
+        assert_eq!(window_size(Some(800), Some(600), fit), (800, 600));
+        assert_eq!(window_size(None, None, fit), fit);
+        assert_eq!(
+            window_size(Some(480), None, fit),
+            (480, 200),
+            "half the width is half the height"
+        );
+        assert_eq!(window_size(None, Some(200), fit), (480, 200));
+        // Nothing comes out as zero, whatever it is given.
+        assert_eq!(window_size(Some(0), None, fit), (1, 1));
+        assert_eq!(window_size(Some(10), None, (0, 0)), (10, 1));
+    }
     use super::*;
 
     /// A drag is a stream of sizes; only the one it stops on is worth sending.
