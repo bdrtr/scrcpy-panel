@@ -335,9 +335,13 @@ fn expand_bit_rate(value: &str) -> String {
         Some('M') | Some('m') => (&trimmed[..trimmed.len() - 1], 1_000_000u64),
         _ => (trimmed, 1),
     };
-    match digits.parse::<u64>() {
-        Ok(n) => (n * multiplier).to_string(),
-        Err(_) => trimmed.to_string(),
+    match digits.parse::<u64>().ok().and_then(|n| n.checked_mul(multiplier)) {
+        Some(n) => n.to_string(),
+        // Either not a number or one so large that expanding it would wrap.
+        // Handing the text on unchanged lets the client say what it thinks of
+        // it, which is better than passing on a number that means something
+        // else entirely.
+        None => trimmed.to_string(),
     }
 }
 
@@ -619,6 +623,23 @@ pub fn tag_file_name(path: &str, tag: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// A bit rate that cannot be expanded without wrapping is passed on as it
+    /// was written. `99999999999999M` used to come out the other side as a
+    /// perfectly plausible small number.
+    #[test]
+    fn a_bit_rate_too_large_to_expand_is_left_alone() {
+        assert_eq!(expand_bit_rate("8M"), "8000000");
+        assert_eq!(expand_bit_rate("128K"), "128000");
+        assert_eq!(expand_bit_rate("2000000"), "2000000");
+        assert_eq!(expand_bit_rate(" 8m "), "8000000", "trimmed and case-blind");
+        assert_eq!(expand_bit_rate("elma"), "elma");
+        assert_eq!(
+            expand_bit_rate("99999999999999M"),
+            "99999999999999M",
+            "expanding this wraps, so it goes on untouched"
+        );
+    }
 
     /// The defaults here and the defaults in `ui/state.slint` have to agree.
     ///

@@ -2621,10 +2621,35 @@ struct StoredSettings {
 
 /// The configuration file, or nothing at all — a first run has no file, and the
 /// UI defaults stand.
+/// The stored preferences, or nothing if there are none to read.
+///
+/// A file that will not parse is not the same as no file, and used to be
+/// treated as one: the panel started on defaults and the first thing that
+/// touched the Ayarlar tab wrote them over the top, so one stray character cost
+/// every preference and said nothing. It is moved aside now and named in the
+/// log, which leaves the user something to look at and something to put back.
 fn load_stored_settings() -> Option<StoredSettings> {
-    settings_path()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str::<StoredSettings>(&text).ok())
+    let path = settings_path()?;
+    let text = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str::<StoredSettings>(&text) {
+        Ok(stored) => Some(stored),
+        Err(e) => {
+            let aside = path.with_extension("json.broken");
+            match std::fs::rename(&path, &aside) {
+                Ok(()) => log::warn!(
+                    "{} could not be read ({e}); it has been moved to {} and the defaults used",
+                    path.display(),
+                    aside.display()
+                ),
+                Err(move_failed) => log::warn!(
+                    "{} could not be read ({e}) and could not be moved aside ({move_failed}); \
+                     the defaults are in use and saving will overwrite it",
+                    path.display()
+                ),
+            }
+            None
+        }
+    }
 }
 
 fn load_settings(window: &PanelWindow) {

@@ -42,7 +42,13 @@ fn whole_frames(count: usize, channels: u16) -> usize {
     count - count % channels
 }
 
-/// Audio ring buffer (lock-free for the common path)
+/// The ring between the decoder and the sound card's callback.
+///
+/// Not lock-free, whatever this used to say: it lives behind a `Mutex` and both
+/// sides take it — the callback for the length of a copy, the decoder for a copy
+/// and the cap. The holds are short and it works, but a callback that has to
+/// wait for a lock is a callback that can miss its deadline, and calling it
+/// lock-free hid that from anyone reading.
 pub struct AudioBuffer {
     data: Vec<f32>,
     /// Write position (producer)
