@@ -182,7 +182,10 @@ client-resized flag set. This paragraph used to say it had only ever been unit-t
 - `--v4l2-sink` publishes the mirror as a webcam: `VIDIOC_S_FMT` once, then a write per
   frame. Verified end to end against a loopback device — the phone's screen read back out
   of `/dev/video9` by ffmpeg at the right size and in the right colours, with and without
-  `--v4l2-buffer`. It needs the module first:
+  `--v4l2-buffer`. A loopback is told its size once, so a stream that changes size mid
+  session is reported rather than written at the wrong stride — and reported *once*, not
+  once a frame: changing the phone's display to 720x1600 with a sink attached logs the
+  warning a single time and the session carries on. It needs the module first:
   `sudo modprobe v4l2loopback video_nr=9 card_label=scrcpy exclusive_caps=1`.
 - Of the 74 flags the form can produce, 73 reach the device. The one that does not is
   `--otg`, and not for want of an implementation: OTG is a session with no session in it —
