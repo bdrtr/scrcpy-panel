@@ -150,6 +150,24 @@ pub enum ControlMsg {
 /// times 2^15, with the top of the range clamped because +1.0 would otherwise
 /// wrap to -1.0. This is `sc_float_to_i16fp` from scrcpy, and getting it wrong
 /// is silent — the message is well formed and the device simply does nothing.
+/// The longest start of `text` that fits in `limit` bytes without cutting a
+/// character in half.
+///
+/// Both of the length-limited fields here used to cut at the byte, so a Turkish
+/// or an emoji-laden string long enough to be trimmed lost its last character to
+/// a replacement mark on the device — the server reads UTF-8 and a half-finished
+/// sequence is not any. Nothing crashed, which is why it went unnoticed.
+fn truncated(text: &str, limit: usize) -> &str {
+    if text.len() <= limit {
+        return text;
+    }
+    let mut end = limit;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 fn to_i16fp(value: f32) -> i16 {
     let scaled = (value.clamp(-1.0, 1.0) * 32768.0) as i32;
     scaled.clamp(i16::MIN as i32, i16::MAX as i32) as i16
@@ -169,10 +187,9 @@ impl ControlMsg {
             }
             ControlMsg::InjectText { text } => {
                 buf.write_u8(MSG_INJECT_TEXT)?;
-                let bytes = text.as_bytes();
-                let len = bytes.len().min(300);
-                buf.write_u32::<BigEndian>(len as u32)?;
-                buf.write_all(&bytes[..len])?;
+                let bytes = truncated(text, 300).as_bytes();
+                buf.write_u32::<BigEndian>(bytes.len() as u32)?;
+                buf.write_all(bytes)?;
             }
             ControlMsg::InjectTouch {
                 action, pointer_id, x, y,
@@ -271,10 +288,9 @@ impl ControlMsg {
                 // and the server read the extra byte as the next message's type
                 // — a package name once arrived as RESIZE_DISPLAY and crashed
                 // the control thread.
-                let bytes = name.as_bytes();
-                let len = bytes.len().min(255);
-                buf.write_u8(len as u8)?;
-                buf.write_all(&bytes[..len])?;
+                let bytes = truncated(name, 255).as_bytes();
+                buf.write_u8(bytes.len() as u8)?;
+                buf.write_all(bytes)?;
             }
             ControlMsg::ResetVideo => {
                 buf.write_u8(MSG_RESET_VIDEO)?;
@@ -358,6 +374,47 @@ mod tests {
         assert_eq!(to_i16fp(2.0), i16::MAX, "clamped rather than wrapped");
         assert_eq!(to_i16fp(-2.0), i16::MIN);
         assert_eq!(to_i16fp(0.5), 16384);
+    }
+
+    /// A string trimmed to fit has to be trimmed at a character.
+    ///
+    /// Both limited fields cut at the byte, so a string of multi-byte
+    /// characters lost its last one to a replacement mark on the device — the
+    /// server reads UTF-8 and half a sequence is not any. It never crashed,
+    /// which is why nobody noticed.
+    #[test]
+    fn a_string_is_cut_at_a_character_and_not_at_a_byte() {
+        // "ş" is two bytes, so 150 of them are 300 — exactly the limit — and
+        // 151 are one byte over it.
+        let text = "ş".repeat(151);
+        let msg = ControlMsg::InjectText { text: text.clone() };
+        let bytes = msg.serialize().expect("it serialises");
+        let length = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
+        let sent = &bytes[5..5 + length];
+        assert_eq!(length, 300, "as much as fits");
+        assert!(
+            std::str::from_utf8(sent).is_ok(),
+            "the device was sent something that is not UTF-8"
+        );
+        assert_eq!(std::str::from_utf8(sent).unwrap().chars().count(), 150);
+
+        // And the one-byte-length field, where the same cut is made at 255.
+        let name = "ş".repeat(200); // 400 bytes
+        let msg = ControlMsg::StartApp { name };
+        let bytes = msg.serialize().expect("it serialises");
+        let length = bytes[1] as usize;
+        let sent = &bytes[2..2 + length];
+        assert_eq!(length, 254, "255 would split the 128th character");
+        assert!(std::str::from_utf8(sent).is_ok());
+    }
+
+    /// A string that fits is untouched, including one that ends exactly on the
+    /// limit.
+    #[test]
+    fn a_string_that_fits_is_left_alone() {
+        assert_eq!(truncated("hello", 300), "hello");
+        assert_eq!(truncated(&"ş".repeat(150), 300).len(), 300);
+        assert_eq!(truncated("", 0), "");
     }
 
     #[test]
