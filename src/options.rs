@@ -633,20 +633,69 @@ impl Options {
     }
     pub fn audio_playback(&self) -> bool { self.audio_enabled() }
 
+    /// `--port`, which scrcpy spells either `27183` or `27183:27199`.
+    ///
+    /// Only the second was understood, and a bare port fell through to the
+    /// default — silently, which is the bad way to be wrong about this: the
+    /// user is left believing they moved the port, and the client listens
+    /// somewhere else. Anything that is neither is said out loud rather than
+    /// quietly replaced.
     pub fn port_range_parsed(&self) -> (u16, u16) {
-        let parts: Vec<&str> = self.port_range.split(':').collect();
-        if parts.len() == 2 {
-            let first = parts[0].parse().unwrap_or(27183);
-            let last = parts[1].parse().unwrap_or(27199);
-            (first, last)
-        } else {
-            (27183, 27199)
+        const DEFAULT: (u16, u16) = (27183, 27199);
+        let text = self.port_range.trim();
+        let parsed = match text.split_once(':') {
+            Some((first, last)) => first
+                .trim()
+                .parse::<u16>()
+                .ok()
+                .zip(last.trim().parse::<u16>().ok()),
+            None => text.parse::<u16>().ok().map(|port| (port, port)),
+        };
+        match parsed {
+            Some((first, last)) if first <= last => (first, last),
+            Some((first, last)) => {
+                log::warn!(
+                    "--port {first}:{last} runs backwards; using {}:{}",
+                    DEFAULT.0,
+                    DEFAULT.1
+                );
+                DEFAULT
+            }
+            None => {
+                log::warn!(
+                    "--port {text:?} is neither a port nor a range; using {}:{}",
+                    DEFAULT.0,
+                    DEFAULT.1
+                );
+                DEFAULT
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// scrcpy's `--port` takes a port or a range, and only the range was read.
+    /// A bare port fell through to the default without a word, so `-p 27500`
+    /// listened on 27183 and the user had no way to know.
+    #[test]
+    fn a_bare_port_is_a_range_of_one() {
+        let at = |value: &str| {
+            let mut opts = Options::parse_from(["scrcpy-slint"]);
+            opts.port_range = value.to_string();
+            opts.port_range_parsed()
+        };
+        assert_eq!(at("27183:27199"), (27183, 27199));
+        assert_eq!(at("27500"), (27500, 27500), "a port on its own is that port");
+        assert_eq!(at(" 27500 "), (27500, 27500));
+        assert_eq!(at("27500:27502"), (27500, 27502));
+        // Neither a port nor a range: the default, with a warning rather than
+        // in silence.
+        assert_eq!(at("nonsense"), (27183, 27199));
+        assert_eq!(at("27199:27183"), (27183, 27199), "a range that runs backwards");
+        assert_eq!(at("99999"), (27183, 27199), "beyond a port number");
+    }
     use super::*;
     use clap::Parser;
 

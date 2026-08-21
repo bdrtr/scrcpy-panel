@@ -1863,6 +1863,33 @@ fn server_version_from_path(path: &str) -> Option<String> {
     looks_like_a_version.then(|| rest.to_string())
 }
 
+/// Ask a windowed client to stop, and only insist if it will not.
+///
+/// `Child::kill` is SIGKILL, which is no way to end a client that has an adb
+/// tunnel to take down, a server on the device to let go of and possibly a
+/// recording whose trailer is not written yet. Interrupted instead, it shuts
+/// down in order and is gone in milliseconds — so it is asked first, and the
+/// hammer is what happens when a second and a half of asking gets nowhere.
+/// Returns how it ended, which is what tells being asked from being killed.
+fn stop_child(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as libc::pid_t;
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+        while std::time::Instant::now() < deadline {
+            match child.try_wait() {
+                Ok(Some(status)) => return Some(status),
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                Err(_) => break,
+            }
+        }
+        log::warn!("A client did not stop when asked; killing it");
+    }
+    let _ = child.kill();
+    child.wait().ok()
+}
+
 /// Stop whichever kind of session is running.
 fn stop_session(panel: &Rc<Panel>) {
     let mut stopped = panel.pending.borrow_mut().take().is_some();
@@ -1870,8 +1897,7 @@ fn stop_session(panel: &Rc<Panel>) {
     panel.session_watch.borrow_mut().take();
 
     for mut child in panel.process.borrow_mut().drain(..) {
-        let _ = child.kill();
-        let _ = child.wait();
+        stop_child(&mut child);
         stopped = true;
     }
 
@@ -2654,4 +2680,43 @@ fn shortcut_rows() -> Vec<ShortcutRow> {
 /// Still SDL-backed, like the mirror window's clipboard helpers.
 fn set_clipboard(text: &str) {
     crate::input::slint_input::set_clipboard_text(text);
+}
+
+#[cfg(all(test, unix))]
+mod stop_tests {
+    use super::stop_child;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::Command;
+
+    /// A client with an adb tunnel to take down, a server on the device to let
+    /// go of and possibly a recording whose trailer is not written yet should
+    /// be *asked* to stop. It used to be SIGKILLed, so none of that ran.
+    #[test]
+    fn a_client_is_asked_rather_than_killed() {
+        let mut child = Command::new("sleep").arg("30").spawn().expect("sleep runs here");
+        let status = stop_child(&mut child).expect("it stopped");
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGTERM),
+            "it was killed outright rather than asked"
+        );
+    }
+
+    /// And one that will not go is still made to. This waits out the second and
+    /// a half on purpose, which is the whole of what it is checking.
+    #[test]
+    fn one_that_ignores_being_asked_is_killed_anyway() {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            // The loop matters: a shell whose last command is the only one
+            // execs it and is replaced, taking the trap with it.
+            .arg("trap \'\' TERM; while :; do sleep 1; done")
+            .spawn()
+            .expect("sh runs here");
+        // Long enough for the shell to have reached the `trap`: asked before
+        // that, it dies of the default disposition and proves nothing.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let status = stop_child(&mut child).expect("it stopped");
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+    }
 }

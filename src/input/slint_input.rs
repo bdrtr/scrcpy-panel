@@ -22,6 +22,19 @@ const BUTTON_LEFT: i32 = 1;
 const BUTTON_RIGHT: i32 = 2;
 const BUTTON_MIDDLE: i32 = 3;
 
+/// Slint numbers its buttons 1, 2, 3; Android's `MotionEvent` uses a bit per
+/// button, and 2 there is the middle one rather than the right. Forwarding a
+/// secondary click used to send `1` whatever had been clicked, so a right-click
+/// arrived at the device as a left-click.
+fn android_button(button: i32) -> u32 {
+    match button {
+        BUTTON_LEFT => 1,   // BUTTON_PRIMARY
+        BUTTON_RIGHT => 2,  // BUTTON_SECONDARY
+        BUTTON_MIDDLE => 4, // BUTTON_TERTIARY
+        _ => 0,
+    }
+}
+
 /// What a secondary click does, from `--mouse-bind`.
 ///
 /// scrcpy takes one or two four-character sequences — right, middle, 4th, 5th —
@@ -387,7 +400,7 @@ impl SlintInput {
         if button != BUTTON_LEFT {
             // Every button but the left one goes through --mouse-bind.
             if let Some(action) = self.mouse_bindings.for_button(button, shift) {
-                self.run_secondary_click(action, x, y, controller);
+                self.run_secondary_click(action, button, x, y, controller);
             }
             return;
         }
@@ -414,6 +427,7 @@ impl SlintInput {
     fn run_secondary_click(
         &self,
         action: SecondaryClick,
+        button: i32,
         x: u32,
         y: u32,
         controller: &Controller,
@@ -421,12 +435,25 @@ impl SlintInput {
         match action {
             SecondaryClick::Ignore => {}
             SecondaryClick::Forward => {
-                // Forwarding a secondary button means a real click at that spot.
+                // Forwarding a secondary button means a real click at that
+                // spot, with the button that was actually clicked — this used
+                // to say the primary one whichever it had been, so a
+                // right-click arrived as a left-click and `--mouse-bind`'s
+                // forward setting did something other than forward.
+                //
+                // What it still does not carry is a button held elsewhere: no
+                // mask of what is down is kept anywhere in this path, so the
+                // release says nothing is held. A right-click in the middle of
+                // a left-drag therefore ends the drag. Left alone deliberately
+                // — tracking that state is a change to every pointer message
+                // here, and nothing on this machine can click into the client's
+                // own window to prove it.
+                let pressed = android_button(button);
                 controller.push_msg(self.touch(
-                    AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, 0xFFFF, 1, 1,
+                    AMOTION_ACTION_DOWN, POINTER_ID_MOUSE, x, y, 0xFFFF, pressed, pressed,
                 ));
                 controller.push_msg(self.touch(
-                    AMOTION_ACTION_UP, POINTER_ID_MOUSE, x, y, 0, 1, 0,
+                    AMOTION_ACTION_UP, POINTER_ID_MOUSE, x, y, 0, pressed, 0,
                 ));
             }
             SecondaryClick::Back => {
@@ -1000,6 +1027,23 @@ pub fn set_clipboard_text(text: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    /// `--mouse-bind`'s forward setting has to forward the button that was
+    /// clicked. Slint numbers its buttons 1, 2, 3 and Android uses a bit per
+    /// button, where 2 is the middle one — and a right-click used to be sent as
+    /// the primary button whichever it had been, so "forward" did something
+    /// other than forward.
+    #[test]
+    fn a_forwarded_button_is_the_button_that_was_clicked() {
+        assert_eq!(super::android_button(super::BUTTON_LEFT), 1);
+        assert_eq!(super::android_button(super::BUTTON_RIGHT), 2);
+        assert_eq!(
+            super::android_button(super::BUTTON_MIDDLE),
+            4,
+            "the middle button is the third bit, not the second"
+        );
+        assert_eq!(super::android_button(9), 0, "a button Android has no bit for");
+    }
 
     /// `--clipboard-direction=to-pc` has to stop every way of pasting into the
     /// device, and there are three of them. It used to stop two: the shortcut
