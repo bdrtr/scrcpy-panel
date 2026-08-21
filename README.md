@@ -149,8 +149,13 @@ writes — a device list with a mix of `device`, `offline` and `unauthorized` ro
 one, an install that reports `Failure` on stdout and exits zero anyway. Running the commands
 is tested against the real adb with nothing plugged in: `cargo test --release -- --ignored
 what_adb_says` asks for the list and gets an empty one rather than an error or a phantom
-row, reads the version banner back, connects to a closed port and gets a refusal, and
-queries a device that is not there without hanging. What that cannot cover is the other
+row, reads the version banner back, connects to a closed port and gets an error rather
+than a line of news, and queries a device that is not there without hanging. That last pair
+found something: `adb connect` exits 0 whether it worked or not — a closed port, an
+unroutable address and a name that will not resolve all print a refusal and return success
+— so the panel had been showing a failed connect as an ordinary info line and refreshing
+the device list underneath it. It reads adb's words now, and the three refusals adb 1.0.41
+actually prints are in the test. What that cannot cover is the other
 half — no adb operation has been run through the new module against a phone yet, so
 `tcpip`, `pair`, `install`, `push` and `screencap` are, for now, only as good as their
 arguments look.

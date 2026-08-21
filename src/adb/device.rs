@@ -204,14 +204,36 @@ pub fn enable_tcpip(serial: &str, port: u16) -> Result<()> {
 pub fn connect(address: &str) -> Result<String> {
     let mut command = adb();
     command.args(["connect", address]);
-    output_of(command, "connect")
+    let said = output_of(command, "connect")?;
+    if did_not_connect(&said) {
+        bail!("{}", last_line(&said));
+    }
+    Ok(said)
 }
 
 /// `adb pair`, for Android 11 and later.
 pub fn pair(address: &str, code: &str) -> Result<String> {
     let mut command = adb();
     command.args(["pair", address, code]);
-    output_of(command, "pair")
+    let said = output_of(command, "pair")?;
+    if did_not_connect(&said) {
+        bail!("{}", last_line(&said));
+    }
+    Ok(said)
+}
+
+/// Whether adb's own words say a connect or a pair did not happen.
+///
+/// Needed for the same reason `refused` is, and adb does not say it the same
+/// way. `adb connect` exits 0 whatever happens: asked for a closed port it
+/// prints "failed to connect to '127.0.0.1:1': Connection refused" and exits
+/// 0, for an unroutable address "Connection timed out" and exits 0, for a name
+/// that does not resolve "failed to resolve host" and exits 0. Trusting the
+/// status showed all three in the panel as an ordinary info line, with the
+/// device list refreshed underneath as though something had arrived.
+pub fn did_not_connect(said: &str) -> bool {
+    let said = said.to_lowercase();
+    said.starts_with("failed") || said.contains("failed to ") || refused(&said)
 }
 
 /// One key event, by name — KEYCODE_HOME and friends.
@@ -330,13 +352,11 @@ mod tests {
             "that is not adb's version banner: {said}"
         );
 
-        // A port nothing is listening on. adb reports this its own way and the
-        // wrapper has to bring it back as an error, not as a blank success.
+        // A port nothing is listening on. adb prints its refusal and exits 0,
+        // so this is the case the exit status gets wrong; it has to come back
+        // as an error rather than as a line the panel would show as news.
         match connect("127.0.0.1:1") {
-            Ok(said) => assert!(
-                said.contains("failed") || said.contains("cannot"),
-                "connecting to a closed port came back as a plain success: {said:?}"
-            ),
+            Ok(said) => panic!("a connect that did not happen came back as {said:?}"),
             Err(e) => println!("refused, as it should be: {e:#}"),
         }
 
@@ -344,6 +364,27 @@ mod tests {
         // back empty.
         assert_eq!(property("no-such-device", "ro.build.version.release"), "");
         assert_eq!(screen_size("no-such-device"), "");
+    }
+
+    /// What adb says when a connect does not happen, and it is not the exit
+    /// status: every one of these came back with 0 from adb 1.0.41.
+    #[test]
+    fn a_connect_that_did_not_happen_is_not_a_success() {
+        for said in [
+            "failed to connect to '127.0.0.1:1': Connection refused",
+            "failed to connect to '10.255.255.1:5555': Connection timed out",
+            "failed to resolve host: 'notahost': Name or service not known",
+            "error: protocol fault (couldn't read status message): Success",
+        ] {
+            assert!(did_not_connect(said), "taken as a success: {said}");
+        }
+        for said in [
+            "connected to 192.168.1.44:5555",
+            "already connected to 192.168.1.44:5555",
+            "Successfully paired to 192.168.1.44:37241 [guid=adb-abc]",
+        ] {
+            assert!(!did_not_connect(said), "taken as a failure: {said}");
+        }
     }
 
     /// The device list, read the way adb actually writes it. This parser lived
