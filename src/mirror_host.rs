@@ -157,12 +157,14 @@ pub fn attach(
                         });
                         log::info!("Client rotation: {:?}", next);
                     }
-                    // A vertical flip is a horizontal one turned half way
-                    // round, and half a turn is something the view can already
-                    // do — so only the horizontal mirror is ever drawn.
+                    // A vertical flip is a horizontal one turned half way round,
+                    // and half a turn is something the view can already do — so
+                    // only the horizontal mirror is ever drawn. Which of the two
+                    // needs the half turn depends on the rotation: see
+                    // `needs_half_turn`.
                     WindowAction::FlipHorizontal | WindowAction::FlipVertical => {
                         flip.set(!flip.get());
-                        let next = if action == WindowAction::FlipVertical {
+                        let next = if needs_half_turn(action, orientation.get()) {
                             orientation.get().rotate_cw().rotate_cw()
                         } else {
                             orientation.get()
@@ -567,6 +569,19 @@ pub fn window_size(
     }
 }
 
+/// Whether a flip also needs the view turned half way round.
+///
+/// Only the horizontal mirror is ever drawn, so a vertical flip is that mirror
+/// plus a half turn — `V = H·R180`, which holds in the frame's own axes. The
+/// screen's axes are not the frame's once the view is quarter-turned, though:
+/// at 90 or 270 the frame's horizontal is the screen's vertical, so the two
+/// shortcuts want the opposite treatment. Without this, MOD+Shift+left flipped
+/// the picture vertically and MOD+Shift+up flipped it horizontally whenever the
+/// view was on its side.
+fn needs_half_turn(action: WindowAction, orientation: Orientation) -> bool {
+    (action == WindowAction::FlipVertical) != orientation.swaps_dimensions()
+}
+
 pub fn optimal_window_size(frame_w: u32, frame_h: u32, orientation: Orientation) -> (u32, u32) {
     /// Space to leave for panels and window decorations
     const MARGIN: u32 = 96;
@@ -595,6 +610,29 @@ pub fn optimal_window_size(frame_w: u32, frame_h: u32, orientation: Orientation)
 
 #[cfg(test)]
 mod tests {
+
+    /// Only the horizontal mirror is drawn, so a vertical flip is that plus a
+    /// half turn — in the frame's axes. Once the view is quarter-turned the
+    /// screen's axes are the other way round, and the two shortcuts want the
+    /// opposite treatment. Without this, MOD+Shift+left flipped the picture
+    /// vertically whenever the view was on its side, and up flipped it
+    /// horizontally.
+    #[test]
+    fn which_flip_needs_the_half_turn_follows_the_rotation() {
+        use Orientation::*;
+        for upright in [Normal, Rot180] {
+            assert!(!needs_half_turn(WindowAction::FlipHorizontal, upright));
+            assert!(needs_half_turn(WindowAction::FlipVertical, upright));
+        }
+        for sideways in [Rot90, Rot270] {
+            assert!(sideways.swaps_dimensions(), "these are the quarter turns");
+            assert!(
+                needs_half_turn(WindowAction::FlipHorizontal, sideways),
+                "the frame's horizontal is the screen's vertical here"
+            );
+            assert!(!needs_half_turn(WindowAction::FlipVertical, sideways));
+        }
+    }
 
     /// scrcpy takes the four window flags independently. These two were read as
     /// a pair, so `--window-width=800` on its own fell through to the default
