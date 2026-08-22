@@ -204,16 +204,27 @@ impl DelayBuffer {
                 let due = delayed.pts.and_then(|pts| state.clock.to_system_time(pts));
                 // Re-derived every time round, because every push since this
                 // frame was taken has improved the offset.
-                let deadline = match due.map(|due| due - micros_now()) {
-                    Some(ahead) if ahead > 0 => {
-                        (Instant::now() + Duration::from_micros(ahead as u64) + delay).min(ceiling)
+                // `due` is when the frame should have *arrived*; the deadline
+                // is `due + delay`, which is when it should be *released*. The
+                // two are not the same and conflating them costs everything:
+                // by the time a frame is popped its arrival is always in the
+                // past, so treating that as "overdue" held every frame for the
+                // full delay — one frame released per delay, 5 fps against 37
+                // on a device.
+                let deadline = match due {
+                    Some(due) => {
+                        let wait = (due + delay.as_micros() as i64) - micros_now();
+                        // Late frames are released rather than dropped: this
+                        // buffer has no way to hand one back to the frame pool,
+                        // and a pool that can only shrink leaves the decoder
+                        // allocating ten megabytes a frame for the rest of the
+                        // session.
+                        let wait = Duration::from_micros(wait.max(0) as u64);
+                        (Instant::now() + wait).min(ceiling)
                     }
-                    // Due, or overdue, or unknown. Late frames are released
-                    // rather than dropped: this buffer has no way to hand one
-                    // back to the frame pool, and a pool that can only shrink
-                    // leaves the decoder allocating ten megabytes a frame for
-                    // the rest of the session.
-                    _ => ceiling,
+                    // No timestamp, or no clock yet: the ceiling is what this
+                    // buffer did for every frame before it had either.
+                    None => ceiling,
                 };
                 let Some(wait) = deadline.checked_duration_since(Instant::now()) else {
                     break; // due, or overdue: out it goes rather than into the bin
@@ -344,6 +355,38 @@ mod tests {
         assert!(
             spread >= Duration::from_millis(80),
             "three frames 120 ms apart on the device left {spread:?} apart here"
+        );
+    }
+
+    /// Frames arriving at a steady rate leave at that rate, not one per delay.
+    ///
+    /// This is the test the burst one could not be: pushing everything at once
+    /// hid an arithmetic mistake that held *every* frame for the whole delay,
+    /// because with all of them already in the queue the sums came out the
+    /// same. On a device that was five frames a second against thirty-seven —
+    /// the buffer throttling the stream to one frame per `--video-buffer` — and
+    /// nothing in this file said so.
+    ///
+    /// Five frames 30 ms apart behind a 200 ms buffer should all be out in
+    /// about 200 + 4 x 30 = 320 ms. One per delay would be 1000. The bound is
+    /// generous enough not to flake and far enough below 1000 to catch it.
+    #[test]
+    fn a_steady_rate_comes_out_at_that_rate() {
+        let (tx, rx) = bounded(16);
+        let buffer = DelayBuffer::new(200, tx);
+        let began = Instant::now();
+        for n in 0..5 {
+            buffer.push(a_frame_at(n * 30_000));
+            thread::sleep(Duration::from_millis(30));
+        }
+        for n in 0..5 {
+            rx.recv_timeout(Duration::from_secs(2))
+                .unwrap_or_else(|_| panic!("frame {n} never arrived"));
+        }
+        let took = began.elapsed();
+        assert!(
+            took < Duration::from_millis(600),
+            "five frames 30 ms apart took {took:?}, which is a buffer releasing one per delay"
         );
     }
 

@@ -334,6 +334,21 @@ and none of them needed a phone to find. What each was held to:
   together but stamped 60 ms apart have to leave at least 80 ms apart, and put back on
   arrival scheduling for one run it fails. The bound is a lower one on purpose — a loaded
   machine can only make the gaps longer.
+- **It was written wrong first, and only the device said so.** The deadline is
+  `to_system_time(pts) + delay`; the first version read the *arrival* the timestamp implies,
+  found it already in the past — which by the time a frame is popped it always is — and took
+  that as overdue, falling through to the ceiling. Every frame then waited the whole delay:
+  the buffer throttled the stream to one frame per `--video-buffer`. On the Redmi with the
+  screen scrolling that was **5.0 fps against 37 without the buffer**, flat; after the fix,
+  66.5 to 69.3. The burst test could not see it, because pushing everything at once makes the
+  two arithmetics agree. `a_steady_rate_comes_out_at_that_rate` is the one that would have:
+  five frames 30 ms apart behind a 200 ms buffer, which must all be out inside 600 ms and
+  would take 1000 one-per-delay.
+- What the device could **not** show is the smoothing itself. Run back to back with the
+  screen scrolling, `--print-fps` reads 66.8 mean against 69.6 with the buffer, standard
+  deviation 9.3 against 10.2 — indistinguishable, and it should be: frames counted per second
+  say nothing about their spacing *within* the second, which is the only thing this changes.
+  The regression it did catch is what a live run is for; the smoothing rests on the tests.
 
   The first frame does not wait. There is nothing yet for it to be smoothed against, and
   holding it would mean `--video-buffer=200` costing a fifth of a second of black before the
