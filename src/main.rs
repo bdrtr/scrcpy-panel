@@ -446,7 +446,22 @@ fn run(opts: Options) -> Result<()> {
                     mirror.set_frame_width(frame_width as i32);
                     mirror.set_frame_height(frame_height as i32);
                 }
-                MirrorUpdate::Live(live) => mirror.set_live(live),
+                MirrorUpdate::Live(live) => {
+                    mirror.set_live(live);
+                    if !live {
+                        // The placeholder is drawn over the picture, not
+                        // instead of it, so a frame left behind here is the
+                        // stopped session still on screen underneath "waiting
+                        // for a picture" — and, at 1080x2400 in RGBA, ten
+                        // megabytes held for as long as the window is open.
+                        // Live goes false once, before a session's first frame,
+                        // and never on a stall, so this cannot blank a running
+                        // mirror: what it clears is the previous session's last
+                        // frame, which the new one would otherwise show until
+                        // its own first frame arrived.
+                        mirror.set_frame(slint::Image::default());
+                    }
+                }
             }
         })
     };

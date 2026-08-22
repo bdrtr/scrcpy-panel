@@ -1415,7 +1415,22 @@ fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts: &Options) 
                             mirror.set_frame_width(frame_width as i32);
                             mirror.set_frame_height(frame_height as i32);
                         }
-                        MirrorUpdate::Live(live) => mirror.set_live(live),
+                        MirrorUpdate::Live(live) => {
+                            mirror.set_live(live);
+                            if !live {
+                                // The placeholder is drawn over the picture, not
+                                // instead of it, so a frame left behind here is the
+                                // stopped session still on screen underneath "waiting
+                                // for a picture" — and, at 1080x2400 in RGBA, ten
+                                // megabytes held for as long as the window is open.
+                                // Live goes false once, before a session's first frame,
+                                // and never on a stall, so this cannot blank a running
+                                // mirror: what it clears is the previous session's last
+                                // frame, which the new one would otherwise show until
+                                // its own first frame arrived.
+                                mirror.set_frame(slint::Image::default());
+                            }
+                        }
                     }
                 })
             };
@@ -1888,7 +1903,9 @@ fn stop_session(panel: &Rc<Panel>) {
     if let Some(window) = panel.window.upgrade() {
         window.global::<App>().set_session_running(false);
         sync_tray(false);
-        window.global::<Mirror>().set_live(false);
+        let mirror = window.global::<Mirror>();
+        mirror.set_live(false);
+        mirror.set_frame(slint::Image::default());
     }
 
     if stopped {
