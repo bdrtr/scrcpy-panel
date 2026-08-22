@@ -129,7 +129,12 @@ pub mod akeycode {
 /// Android metastate flags.
 ///
 /// Transcribed whole from Android's `KeyEvent`, because half a table is
-/// harder to check against the source than all of it.
+/// harder to check against the source than all of it. Half of it was
+/// nevertheless wrong: the meta row sat one slot too low, so `META_ON` was the
+/// generic bit *plus* a side bit, and the two lock flags carried
+/// `META_CAP_LOCKED`/`META_ALT_LOCKED` — different flags with similar names,
+/// three hex digits away from the ones meant. `the_metastate_flags_are_androids`
+/// holds all fourteen to the values in android-36's own `KeyEvent`.
 #[allow(dead_code)]
 pub mod ameta {
     pub const SHIFT_LEFT_ON: u32 = 0x40;
@@ -141,9 +146,60 @@ pub mod ameta {
     pub const ALT_LEFT_ON: u32 = 0x10;
     pub const ALT_RIGHT_ON: u32 = 0x20;
     pub const ALT_ON: u32 = 0x2;
-    pub const META_LEFT_ON: u32 = 0x10000;
-    pub const META_RIGHT_ON: u32 = 0x20000;
-    pub const META_ON: u32 = 0x10000 | 0x20000;
-    pub const NUM_LOCK_ON: u32 = 0x200;
-    pub const CAPS_LOCK_ON: u32 = 0x100;
+    pub const META_LEFT_ON: u32 = 0x20000;
+    pub const META_RIGHT_ON: u32 = 0x40000;
+    pub const META_ON: u32 = 0x10000;
+    pub const NUM_LOCK_ON: u32 = 0x200000;
+    pub const CAPS_LOCK_ON: u32 = 0x100000;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ameta;
+
+    /// The values Android's own `KeyEvent` declares, read out of
+    /// `platforms/android-36/android-stubs-src.jar`. Only `META_ON` is sent
+    /// today — `metastate` in `slint_input.rs` ORs it in for the Super key —
+    /// but the whole row is pinned, because the way this went wrong was a
+    /// transcription slipping a line, which the neighbours would have caught.
+    #[test]
+    fn the_metastate_flags_are_androids() {
+        assert_eq!(ameta::SHIFT_ON, 0x1);
+        assert_eq!(ameta::ALT_ON, 0x2);
+        assert_eq!(ameta::ALT_LEFT_ON, 0x10);
+        assert_eq!(ameta::ALT_RIGHT_ON, 0x20);
+        assert_eq!(ameta::SHIFT_LEFT_ON, 0x40);
+        assert_eq!(ameta::SHIFT_RIGHT_ON, 0x80);
+        assert_eq!(ameta::CTRL_ON, 0x1000);
+        assert_eq!(ameta::CTRL_LEFT_ON, 0x2000);
+        assert_eq!(ameta::CTRL_RIGHT_ON, 0x4000);
+        assert_eq!(ameta::META_ON, 0x10000);
+        assert_eq!(ameta::META_LEFT_ON, 0x20000);
+        assert_eq!(ameta::META_RIGHT_ON, 0x40000);
+        assert_eq!(ameta::CAPS_LOCK_ON, 0x100000);
+        assert_eq!(ameta::NUM_LOCK_ON, 0x200000);
+    }
+
+    /// The flags that say *which* Super was pressed are not among the ones a
+    /// side-blind modifier may set: 0x30000 told the device the left Super was
+    /// physically down, whichever one the user had pressed.
+    #[test]
+    fn a_side_blind_modifier_sets_no_side() {
+        let sides = ameta::SHIFT_LEFT_ON
+            | ameta::SHIFT_RIGHT_ON
+            | ameta::CTRL_LEFT_ON
+            | ameta::CTRL_RIGHT_ON
+            | ameta::ALT_LEFT_ON
+            | ameta::ALT_RIGHT_ON
+            | ameta::META_LEFT_ON
+            | ameta::META_RIGHT_ON;
+        for flag in [
+            ameta::SHIFT_ON,
+            ameta::CTRL_ON,
+            ameta::ALT_ON,
+            ameta::META_ON,
+        ] {
+            assert_eq!(flag & sides, 0, "{flag:#x} carries a side");
+        }
+    }
 }
