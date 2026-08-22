@@ -246,6 +246,31 @@ and none of them needed a phone to find. What each was held to:
   one. The same eight-second run now writes 131 KB of matroska, and `ffprobe` reads back an
   AAC track at 48000 Hz, 2 channels, 8.003 seconds. Video-and-audio recording is unchanged:
   h264 1080x2400 with opus beside it, over 6.16 seconds.
+- **The two silences sounded the same, and only one of them had a voice.** A decoder that
+  refuses every packet says so after fifty; a decoder that *accepts* every packet and
+  returns no frame said nothing, at any level — `decode` gives back `Ok(None)`, which is
+  also what a config packet gives back, and the caller cannot tell them apart. That is the
+  shape a broken audio path would most likely take next, and it now gets the same fifty-packet
+  warning the refusals get. Priming is ordinary and costs a frame or two; the measurement in
+  this file is 20 AAC packets in and 19 frames out.
+- **And a session now says what it decoded, rather than only that it ended.** `Audio: 237
+  frames, 485376 samples decoded` off the Redmi over a five-second AAC run — 237 × 1024
+  samples × 2 channels is exactly 485376, and 237 × 1024 / 48000 is 5.056 s, so the count
+  agrees with AAC-LC's frame size and with the clock. Getting it *said* took two goes. The
+  count was first printed where the pipeline's loop ends, and no ordinary session reaches
+  there: the pipeline is a thread nobody joins, so a run stopped by `--time-limit` ends when
+  the process does. It is shared with the session now and reported from `shutdown`, which is
+  a place that is always reached.
+- **The warning about a device sending the wrong format can only ever see one codec of the
+  four, and it is not the usual one.** It compares `audio.sample_rate` against 48000, and
+  that value is read back off the decoder context — which is where `AudioDecoder::new` wrote
+  48000 in the first place. So the question is whether libavcodec ever writes a different
+  one back. Put to it with genuine 44.1 kHz content while told 48000, over 40 packets: **AAC
+  keeps 48000** and **FLAC corrects itself to 44100**. Opus is 48 kHz by construction and PCM
+  carries no rate at all. The check is therefore live for FLAC and a mirror for the rest.
+  Nothing is known to send anything else — the server asks Android for 48 kHz stereo and
+  Android resamples to it — so this is a guard with one live case rather than a bug, but it
+  is worth knowing which case that is.
 - **`--audio-codec=aac` had never decoded anything, and `--audio-codec=raw` never
   opened.** The sample rate and channel layout were set only for Opus, and they are the
   only description of the stream a decoder here gets — the config packet is thrown away

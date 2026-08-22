@@ -21,6 +21,12 @@ pub struct AudioDecoder {
     /// been said out loud yet.
     refused_in_a_row: u32,
     complained: bool,
+    /// The same for the other silence: packets taken and no frame given back.
+    accepted_without_a_frame: u32,
+    said_nothing_came_out: bool,
+    /// What the session actually decoded, for the line at the end of it.
+    frames: u64,
+    samples: u64,
 }
 
 /// A second of a stream nothing can decode, at Opus's fifty packets a second.
@@ -31,6 +37,16 @@ pub struct AudioDecoder {
 /// user heard nothing and the log said nothing at the level they were running
 /// at.
 const REFUSALS_WORTH_A_WORD: u32 = 50;
+
+/// The same, for packets the decoder takes and gives nothing back for.
+///
+/// The two silences sound identical and had one line between them. A decoder
+/// refusing everything says so after fifty; a decoder *accepting* everything
+/// and emitting nothing said nothing at all, at any level — `decode` returns
+/// `Ok(None)` and the caller cannot tell that from a config packet. Priming is
+/// ordinary and costs a frame or two: this file's own measurement is 20 AAC
+/// packets in and 19 frames out. Fifty is not priming.
+const ACCEPTED_WITHOUT_A_FRAME: u32 = 50;
 
 impl AudioDecoder {
     /// Create a new audio decoder for the given codec
@@ -95,6 +111,10 @@ impl AudioDecoder {
             channels: 0,
             refused_in_a_row: 0,
             complained: false,
+            accepted_without_a_frame: 0,
+            said_nothing_came_out: false,
+            frames: 0,
+            samples: 0,
         })
     }
 
@@ -136,8 +156,10 @@ impl AudioDecoder {
         self.complained = false;
 
         let mut all_samples = Vec::new();
+        let mut frames = 0u64;
 
         while self.decoder.receive_frame(&mut self.av_frame).is_ok() {
+            frames += 1;
             // Update format info
             if self.sample_rate == 0 {
                 self.sample_rate = self.decoder.rate();
@@ -152,14 +174,35 @@ impl AudioDecoder {
         }
 
         if all_samples.is_empty() {
+            self.accepted_without_a_frame += 1;
+            if self.accepted_without_a_frame >= ACCEPTED_WITHOUT_A_FRAME
+                && !self.said_nothing_came_out
+            {
+                self.said_nothing_came_out = true;
+                log::warn!(
+                    "The audio decoder has taken {} packets without giving a frame back; \
+                     there will be no sound until it does",
+                    self.accepted_without_a_frame
+                );
+            }
             return Ok(None);
         }
+        self.accepted_without_a_frame = 0;
+        self.said_nothing_came_out = false;
+        self.frames += frames;
+        self.samples += all_samples.len() as u64;
 
         Ok(Some(DecodedAudio {
             samples: all_samples,
             sample_rate: self.sample_rate,
             channels: self.channels,
         }))
+    }
+
+    /// What the session decoded, for the line at the end of it: a count that
+    /// distinguishes a stream that played from one that only arrived.
+    pub fn decoded(&self) -> (u64, u64) {
+        (self.frames, self.samples)
     }
 
     /// Convert an FFmpeg audio frame to interleaved f32 samples

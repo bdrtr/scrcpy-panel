@@ -16,6 +16,7 @@ use anyhow::{Context, Result};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::io::BufReader;
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -99,6 +100,14 @@ pub struct Session {
     _tunnel: adb::tunnel::AdbTunnel,
     no_cleanup: bool,
     kill_adb_on_close: bool,
+    /// What the audio pipeline decoded, as it goes.
+    ///
+    /// Shared rather than returned, because the pipeline is a thread nobody
+    /// joins: a session stopped by `--time-limit` ends when the process does,
+    /// and anything the thread meant to say on its way out is never said. The
+    /// first version of this counted beautifully into a line that no ordinary
+    /// run ever reached.
+    audio_decoded: Arc<(AtomicU64, AtomicU64)>,
     /// --record-orientation, for a recording started after the session is up.
     record_rotation: u16,
     /// --disable-screensaver, held for the life of the session. It lives here
@@ -226,8 +235,15 @@ impl Session {
         let video_config: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
         let audio_config: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
 
+        let audio_decoded = Arc::new((AtomicU64::new(0), AtomicU64::new(0)));
         let (audio, audio_codec_id) = match audio_socket {
-            Some(socket) => start_audio(socket, opts, &recorder, audio_config.clone())?,
+            Some(socket) => start_audio(
+                socket,
+                opts,
+                &recorder,
+                audio_config.clone(),
+                audio_decoded.clone(),
+            )?,
             None => (None, None),
         };
 
@@ -265,6 +281,7 @@ impl Session {
             _tunnel: tunnel,
             no_cleanup: opts.no_cleanup,
             kill_adb_on_close: opts.kill_adb_on_close,
+            audio_decoded,
             record_rotation: opts.record_rotation(),
             _screensaver: opts.disable_screensaver.then(inhibit_screensaver).flatten(),
         };
@@ -550,6 +567,17 @@ impl Session {
     /// way out. So: drop the frame receiver, shut the socket to release the
     /// demuxer, then join both.
     pub fn shutdown(mut self) {
+        // What the audio actually did, said where it can be heard: the pipeline
+        // is a thread nobody joins, so anything it says after its own loop is
+        // said into a process that is already leaving.
+        let frames = self.audio_decoded.0.load(Ordering::Relaxed);
+        if frames > 0 {
+            log::info!(
+                "Audio: {frames} frames, {} samples decoded",
+                self.audio_decoded.1.load(Ordering::Relaxed)
+            );
+        }
+
         drop(self.video.take());
 
         if let Some(socket) = self.video_socket.take() {
@@ -697,6 +725,7 @@ fn start_audio(
     opts: &Options,
     recorder: &Arc<RwLock<Option<Recorder>>>,
     config_seen: Arc<Mutex<Option<Vec<u8>>>>,
+    decoded: Arc<(AtomicU64, AtomicU64)>,
 ) -> Result<(Option<AudioStream>, Option<u32>)> {
     let mut header_socket = socket;
     let info = match demuxer::read_audio_header(&mut header_socket) {
@@ -748,6 +777,7 @@ fn start_audio(
                 recorder,
                 config_seen,
                 playing,
+                decoded,
             )
         })
         .context("Failed to start audio thread")?;
@@ -886,6 +916,7 @@ fn run_audio_pipeline(
     recorder: Arc<RwLock<Option<Recorder>>>,
     config_seen: Arc<Mutex<Option<Vec<u8>>>>,
     playback: bool,
+    decoded: Arc<(AtomicU64, AtomicU64)>,
 ) {
     let mut format_checked = false;
     let mut playing = playback;
@@ -929,6 +960,22 @@ fn run_audio_pipeline(
                         // stereo, which is what the server encodes. Anything
                         // else would play at the wrong speed rather than fail,
                         // so it is worth one line.
+                        //
+                        // It sees one codec of the four, though, and it is not
+                        // the usual one. `audio.sample_rate` is read back off
+                        // the decoder context, and `AudioDecoder::new` is what
+                        // wrote 48000 there — so the question is whether
+                        // libavcodec ever writes a different one back. Put to
+                        // it with genuine 44.1 kHz content while told 48000,
+                        // over 40 packets: AAC keeps 48000 and FLAC corrects
+                        // itself to 44100. Opus is 48 kHz by construction and
+                        // PCM carries no rate at all, so they cannot differ
+                        // either. This can therefore only ever fire for FLAC;
+                        // for the rest it compares a number against itself.
+                        // Nothing is known to send anything else — the server
+                        // asks Android for 48 kHz stereo and Android resamples
+                        // to it — so this is a guard with one live case rather
+                        // than a bug, but it was worth knowing which.
                         if !format_checked {
                             format_checked = true;
                             if audio.sample_rate != 48_000 || audio.channels != 2 {
@@ -941,6 +988,9 @@ fn run_audio_pipeline(
                                 );
                             }
                         }
+                        let (frames, samples) = decoder.decoded();
+                        decoded.0.store(frames, Ordering::Relaxed);
+                        decoded.1.store(samples, Ordering::Relaxed);
                         if samples_tx.send(audio.samples).is_err() {
                             log::debug!("Nothing is listening to the audio; carrying on for the recording");
                             playing = false;
@@ -949,7 +999,7 @@ fn run_audio_pipeline(
                     Ok(None) => {} // config packet, or more data needed
                     Err(e) => {
                         log::error!("Audio decode error: {}", e);
-                        return;
+                        break;
                     }
                 }
             }
@@ -957,12 +1007,18 @@ fn run_audio_pipeline(
                 log::warn!("Unexpected session header on the audio stream, ignoring");
             }
             Ok(None) => {
-                log::info!("End of audio stream");
-                return;
+                break;
             }
             Err(e) => {
-                log::error!("Audio demuxer error: {}", e);
-                return;
+                // The ordinary end of a session that was stopped: shutting the
+                // socket down is what unblocks this read, and it comes back as
+                // an error rather than as end of stream. Worth a debug line
+                // rather than an error one, and worth breaking to so the count
+                // below is printed however the stream ended — putting it on the
+                // clean end alone meant a session stopped by `--time-limit`
+                // never reached it, which is every session this was tried on.
+                log::debug!("Audio stream ended: {}", e);
+                break;
             }
         }
     }
