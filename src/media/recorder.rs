@@ -518,7 +518,21 @@ unsafe fn write_the_packets(
             (v, a, s.stopped)
         };
 
-        if stopped && vpkt.is_none() && apkt.is_none() { break; }
+        // Stopping is not a reason to throw away what is already in hand.
+        // `should_pop` refuses to pop for a stream that is already holding one,
+        // so on the round where `stopped` turns up both locals can be `None`
+        // while a whole recording is still sitting in `pending_a` and behind it
+        // in the queue. Leaving on that pair alone wrote a file with no packets
+        // in it. Once the origin is known both pendings are `None` for good, so
+        // this cannot hold the loop open.
+        if stopped
+            && vpkt.is_none()
+            && apkt.is_none()
+            && pending_v.is_none()
+            && pending_a.is_none()
+        {
+            break;
+        }
 
         // Discard further config packets (orientation changes etc.)
         // C: "Ignore further config packets ... The next non-config packet will have the config packet data prepended"
@@ -781,6 +795,69 @@ mod tests {
         let counted = count_packets(&path);
         let _ = std::fs::remove_file(&path);
         assert_eq!(counted.1, 3, "an audio packet went missing: {counted:?}");
+    }
+
+    /// The stop that arrives while a packet is being held must not take the
+    /// recording with it.
+    ///
+    /// `should_pop` refuses to pop for a stream that is already holding one, so
+    /// on the round where `stopped` turns up both locals can come back `None`
+    /// while a whole recording is still sitting in `pending_a` and behind it in
+    /// the queue. The loop read that pair of `None`s as "nothing left" and left,
+    /// writing a file with no packets in it at all — 626 bytes of mkv that will
+    /// not open, or a 261-byte mp4 with zero tracks.
+    ///
+    /// The feed is the one above with video's two real packets removed: a
+    /// config packet reaches the loop and is discarded, which leaves video
+    /// holding nothing while audio holds one and has two more waiting. That is
+    /// what `start_recording` mid-session makes — its `ControlMsg::ResetVideo`
+    /// is why a second config packet is in the loop's path — and a stop before
+    /// the keyframe that follows lands squarely in the window.
+    #[test]
+    fn a_stop_before_the_origin_is_found_still_writes_what_is_held() {
+        const PCM_S16LE: u32 = 65536; // AV_CODEC_ID_PCM_S16LE
+        let path = std::env::temp_dir().join(format!(
+            "scrcpy-slint-stop-{}.mkv",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let recorder = Recorder::new();
+        recorder.set_video_codec(VideoCodecInfo {
+            codec_id: 27, // H.264
+            width: 64,
+            height: 48,
+        });
+        recorder.set_audio_codec(PCM_S16LE, false);
+
+        let audio = |pts: i64| RecPacket { data: vec![0u8; 64], pts, is_key: true };
+        let config = || RecPacket { data: vec![0u8; 8], pts: AV_NOPTS, is_key: false };
+        recorder.push_audio(audio(0));
+        // The first is the stream's extradata, taken before the loop begins;
+        // the second reaches the loop and is discarded there. Video offers
+        // nothing else for the rest of the session.
+        recorder.push_video(config());
+        recorder.push_video(config());
+        recorder.push_audio(audio(20_000));
+        recorder.push_audio(audio(40_000));
+
+        let handle = recorder.spawn(
+            path.to_string_lossy().into_owned(),
+            Some("mkv".to_string()),
+            true,
+            Some(PCM_S16LE),
+            0,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        recorder.stop();
+        let _ = handle.join();
+
+        let counted = count_packets(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            counted.1, 3,
+            "the stop threw away the held packet and the queue behind it: {counted:?}"
+        );
     }
 
     /// (video, audio) packet counts in a file, by demuxing it.

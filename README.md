@@ -249,6 +249,26 @@ and none of them needed a phone to find. What each was held to:
   one. The same eight-second run now writes 131 KB of matroska, and `ffprobe` reads back an
   AAC track at 48000 Hz, 2 channels, 8.003 seconds. Video-and-audio recording is unchanged:
   h264 1080x2400 with opus beside it, over 6.16 seconds.
+- **Stopping a recording could throw the whole recording away.** The packet loop cannot
+  write anything until it knows the PTS origin, so until then each stream holds one packet
+  aside and `should_pop` refuses to pop again for a stream that is already holding one —
+  the queue being a better place for a packet than the floor. The round on which `stopped`
+  arrives was subject to that same refusal, so both locals came back `None` and the loop
+  read that pair as "nothing left" and left, dropping the held packet, everything queued
+  behind it, and never reaching the `&& !stopped` line four blocks down that exists to
+  write out a stream whose partner never came. `stop_recording()` still returned true and
+  still logged "Recording stopped". What it takes is a config packet reaching the loop
+  first — it is discarded there, which leaves video holding nothing while audio holds one —
+  and `start_recording` mid-session makes exactly that, because the `ControlMsg::ResetVideo`
+  it sends is what puts a second config packet in the loop's path. Measured on the feed the
+  new test uses: three audio packets in and none out, one still held in `pending_a` and two
+  still in the queue, and a 626-byte mkv that will not open at all ("End of file"). The
+  control says the stop path itself is sound — take the second config packet out of the same
+  feed and all three are written, because then nothing is being held when the stop arrives.
+  The break now also asks whether anything is still being held; the feed with the config back
+  in writes all three. It cannot hold the loop open, because once the origin is known both
+  pendings are `None` for good.
+  `a_stop_before_the_origin_is_found_still_writes_what_is_held` in `src/media/recorder.rs`.
 - **The four audio-only containers were then tried one at a time, and the one that looks
   broken is not.** Four seconds each off the silent Redmi, `--no-video --record` into the
   container `muxer_format_for` picks for that codec: opus into `.opus`, 1035 bytes, 200
