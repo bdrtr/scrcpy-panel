@@ -158,7 +158,86 @@ the device list underneath it. It reads adb's words now, and the three refusals 
 actually prints are in the test. What that cannot cover is the other
 half — no adb operation has been run through the new module against a phone yet, so
 `tcpip`, `pair`, `install`, `push` and `screencap` are, for now, only as good as their
-arguments look.
+arguments look. The push, at least, is no longer among the untried: it has a fake daemon
+of its own — sixty lines of `TcpListener` that speaks enough of adb's protocol to take
+one — which holds the framing to account rather than skipping to the end. The transport,
+the switch to sync mode, the path with its mode, 100 KB arriving as two chunks because a
+chunk is 64 KB, the modification time on DONE, the file coming back byte for byte, and a
+daemon answering FAIL having its words carried out to the caller.
+
+### The files no review had looked at
+
+Every hunt so far had gone through the same places. This one went through the ones that
+had never been read: the pixel maths, the key tables, the pad translation, the audio
+decoder, the adb framing, the control queue, the error cards. Seventeen things came back,
+and none of them needed a phone to find. What each was held to:
+
+- **Five of the fourteen Android metastate flags were somebody else's flags.** The meta
+  row had slipped one slot, so `META_ON` was `META_META_ON | META_META_LEFT_ON` and the
+  device was told the *left* Super key was down whichever one had been pressed; the two
+  lock flags were `META_CAP_LOCKED` and `META_ALT_LOCKED`, three hex digits away from the
+  ones meant. Checked against `android/view/KeyEvent.java` in android-36's
+  `android-stubs-src.jar`, and all fourteen are now pinned by a test.
+- **`--audio-codec=aac` had never decoded anything, and `--audio-codec=raw` never
+  opened.** The sample rate and channel layout were set only for Opus, and they are the
+  only description of the stream a decoder here gets — the config packet is thrown away
+  rather than handed over as extradata. Measured against this machine's libavcodec with
+  twenty AAC access units out of an mp4: 0 of 20 accepted with the rate unset, 20 of 20
+  accepted and 19 frames out with it set. PCM does not even open — `avcodec_open2`
+  returns EINVAL for a rate of zero — so raw lost the recording's audio track as well.
+  Proved against libavcodec rather than against the server's own stream; the device end
+  of that is still to do.
+- **The panel showed the wrong card for four of its own failures.** Run against the old
+  classifier, on messages this program really produces: a missing `scrcpy-server` came
+  out as "adb bulunamadı" with a file picker for the adb that had just worked, two
+  phones plugged in
+  came out as "Cihaz bulunamadı" with advice to plug one in, the `--require-audio` and
+  `--no-audio` refusal came out as a warning saying audio needs Android 11, and port
+  exhaustion — the one failure the port card exists for — fell through to the generic
+  card, because the card's phrases were upstream C scrcpy's rather than this client's.
+  The test had been asserting on upstream's wording under a comment saying these are
+  messages "this program or adb really produces".
+- **The control queue would throw away the finger coming up.** `QUEUE_LIMIT` is
+  documented as the limit "for droppable control messages" and nothing in the code knew
+  which those were: sixty touches is one drag, and the release that ends it went over the
+  side as readily as a move, leaving the device believing the finger was still down. Moves
+  and scroll notches give way now; everything else waits a quarter of a second for room,
+  and a channel that has actually died comes straight back rather than waiting.
+- **One daemon listed the devices while another one mirrored them.** An explicit adb
+  port of 5037 — which is what the panel's own field says out of the box — was left off
+  the children on the grounds that it is adb's default, which is true only when
+  `ANDROID_ADB_SERVER_PORT` is absent from this process's environment. It is inherited.
+- **The server's log stopped after five quiet minutes.** The shell stream carried a
+  five-minute read timeout, which is a deadline on a quiet shell rather than a slow one,
+  and the reader read the timeout as end of stream. Everything the server printed
+  afterwards went nowhere.
+- **Thirty translations were one `msgcat` away from vanishing.** build.rs read only the
+  first line of a `.po` entry, and a wrapped entry — what msgfmt, msgmerge and xgettext
+  write for anything past the seventy-ninth column, and 28 of these msgids are longer
+  than that — was dropped whole and silent. Running the file through `msgcat` took the
+  table from 397 entries to 367. Three messages had drifted out of the file as well and
+  were showing in Turkish in an English panel; a test now walks the Rust source for
+  `tr!` calls and holds every one to the generated table, and a second walks the error
+  cards, whose strings reach `tr!` as variables and are invisible to the first.
+- **`--video-buffer` shifts the stream; it does not smooth it.** The file said it
+  "smooths out network jitter", and it cannot as written: a frame's release time is its
+  arrival plus a constant, so the spacing on the way out is the spacing on the way in.
+  Doing what upstream does needs the frame's own timestamp carried through the decoder,
+  which `DecodedFrame` does not have. The claim is gone and a test pins what the file
+  actually does. Its stop is prompt now as well — it waited in a `sleep` no notification
+  could cut short, so a buffer told to stop held its thread, and the join behind it, for
+  the rest of the delay: with the sleep put back, the new test measures the join waiting
+  2.95 s of a 3 s delay for a buffer that had been told to go.
+- **The UHID gamepad introduced itself as nothing in particular.** Vendor and product
+  zero, where upstream sends the Xbox 360's — which is what makes Android load a key
+  layout that puts the triggers and the right stick where a game looks for them. And an
+  analog trigger arriving as an axis was read as though it were 0..1, where every gilrs
+  axis is -1..1, so the first half of the pull did nothing. Still the one thing here with
+  no pad to try it on: both are read off gilrs's source and upstream's, not off a device.
+
+Two tests were also racing each other rather than testing anything: `cargo test --release
+adb::settings` failed 5 runs in 60, because two tests wrote the same process-wide setting
+in parallel and a third read it. They take turns now — 60 runs, none failed.
 
 
 ## Known issues
@@ -211,7 +290,18 @@ arguments look.
   the sticks' vertical axis, which gilrs points up and SDL points down. gilrs is a queue to
   drain rather than something to wait on, so it is read every 8 ms on a timer, which is
   what a wired pad reports at. All of that has been run with no gamepad connected — gilrs
-  starts, enumerates none, and the session is unaffected — and none of it with one.
+  starts, enumerates none, and the session is unaffected — and none of it with one. Two
+  things in it were wrong for the same reason: nobody could try it. The pad was created
+  with a vendor and product of zero, where upstream sends the Xbox 360's `045e:028e` and
+  the name to match — the identity is what makes Android pick a key layout that puts the
+  triggers on LTRIGGER and RTRIGGER rather than on the right stick's two axes, and the
+  report descriptor here is byte-identical to scrcpy's, so it was the half that gives it
+  meaning that had been left behind. And an analog trigger arriving as an *axis* was read
+  as though it were 0..1: `axis_value` in gilrs ends `val / range * 2.0 - 1.0`, so a
+  released trigger reports -1, and clamping that away made the first half of the pull do
+  nothing at all. Pads with an entry in SDL's database were never affected — their
+  triggers arrive as buttons, which really are 0..1 — so this is the road every pad the
+  database has not heard of takes.
 - A UHID mouse is a relative mouse, so the pointer is captured while it runs, as it is in
   scrcpy: the window locks it where the compositor allows that and confines it to the
   window where it does not. LAlt, LSuper or RSuper give it back, and take it again. The
