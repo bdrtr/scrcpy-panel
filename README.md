@@ -226,6 +226,26 @@ and none of them needed a phone to find. What each was held to:
   lock flags were `META_CAP_LOCKED` and `META_ALT_LOCKED`, three hex digits away from the
   ones meant. Checked against `android/view/KeyEvent.java` in android-36's
   `android-stubs-src.jar`, and all fourteen are now pinned by a test.
+- **And with a phone plugged in, AAC decodes.** The paragraph above proved the fix against
+  libavcodec and said the device end was still to do; it is done. A live session against the
+  Redmi with `--audio-codec=aac` prints `Audio format: 48000Hz, 2 channels, format:
+  F32(Planar)` from `audio_decoder.rs`, and that line is only reached once `receive_frame`
+  has returned a frame — so the server's own AAC, not a file, went in and samples came out.
+  A broken decoder cannot reach it: `send_packet` fails first, and after fifty in a row the
+  warning about refusals is what appears instead.
+- **Two things had to be fixed before that session could even be recorded, and both were
+  found by trying it.** `--no-video` shut the client down the moment it started: `main.rs`
+  took the audio stream, started the pipeline, then found no video and returned, so
+  `--no-video --record=out.mkv --time-limit=8` ran for one second and wrote nothing, with an
+  INFO line that read like ordinary operation. And the recorder was spawned inside
+  `start_video`, so even with the process kept alive there was no thread writing the file —
+  the audio packets were teed into a recorder nobody drained. Audio-only sessions run on
+  their own loop now, out on the interrupt, the time limit, or the server going away — which
+  a session with no picture has to ask about, since it cannot notice the frames stopping.
+  The recorder is spawned once the streams have said what they are, with or without a video
+  one. The same eight-second run now writes 131 KB of matroska, and `ffprobe` reads back an
+  AAC track at 48000 Hz, 2 channels, 8.003 seconds. Video-and-audio recording is unchanged:
+  h264 1080x2400 with opus beside it, over 6.16 seconds.
 - **`--audio-codec=aac` had never decoded anything, and `--audio-codec=raw` never
   opened.** The sample rate and channel layout were set only for Opus, and they are the
   only description of the stream a decoder here gets — the config packet is thrown away

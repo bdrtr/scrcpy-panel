@@ -237,6 +237,43 @@ fn run_otg(opts: Options) -> Result<()> {
     Ok(())
 }
 
+/// `--no-video`: the session with no picture in it at all.
+///
+/// There is nothing to draw and nothing to drain — the audio pipeline feeds the
+/// recorder and the speakers on its own thread — so this only has to keep the
+/// process alive for as long as the session is meant to last, and take the same
+/// three ways out that a windowless one does: an interrupt, the time limit, and
+/// the server going away. That last is the one a session with a picture notices
+/// by the frames stopping; with no frames it has to be asked for.
+fn run_audio_only(opts: &Options, session: &session::Session) {
+    use std::time::{Duration, Instant};
+
+    let deadline = opts
+        .time_limit
+        .filter(|&s| s > 0)
+        .map(|s| Instant::now() + Duration::from_secs(s as u64));
+    if deadline.is_some() {
+        log::info!("Time limit: {} s", opts.time_limit.unwrap_or(0));
+    }
+    log::info!("Audio only; there is no picture to draw");
+
+    let reason = loop {
+        if SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
+            break "an interrupt";
+        }
+        if deadline.is_some_and(|end| Instant::now() >= end) {
+            break "the time limit";
+        }
+        if session.server_has_ended() {
+            break "the server going away";
+        }
+        // Short enough that an interrupt is noticed at once, and there is
+        // nothing else for this thread to be doing.
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    log::info!("Stopping: {reason}");
+}
+
 /// `--no-window`: the session with nothing drawing it.
 ///
 /// The frames still have to be taken. Recording is fed by the demuxer, but the
@@ -353,13 +390,24 @@ fn run(opts: Options) -> Result<()> {
     }
 
     let mut session = session::Session::start(&opts)?;
+    let had_audio = session.audio.is_some();
     let _audio = session
         .audio
         .take()
         .and_then(start_audio);
 
     let Some(video) = session.video.take() else {
-        log::info!("Video is disabled, so there is nothing to show");
+        // Audio with no video is a session too, and this used to set one up and
+        // shut it down in the same breath. Asked for eight seconds of audio-only
+        // recording — `--no-video --record=out.mkv --time-limit=8`, which is what
+        // upstream's own audio-only recording looks like — it ran for one second
+        // and wrote no file at all, with an INFO line that read like ordinary
+        // operation.
+        if had_audio {
+            run_audio_only(&opts, &session);
+        } else {
+            log::info!("Neither video nor audio is on, so there is nothing to do");
+        }
         session.shutdown();
         return Ok(());
     };

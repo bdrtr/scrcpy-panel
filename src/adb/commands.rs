@@ -122,6 +122,18 @@ impl ShellHandle {
         self.stream.shutdown(std::net::Shutdown::Both)
     }
 
+    /// Whether the shell has ended, without waiting for it.
+    ///
+    /// The reader thread returns when the socket closes, which is what a server
+    /// that has gone — a device unplugged, a server that died — looks like from
+    /// this end. A session with no picture to watch has nothing else to notice
+    /// it by.
+    pub fn has_ended(&self) -> bool {
+        self._reader_thread
+            .as_ref()
+            .is_some_and(|thread| thread.is_finished())
+    }
+
     /// Wait for the shell to finish (joins the reader thread)
     pub fn wait(&mut self) -> std::io::Result<()> {
         if let Some(handle) = self._reader_thread.take() {

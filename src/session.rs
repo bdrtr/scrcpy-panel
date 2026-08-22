@@ -107,6 +107,16 @@ pub struct Session {
     _screensaver: Option<crate::display::screensaver::ScreensaverInhibitor>,
 }
 
+impl Session {
+    /// Whether the server on the device has gone.
+    ///
+    /// A session being watched notices that when the frames stop arriving. One
+    /// with no picture — `--no-video`, audio only — has to ask.
+    pub fn server_has_ended(&self) -> bool {
+        self.server_process.has_ended()
+    }
+}
+
 /// Ask the desktop to keep the screen awake, or say why it will not.
 ///
 /// A desktop without the service is a missing convenience, not a reason to
@@ -262,8 +272,49 @@ impl Session {
         if let Some(socket) = video_socket {
             session.start_video(socket, opts, video_config)?;
         }
+        // After the video header, because that is where the video codec comes
+        // from — and whether or not there was one, because a recording with no
+        // video in it is still a recording.
+        session.spawn_recorder(opts);
 
         Ok(session)
+    }
+
+    /// Start the thread that writes the recording, once the streams have said
+    /// what they are.
+    ///
+    /// This lived inside `start_video`, and so did not happen at all without
+    /// one. `--no-video --record=out.mkv` therefore made a recorder, teed every
+    /// audio packet into it from `run_audio_pipeline`, and never started the
+    /// thread that drains it: the packets banked up in a queue nobody read and
+    /// the file was never created — asked for eight seconds of audio, the
+    /// client wrote nothing and said nothing about it. Audio-only recording is
+    /// what upstream's `--no-video --record=file.opus` is.
+    fn spawn_recorder(&mut self, opts: &Options) {
+        let Some(path) = opts.record.clone() else {
+            return;
+        };
+        let thread = {
+            let guard = self.recorder.read().expect("recorder lock");
+            let Some(rec) = guard.as_ref() else {
+                return;
+            };
+            rec.spawn(
+                path.clone(),
+                opts.record_format.clone(),
+                opts.video_enabled(),
+                // What the device gave, not what was asked for: a server that
+                // declines audio would otherwise leave this waiting for ever
+                // with the whole stream banked up behind it.
+                self.audio_codec_id,
+                opts.record_rotation(),
+            )
+        };
+        *self.recorder_thread.lock().expect("recorder thread lock") = Some(thread);
+        match opts.record_format {
+            Some(ref format) => log::info!("Recording to: {} ({})", path, format),
+            None => log::info!("Recording to: {}", path),
+        }
     }
 
     /// Set up the demux and decode threads for the video socket.
@@ -306,22 +357,6 @@ impl Session {
 
             if let Some(rec) = self.recorder.read().expect("recorder lock").as_ref() {
                 rec.set_video_codec(video_codec);
-                let path = opts.record.as_ref().expect("recorder implies --record").clone();
-                let thread = rec.spawn(
-                    path.clone(),
-                    opts.record_format.clone(),
-                    opts.video_enabled(),
-                    // What the device gave, not what was asked for: a server
-                    // that declines audio would otherwise leave this waiting
-                    // for ever with the whole stream banked up behind it.
-                    self.audio_codec_id,
-                    opts.record_rotation(),
-                );
-                *self.recorder_thread.lock().expect("recorder thread lock") = Some(thread);
-                match opts.record_format {
-                    Some(ref format) => log::info!("Recording to: {} ({})", path, format),
-                    None => log::info!("Recording to: {}", path),
-                }
             }
         }
 
