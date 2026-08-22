@@ -499,6 +499,19 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   anything that answers an accessory-protocol query with 2 or more is an Android device
   willing to take HID, and if exactly one does, that is the one. `--keyboard` and `--mouse`
   are forced to `aoa` there, since there is no socket for UHID to use.
+- **And it used to open a window that sent nothing and call that success.** Forcing both
+  roads to `aoa` is only half a decision: `attach` falls back from the cable to the socket
+  when AOA will not open, which is the right answer for a mirroring session and an
+  impossible one here, because OTG has no socket. `create` then refuses for want of a
+  controller and both roads end unset — and `run_otg` never asked. The `--serial` arm also
+  skips the USB scan entirely, so the refusal written for a device on TCP/IP was never
+  reached when a TCP/IP address was handed over explicitly. Measured with nothing but the
+  Redmi on the bus, before and after: `--otg --serial 192.168.1.44:5555 --time-limit 1`
+  used to log three warnings, open a window titled after the address showing the OTG
+  placeholder, run for the full second and exit **0**; it now refuses in one sentence,
+  shows no window, and exits **1**. The second refusal is scrcpy's own — `--otg` with
+  `--keyboard=disabled --mouse=disabled` is "Cannot not disable all inputs in OTG mode"
+  upstream, and is now the same here, checked before anything is opened at all.
 - **`--gamepad=uhid` works, and is the one thing here with no gamepad to prove it on.**
   The report side was ported with the rest of scrcpy's HID code; what it lacked was a
   source, and neither Slint nor winit reads gamepads. gilrs does, on every desktop this

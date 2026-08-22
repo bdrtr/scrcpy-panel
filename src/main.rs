@@ -184,6 +184,16 @@ fn run_otg(opts: Options) -> Result<()> {
             }
         }
     };
+    // scrcpy refuses this one too — "Cannot not disable all inputs in OTG
+    // mode" — and for the same reason: with no keyboard and no mouse, OTG is
+    // a window that shows nothing and sends nothing.
+    if opts.keyboard == "disabled" && opts.mouse == "disabled" {
+        anyhow::bail!(
+            "--otg with --keyboard=disabled and --mouse=disabled has nothing left to do: \
+             the input path is the whole of this mode."
+        );
+    }
+
     log::info!("OTG: {serial}, over USB and nothing else");
 
     // AOA is the only road here — there is no socket to send UHID down.
@@ -210,6 +220,21 @@ fn run_otg(opts: Options) -> Result<()> {
     }
 
     uhid.attach(None, &opts, &serial);
+
+    // Whether anything actually opened is the whole of this mode, so it is
+    // asked rather than assumed. `attach` falls back from the cable to the
+    // socket when AOA will not open, which is the right answer for a mirroring
+    // session and an impossible one here: OTG has no socket to fall back to, so
+    // `create` refuses for want of a controller and both roads end unset. It
+    // used to go on and run the event loop anyway — a window titled after the
+    // device, showing the OTG placeholder, sending nothing, exiting 0.
+    if !uhid.keyboard_attached() && !uhid.mouse_attached() {
+        anyhow::bail!(
+            "--otg opened neither a keyboard nor a mouse on {serial}. AOA is the cable: \
+             the device has to be on the USB bus and connected for data, and the serial \
+             has to be the one it publishes there rather than an adb address."
+        );
+    }
 
     let reason = Rc::new(Cell::new("the window closing"));
     let interrupt = watch_for_interrupt(reason.clone());
