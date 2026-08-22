@@ -485,7 +485,7 @@ impl SlintInput {
         text: &str,
         mods: Mods,
         repeat: bool,
-        controller: &Controller,
+        controller: Option<&Controller>,
     ) -> WindowAction {
         let Mods { alt, control, shift, meta } = mods;
         self.alt_held = alt;
@@ -509,7 +509,7 @@ impl SlintInput {
         if control && !shortcut_active && !self.camera && !self.uhid && (c == 'v' || c == 'V') && !repeat {
             // Ctrl+V always types the text, which is what --legacy-paste asks
             // the shortcut to do as well.
-            if let Some(text) = clipboard_for_device() {
+            if let (Some(controller), Some(text)) = (controller, clipboard_for_device()) {
                 controller.push_msg(ControlMsg::InjectText { text });
             }
             return WindowAction::None;
@@ -538,6 +538,14 @@ impl SlintInput {
             let action = shortcut_for(c, shift, self.camera);
             return self.run_shortcut(action, controller);
         }
+
+        // Everything below this line is something to send, and --no-control
+        // opened no channel to send it on. scrcpy's own key handler draws the
+        // same line in the same place — `if (!control) return;` sits below the
+        // whole shortcut block — because read-only mirroring is still a window.
+        let Some(controller) = controller else {
+            return WindowAction::None;
+        };
 
         let metastate = metastate(alt, control, shift, meta);
 
@@ -593,10 +601,13 @@ impl SlintInput {
         &mut self,
         text: &str,
         mods: Mods,
-        controller: &Controller,
+        controller: Option<&Controller>,
     ) {
         let Mods { alt, control, shift, meta } = mods;
+        // The modifier state is the window's, not the device's, so it is kept
+        // up to date whether or not there is anywhere to send a key.
         self.alt_held = alt;
+        let Some(controller) = controller else { return };
         let Some(c) = text.chars().next() else { return };
         if self.camera
             || self.uhid
@@ -625,11 +636,23 @@ impl SlintInput {
         }
     }
 
-    fn run_shortcut(&mut self, action: ShortcutAction, controller: &Controller) -> WindowAction {
+    fn run_shortcut(
+        &mut self,
+        action: ShortcutAction,
+        controller: Option<&Controller>,
+    ) -> WindowAction {
         if self.camera && !a_camera_takes(action) {
             log::debug!("{action:?} is not something a camera session can be sent");
             return WindowAction::None;
         }
+
+        // With no control channel the shortcuts that ask the device for
+        // something have nobody to ask, but the ones that act on the window
+        // are still the window's own. --no-control is read-only mirroring,
+        // not a dead window.
+        let Some(controller) = controller else {
+            return window_only(action);
+        };
 
         match action {
             ShortcutAction::None => {}
@@ -737,6 +760,59 @@ impl SlintInput {
     }
 }
 
+/// The half of the shortcut table that needs no device.
+///
+/// Exhaustive on purpose: a shortcut added to `ShortcutAction` has to be
+/// answered here too, and the compiler is what asks. Anything the device
+/// would have to be told about is a `None` — it is not silently turned into
+/// a different action.
+fn window_only(action: ShortcutAction) -> WindowAction {
+    use ShortcutAction as A;
+    match action {
+        A::FlipHorizontal => WindowAction::FlipHorizontal,
+        A::FlipVertical => WindowAction::FlipVertical,
+        A::PauseDisplay => WindowAction::Pause,
+        A::UnpauseDisplay => WindowAction::Unpause,
+        A::Quit => WindowAction::Quit,
+        A::ToggleFullscreen => WindowAction::ToggleFullscreen,
+        A::ResizeToFit => WindowAction::ResizeToFit,
+        A::PixelPerfect => WindowAction::PixelPerfect,
+        A::ToggleFps => WindowAction::ToggleFps,
+        A::RotateCW => WindowAction::RotateCw,
+        A::RotateCCW => WindowAction::RotateCcw,
+        A::None => WindowAction::None,
+        // The rest are all asking the device for something, and there is
+        // nothing here to ask with. Listed rather than caught by a wildcard so
+        // that a shortcut added to `ShortcutAction` cannot slip past this
+        // function without somebody deciding which half it belongs to.
+        A::Home
+        | A::Back
+        | A::AppSwitch
+        | A::Power
+        | A::VolumeUp
+        | A::VolumeDown
+        | A::Menu
+        | A::ExpandNotifications
+        | A::CollapsePanels
+        | A::RotateDevice
+        | A::SetDisplayPowerOff
+        | A::SetDisplayPowerOn
+        | A::CopyToPC
+        | A::CutToPC
+        | A::PasteFromPC
+        | A::PasteAsText
+        | A::OpenKeyboardSettings
+        | A::ResetVideo
+        | A::CameraTorchOn
+        | A::CameraTorchOff
+        | A::CameraZoomIn
+        | A::CameraZoomOut => {
+            log::debug!("{action:?} needs the control channel, and --no-control opened none");
+            WindowAction::None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -770,17 +846,17 @@ mod tests {
         let (controller, messages) = Controller::collecting();
         let mut input = input();
 
-        input.key_down("a", Mods::NONE, true, &controller);
+        input.key_down("a", Mods::NONE, true, Some(&controller));
         assert!(messages.try_recv().is_ok(), "repeats travel by default");
 
         input.set_event_filters(false, true);
-        input.key_down("a", Mods::NONE, false, &controller);
+        input.key_down("a", Mods::NONE, false, Some(&controller));
         assert!(matches!(
             messages.try_recv(),
             Ok(ControlMsg::InjectKeycode { repeat: 0, .. })
         ), "the first press must still travel");
 
-        input.key_down("a", Mods::NONE, true, &controller);
+        input.key_down("a", Mods::NONE, true, Some(&controller));
         assert!(messages.try_recv().is_err(), "the repeat must not");
     }
 
@@ -791,10 +867,81 @@ mod tests {
         let (controller, messages) = Controller::collecting();
         let mut input = input();
         assert_eq!(
-            input.key_down(&key::F11.to_string(), Mods::NONE, false, &controller),
+            input.key_down(&key::F11.to_string(), Mods::NONE, false, Some(&controller)),
             WindowAction::ToggleFullscreen
         );
         assert!(messages.try_recv().is_err(), "F11 is the window's, not the device's");
+    }
+
+    /// --no-control is read-only mirroring, not a dead window.
+    ///
+    /// With no control channel there is nobody to send a key to, and the whole
+    /// keyboard path used to be skipped on that account — the callbacks were
+    /// registered inside `if let Some(controller)`, so `--no-control` left the
+    /// mirror with no shortcuts at all. The Slint FocusScope still swallowed
+    /// the keystroke, so it did not even fall through to the desktop. scrcpy
+    /// runs its entire shortcut block above `if (!control) return;` for exactly
+    /// this reason.
+    ///
+    /// Each row is a shortcut and what a session with no control channel should
+    /// still make of it.
+    #[test]
+    fn the_window_keeps_its_own_shortcuts_without_a_control_channel() {
+        for (key, mods, expected) in [
+            // The window's own: nothing about these needs the device.
+            ("f", Mods::MOD, WindowAction::ToggleFullscreen),
+            ("q", Mods::MOD, WindowAction::Quit),
+            ("w", Mods::MOD, WindowAction::ResizeToFit),
+            ("g", Mods::MOD, WindowAction::PixelPerfect),
+            ("z", Mods::MOD, WindowAction::Pause),
+            ("i", Mods::MOD, WindowAction::ToggleFps),
+            // F11 needs no modifier at all, and never did need a controller.
+            (&*key::F11.to_string(), Mods::NONE, WindowAction::ToggleFullscreen),
+            // The device's own: there is nothing to ask, so nothing happens —
+            // and in particular it is not quietly turned into some other action.
+            ("h", Mods::MOD, WindowAction::None),
+            ("s", Mods::MOD, WindowAction::None),
+            ("p", Mods::MOD, WindowAction::None),
+            ("v", Mods::MOD, WindowAction::None),
+            // An ordinary key is a key the device would have seen, and does not.
+            ("a", Mods::NONE, WindowAction::None),
+        ] {
+            let mut input = input();
+            assert_eq!(
+                input.key_down(key, mods, false, None),
+                expected,
+                "{key:?} with mods {mods:?} and no control channel"
+            );
+            // The other half of it: a key up must not panic for want of one.
+            input.key_up(key, mods, None);
+        }
+    }
+
+    /// The same table, with a controller behind it, to show the fix did not
+    /// quietly move the device's half of the shortcuts into the window's.
+    #[test]
+    fn the_device_shortcuts_still_reach_the_device_when_there_is_one() {
+        for (key, expected_msg) in [
+            ("h", "InjectKeycode"),
+            ("s", "InjectKeycode"),
+            ("p", "InjectKeycode"),
+            ("n", "ExpandNotificationPanel"),
+        ] {
+            let (controller, messages) = Controller::collecting();
+            let mut input = input();
+            assert_eq!(
+                input.key_down(key, Mods::MOD, false, Some(&controller)),
+                WindowAction::None,
+                "MOD+{key} acts on the device, not the window"
+            );
+            let msg = messages.try_recv().unwrap_or_else(|e| {
+                panic!("MOD+{key} sent the device nothing: {e}")
+            });
+            assert!(
+                format!("{msg:?}").starts_with(expected_msg),
+                "MOD+{key} sent {msg:?}, expected {expected_msg}"
+            );
+        }
     }
 
     /// One mechanism, three gestures: which axes the second finger is mirrored
@@ -863,25 +1010,25 @@ mod tests {
         input.pointer_moved(0.5, 0.5, true, &controller);
         input.pointer_up(0.5, 0.5, BUTTON_LEFT, &controller);
         input.pointer_scroll(0.5, 0.5, 0.0, -3.0, &controller);
-        input.key_down("a", Mods::NONE, false, &controller);
-        input.key_up("a", Mods::NONE, &controller);
-        input.key_down("h", Mods::MOD, false, &controller); // MOD+h
+        input.key_down("a", Mods::NONE, false, Some(&controller));
+        input.key_up("a", Mods::NONE, Some(&controller));
+        input.key_down("h", Mods::MOD, false, Some(&controller)); // MOD+h
         assert!(messages.try_recv().is_err(), "nothing of that reaches a camera");
 
         // What it does take.
-        input.key_down("t", Mods::MOD, false, &controller);
+        input.key_down("t", Mods::MOD, false, Some(&controller));
         assert!(matches!(
             messages.try_recv(),
             Ok(ControlMsg::CameraSetTorch { on: true })
         ));
-        input.key_down("\u{F700}", Mods::MOD, false, &controller);
+        input.key_down("\u{F700}", Mods::MOD, false, Some(&controller));
         assert!(matches!(messages.try_recv(), Ok(ControlMsg::CameraZoomIn)));
-        input.key_down("r", Mods::MOD.and_shift(), false, &controller);
+        input.key_down("r", Mods::MOD.and_shift(), false, Some(&controller));
         assert!(matches!(messages.try_recv(), Ok(ControlMsg::ResetVideo)));
 
         // And the window's own actions, which never leave this machine.
         assert_eq!(
-            input.key_down("f", Mods::MOD, false, &controller),
+            input.key_down("f", Mods::MOD, false, Some(&controller)),
             WindowAction::ToggleFullscreen
         );
         assert!(messages.try_recv().is_err());
@@ -906,11 +1053,11 @@ mod tests {
         input.set_event_filters(false, true);
 
         assert_eq!(
-            input.key_down("f", Mods::MOD, false, &controller),
+            input.key_down("f", Mods::MOD, false, Some(&controller)),
             WindowAction::ToggleFullscreen
         );
         assert_eq!(
-            input.key_down("f", Mods::MOD, true, &controller),
+            input.key_down("f", Mods::MOD, true, Some(&controller)),
             WindowAction::None,
             "a held shortcut fires once, as it always did"
         );

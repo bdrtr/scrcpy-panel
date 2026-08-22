@@ -127,82 +127,82 @@ pub fn attach(
     });
     apply(MirrorUpdate::Live(false));
 
-    if let Some(controller) = controller {
-        wire_input(
-            mirror,
-            controller,
-            input.clone(),
-            {
-                let apply = apply.clone();
-                let orientation = orientation.clone();
-                let frame_size = frame_size.clone();
-                let fps = fps.clone();
-                let flip = flip.clone();
-                let paused = paused.clone();
-                let input_for_action = input.clone();
-                move |action| match action {
-                    WindowAction::RotateCw | WindowAction::RotateCcw => {
-                        let next = if action == WindowAction::RotateCw {
-                            orientation.get().rotate_cw()
-                        } else {
-                            orientation.get().rotate_ccw()
-                        };
-                        orientation.set(next);
-                        let (w, h) = frame_size.get();
-                        apply(MirrorUpdate::Geometry {
-                            aspect: display_aspect(w, h, next),
-                            rotation: next.degrees(),
-                            frame_width: w,
-                            frame_height: h,
-                        });
-                        log::info!("Client rotation: {:?}", next);
-                    }
-                    // A vertical flip is a horizontal one turned half way round,
-                    // and half a turn is something the view can already do — so
-                    // only the horizontal mirror is ever drawn. Which of the two
-                    // needs the half turn depends on the rotation: see
-                    // `needs_half_turn`.
-                    WindowAction::FlipHorizontal | WindowAction::FlipVertical => {
-                        flip.set(!flip.get());
-                        let next = if needs_half_turn(action, orientation.get()) {
-                            orientation.get().rotate_cw().rotate_cw()
-                        } else {
-                            orientation.get()
-                        };
-                        orientation.set(next);
-                        {
-                            let mut input = input_for_action.borrow_mut();
-                            input.set_flip(flip.get());
-                            input.set_orientation(next);
-                        }
-                        let (w, h) = frame_size.get();
-                        apply(MirrorUpdate::Geometry {
-                            aspect: display_aspect(w, h, next),
-                            rotation: next.degrees(),
-                            frame_width: w,
-                            frame_height: h,
-                        });
-                        log::info!(
-                            "Client flip: {} (rotation {:?})",
-                            if flip.get() { "on" } else { "off" },
-                            next
-                        );
-                    }
-                    // The stream keeps arriving while the picture is frozen;
-                    // stopping it would mean asking the device for a keyframe
-                    // to start again.
-                    WindowAction::Pause | WindowAction::Unpause => {
-                        let pause = action == WindowAction::Pause;
-                        paused.set(pause);
-                        log::info!("Display {}", if pause { "paused" } else { "running" });
-                    }
-                    WindowAction::ToggleFps => fps.borrow_mut().toggle(),
-                    other => on_action(other, frame_size.get(), orientation.get()),
+    // Wired whether or not there is a controller: without one the pointer has
+    // nowhere to go, but the window's own shortcuts are still the window's.
+    wire_input(
+        mirror,
+        controller,
+        input.clone(),
+        {
+            let apply = apply.clone();
+            let orientation = orientation.clone();
+            let frame_size = frame_size.clone();
+            let fps = fps.clone();
+            let flip = flip.clone();
+            let paused = paused.clone();
+            let input_for_action = input.clone();
+            move |action| match action {
+                WindowAction::RotateCw | WindowAction::RotateCcw => {
+                    let next = if action == WindowAction::RotateCw {
+                        orientation.get().rotate_cw()
+                    } else {
+                        orientation.get().rotate_ccw()
+                    };
+                    orientation.set(next);
+                    let (w, h) = frame_size.get();
+                    apply(MirrorUpdate::Geometry {
+                        aspect: display_aspect(w, h, next),
+                        rotation: next.degrees(),
+                        frame_width: w,
+                        frame_height: h,
+                    });
+                    log::info!("Client rotation: {:?}", next);
                 }
-            },
-            orientation.clone(),
-        );
-    }
+                // A vertical flip is a horizontal one turned half way round,
+                // and half a turn is something the view can already do — so
+                // only the horizontal mirror is ever drawn. Which of the two
+                // needs the half turn depends on the rotation: see
+                // `needs_half_turn`.
+                WindowAction::FlipHorizontal | WindowAction::FlipVertical => {
+                    flip.set(!flip.get());
+                    let next = if needs_half_turn(action, orientation.get()) {
+                        orientation.get().rotate_cw().rotate_cw()
+                    } else {
+                        orientation.get()
+                    };
+                    orientation.set(next);
+                    {
+                        let mut input = input_for_action.borrow_mut();
+                        input.set_flip(flip.get());
+                        input.set_orientation(next);
+                    }
+                    let (w, h) = frame_size.get();
+                    apply(MirrorUpdate::Geometry {
+                        aspect: display_aspect(w, h, next),
+                        rotation: next.degrees(),
+                        frame_width: w,
+                        frame_height: h,
+                    });
+                    log::info!(
+                        "Client flip: {} (rotation {:?})",
+                        if flip.get() { "on" } else { "off" },
+                        next
+                    );
+                }
+                // The stream keeps arriving while the picture is frozen;
+                // stopping it would mean asking the device for a keyframe
+                // to start again.
+                WindowAction::Pause | WindowAction::Unpause => {
+                    let pause = action == WindowAction::Pause;
+                    paused.set(pause);
+                    log::info!("Display {}", if pause { "paused" } else { "running" });
+                }
+                WindowAction::ToggleFps => fps.borrow_mut().toggle(),
+                other => on_action(other, frame_size.get(), orientation.get()),
+            }
+        },
+        orientation.clone(),
+    );
 
     // --v4l2-sink publishes the same decoded frames as a webcam. Opening it
     // here rather than in the session keeps the file descriptor next to the
@@ -242,7 +242,7 @@ pub fn attach(
 /// Bind the Mirror global's input callbacks to a device.
 fn wire_input(
     mirror: &Mirror<'_>,
-    controller: Rc<Controller>,
+    controller: Option<Rc<Controller>>,
     input: Rc<RefCell<SlintInput>>,
     on_action: impl Fn(WindowAction) + 'static,
     orientation: Rc<Cell<Orientation>>,
@@ -261,36 +261,40 @@ fn wire_input(
         mirror.on_borders_double_clicked(move || on_action(WindowAction::ResizeToFit));
     }
 
-    {
-        let input = input.clone();
-        let controller = controller.clone();
-        mirror.on_pointer_down(move |u, v, button, alt, control, shift| {
-            // Slint reports no Meta for pointer events, and the pointer path
-            // does not consult it.
-            let mods = Mods { alt, control, shift, ..Mods::NONE };
-            input.borrow_mut().pointer_down(u, v, button, mods, &controller);
-        });
-    }
-    {
-        let input = input.clone();
-        let controller = controller.clone();
-        mirror.on_pointer_up(move |u, v, button| {
-            input.borrow_mut().pointer_up(u, v, button, &controller);
-        });
-    }
-    {
-        let input = input.clone();
-        let controller = controller.clone();
-        mirror.on_pointer_moved(move |u, v, pressed| {
-            input.borrow_mut().pointer_moved(u, v, pressed, &controller);
-        });
-    }
-    {
-        let input = input.clone();
-        let controller = controller.clone();
-        mirror.on_pointer_scroll(move |u, v, dx, dy| {
-            input.borrow_mut().pointer_scroll(u, v, dx, dy, &controller);
-        });
+    // Every one of these ends in a message to the device, so a session with no
+    // control channel leaves them unset. The keys below are wired either way,
+    // because some of them never leave the window.
+    if let Some(controller) = controller.clone() {
+        {
+            let input = input.clone();
+            let controller = controller.clone();
+            mirror.on_pointer_down(move |u, v, button, alt, control, shift| {
+                // Slint reports no Meta for pointer events, and the pointer
+                // path does not consult it.
+                let mods = Mods { alt, control, shift, ..Mods::NONE };
+                input.borrow_mut().pointer_down(u, v, button, mods, &controller);
+            });
+        }
+        {
+            let input = input.clone();
+            let controller = controller.clone();
+            mirror.on_pointer_up(move |u, v, button| {
+                input.borrow_mut().pointer_up(u, v, button, &controller);
+            });
+        }
+        {
+            let input = input.clone();
+            let controller = controller.clone();
+            mirror.on_pointer_moved(move |u, v, pressed| {
+                input.borrow_mut().pointer_moved(u, v, pressed, &controller);
+            });
+        }
+        {
+            let input = input.clone();
+            mirror.on_pointer_scroll(move |u, v, dx, dy| {
+                input.borrow_mut().pointer_scroll(u, v, dx, dy, &controller);
+            });
+        }
     }
     {
         let input = input.clone();
@@ -305,7 +309,7 @@ fn wire_input(
                 text.as_str(),
                 Mods { alt, control, shift, meta },
                 repeat,
-                &controller,
+                controller.as_deref(),
             );
             if action != WindowAction::None {
                 on_action(action);
@@ -316,9 +320,11 @@ fn wire_input(
     {
         let input = input.clone();
         mirror.on_key_up(move |text, alt, control, shift, meta| {
-            input
-                .borrow_mut()
-                .key_up(text.as_str(), Mods { alt, control, shift, meta }, &controller);
+            input.borrow_mut().key_up(
+                text.as_str(),
+                Mods { alt, control, shift, meta },
+                controller.as_deref(),
+            );
         });
     }
 }

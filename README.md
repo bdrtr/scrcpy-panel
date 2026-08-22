@@ -354,6 +354,27 @@ and none of them needed a phone to find. What each was held to:
   before launching; that is belt and braces now rather than the thing holding it up.
   The test had been asserting on upstream's wording under a comment saying these are
   messages "this program or adb really produces".
+- **`--no-control` took the window's own shortcuts away with the device's.** Every callback
+  on the `Mirror` global — the two keyboard ones, the four pointer ones and the double click
+  on the letterbox bars — was registered inside `wire_input`, and `attach` called `wire_input`
+  from inside `if let Some(controller) = controller`. So a session started with `--no-control`,
+  which is handed a `None` controller all the way down from `connect_sockets`, registered none
+  of them: not the shortcuts `attach` answers itself (rotate, flip, pause, the frame counter),
+  and not the ones it forwards to the host (fullscreen, quit, resize-to-fit, pixel-perfect).
+  `grep` settles the "before" with nothing attached — `wire_input` had exactly one call site
+  and it was that `if let`, and `on_key_down`, `on_key_up` and `on_borders_double_clicked`
+  appear in no other file. The keystroke was not even falling through to the desktop, because
+  `ui/mirror_view.slint`'s FocusScope ends its `key-pressed` with `return EventResult.accept`.
+  scrcpy has never worked that way: `sc_input_manager_process_key` runs its whole `if (smod)`
+  block *above* `if (!control) return;`, precisely so read-only mirroring keeps its window
+  keys. The controller is now an `Option` the whole length of that path — `key_down`, `key_up`
+  and `run_shortcut` — and the line where it stops being optional is the same line scrcpy
+  draws it on, below the shortcut block. The four pointer callbacks are still wired only with
+  a controller behind them, because every one of them ends in a message to the device.
+  `window_only` is exhaustive over `ShortcutAction` rather than wildcarded, so a shortcut
+  added later cannot slip through as the wrong half. Two tests: the window's eleven still
+  answer with no channel at all, and the device's four still reach the device when there is
+  one — which is what says the fix did not move the device's half into the window's.
 - **The control queue would throw away the finger coming up.** `QUEUE_LIMIT` is
   documented as the limit "for droppable control messages" and nothing in the code knew
   which those were: sixty touches is one drag, and the release that ends it went over the
