@@ -619,10 +619,29 @@ fn write_config(window: &PanelWindow, cfg: &PanelConfig) {
 /// `opts` is the command line the panel itself was started with, which the
 /// form does not cover: the panel builds its own options for a session, but
 /// --push-target belongs to the file transfer rather than to a session.
+/// `opts` is the command line the panel itself was started with, which the
+/// form does not cover: the panel builds its own options for a session, but
+/// --push-target belongs to the file transfer rather than to a session.
+///
+/// One `on_` handler apiece, grouped by what they act on. This was a single
+/// function of five hundred and ninety lines — twenty-seven blocks that shared
+/// nothing but the three globals they are registered against.
 fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
-    let app = window.global::<App>();
+    wire_the_form(window, panel);
+    wire_the_devices(window, panel);
+    wire_the_session(window, panel);
+    wire_the_profiles(window, panel);
+    wire_the_log(window, panel);
+    wire_the_queries(window, panel);
+    wire_the_transfers(window, panel, opts);
+}
+
+/// The form itself: what recomputes the command bar, what saves a setting, and
+/// the two buttons that act on the whole form rather than on a device.
+fn wire_the_form(window: &PanelWindow, panel: &Rc<Panel>) {
     let cfg = window.global::<Cfg>();
     let settings = window.global::<Settings>();
+    let app = window.global::<App>();
 
     // Any control in the form recomputes the command bar.
     {
@@ -677,6 +696,12 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
             }
         });
     }
+}
+
+/// Everything that names a device: finding them, choosing one, reaching one over
+/// the network, and sending it a key.
+fn wire_the_devices(window: &PanelWindow, panel: &Rc<Panel>) {
+    let app = window.global::<App>();
 
     {
         let panel = panel.clone();
@@ -725,160 +750,6 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
                 start_session(&window, &panel);
             }
         });
-    }
-
-    {
-        let weak = window.as_weak();
-        let panel = panel.clone();
-        app.on_start_session(move || {
-            if let Some(window) = weak.upgrade() {
-                start_session(&window, &panel);
-            }
-        });
-    }
-
-    {
-        let weak = window.as_weak();
-        let panel = panel.clone();
-        app.on_stop_session(move || {
-            stop_session(&panel);
-            if let Some(window) = weak.upgrade() {
-                window.global::<App>().set_session_running(false);
-                sync_tray(false);
-            }
-        });
-    }
-
-    {
-        let weak = window.as_weak();
-        let panel = panel.clone();
-        app.on_save_profile(move || {
-            if let Some(window) = weak.upgrade() {
-                let config = read_config(&window);
-                let description = format!("{} bayrak · {}", config.flag_count(), config.video_codec);
-
-                let message = match panel.editing_profile.take() {
-                    // Saving while editing writes back to the profile the form
-                    // came from; it used to leave a near-identical copy behind.
-                    Some(index) if index < panel.profiles.borrow().len() => {
-                        let mut profiles = panel.profiles.borrow_mut();
-                        let profile = &mut profiles[index];
-                        profile.description = description;
-                        profile.config = config;
-                        tr!("Profil güncellendi: {}", profile.name)
-                    }
-                    _ => {
-                        let name = format!("Profil {}", panel.profiles.borrow().len() + 1);
-                        panel.profiles.borrow_mut().push(Profile {
-                            name: name.clone(),
-                            description,
-                            config,
-                        });
-                        format!("Profil kaydedildi: {name}")
-                    }
-                };
-
-                save_profiles(&panel);
-                refresh_profile_cards(&panel);
-                panel.info(&message);
-            }
-        });
-    }
-
-    {
-        let weak = window.as_weak();
-        let panel = panel.clone();
-        app.on_apply_profile(move |index| {
-            if let Some(window) = weak.upgrade() {
-                let profiles = panel.profiles.borrow();
-                if let Some(profile) = profiles.get(index as usize) {
-                    write_config(&window, &profile.config);
-                    drop(profiles);
-                    // A profile remembers flags, not which phone was plugged in
-                    // the day it was saved — but `serial` is one of its fields,
-                    // so writing it back pointed the next launch at that old
-                    // device while the ticked row, the label and the count all
-                    // still said otherwise. The ticked rows are the authority.
-                    let ticked = panel
-                        .selected
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .first()
-                        .cloned()
-                        .unwrap_or_default();
-                    window.global::<Cfg>().set_serial(ticked.as_str().into());
-                    refresh_command(&window);
-                    // Applying is not editing: a later save makes a new profile.
-                    panel.editing_profile.set(None);
-                    panel.info(&tr!("Profil uygulandı."));
-                }
-            }
-        });
-    }
-
-    {
-        let panel = panel.clone();
-        app.on_delete_profile(move |index| {
-            let index = index as usize;
-            if index < panel.profiles.borrow().len() {
-                // Deleting shifts every later index, so an edit in flight would
-                // otherwise write back to the wrong profile.
-                panel.editing_profile.set(None);
-                let removed = panel.profiles.borrow_mut().remove(index);
-                save_profiles(&panel);
-                refresh_profile_cards(&panel);
-                panel.info(&format!("Profil silindi: {}", removed.name));
-            }
-        });
-    }
-
-    {
-        let panel = panel.clone();
-        app.on_clear_log(move || {
-            while panel.log.row_count() > 0 {
-                panel.log.remove(0);
-            }
-        });
-    }
-
-    {
-        let weak = window.as_weak();
-        let panel = panel.clone();
-        app.on_copy_log(move || {
-            // Copy what the user is looking at. Copying every row while a
-            // filter is on hands back something they did not ask for.
-            let filter = weak
-                .upgrade()
-                .map(|window| window.global::<App>().get_log_filter().to_string())
-                .unwrap_or_else(|| "all".to_string());
-
-            let text: Vec<String> = panel
-                .log
-                .iter()
-                .filter(|row| filter == "all" || row.level.to_lowercase() == filter)
-                .map(|row| format!("{} {} {}", row.time, row.level, row.message))
-                .collect();
-
-            set_clipboard(&text.join("\n"));
-            panel.info(&tr!("{} satır panoya kopyalandı{}.", text.len(), if filter == "all" { String::new() } else { tr!(" ({} süzgeci)", filter) }));
-        });
-    }
-
-    // Device queries that run the client once and print a list.
-    {
-        let weak = window.as_weak();
-        let panel = panel.clone();
-        app.on_list_encoders(move || query_device(&weak, &panel, "--list-encoders"));
-    }
-    {
-        let weak = window.as_weak();
-        let panel = panel.clone();
-        app.on_list_apps(move || query_device(&weak, &panel, "--list-apps"));
-    }
-    {
-        let weak = window.as_weak();
-        let panel = panel.clone();
-        app.on_list_cameras(move || query_device(&weak, &panel, "--list-cameras"));
     }
 
     {
@@ -979,29 +850,37 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
     {
         let weak = window.as_weak();
         let panel = panel.clone();
-        app.on_edit_profile(move |index| {
+        app.on_device_remedy(move || {
             if let Some(window) = weak.upgrade() {
-                let applied = {
-                    let profiles = panel.profiles.borrow();
-                    profiles.get(index as usize).map(|p| p.config.clone())
-                };
-                if let Some(config) = applied {
-                    write_config(&window, &config);
-                    refresh_command(&window);
-                    // Editing a profile is applying it, opening the form, and
-                    // remembering which one to write back to.
-                    panel.editing_profile.set(Some(index as usize));
-                    let app = window.global::<App>();
-                    app.set_tab("config".into());
-                    app.set_section("video".into());
-                    let name = panel
-                        .profiles
-                        .borrow()
-                        .get(index as usize)
-                        .map(|p| p.name.clone())
-                        .unwrap_or_default();
-                    panel.info(&tr!("\"{}\" düzenleniyor — kaydedince üzerine yazılacak.", name));
-                }
+                run_remedy(&window, &panel);
+            }
+        });
+    }
+}
+
+/// Starting and stopping the mirror, and the things that can only be done while
+/// one is running.
+fn wire_the_session(window: &PanelWindow, panel: &Rc<Panel>) {
+    let app = window.global::<App>();
+
+    {
+        let weak = window.as_weak();
+        let panel = panel.clone();
+        app.on_start_session(move || {
+            if let Some(window) = weak.upgrade() {
+                start_session(&window, &panel);
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let panel = panel.clone();
+        app.on_stop_session(move || {
+            stop_session(&panel);
+            if let Some(window) = weak.upgrade() {
+                window.global::<App>().set_session_running(false);
+                sync_tray(false);
             }
         });
     }
@@ -1094,15 +973,188 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
             }
         });
     }
+}
+
+/// Saved forms: writing one, reading one back into the form, renaming and
+/// removing.
+fn wire_the_profiles(window: &PanelWindow, panel: &Rc<Panel>) {
+    let app = window.global::<App>();
+
     {
         let weak = window.as_weak();
         let panel = panel.clone();
-        app.on_device_remedy(move || {
+        app.on_save_profile(move || {
             if let Some(window) = weak.upgrade() {
-                run_remedy(&window, &panel);
+                let config = read_config(&window);
+                let description = format!("{} bayrak · {}", config.flag_count(), config.video_codec);
+
+                let message = match panel.editing_profile.take() {
+                    // Saving while editing writes back to the profile the form
+                    // came from; it used to leave a near-identical copy behind.
+                    Some(index) if index < panel.profiles.borrow().len() => {
+                        let mut profiles = panel.profiles.borrow_mut();
+                        let profile = &mut profiles[index];
+                        profile.description = description;
+                        profile.config = config;
+                        tr!("Profil güncellendi: {}", profile.name)
+                    }
+                    _ => {
+                        let name = format!("Profil {}", panel.profiles.borrow().len() + 1);
+                        panel.profiles.borrow_mut().push(Profile {
+                            name: name.clone(),
+                            description,
+                            config,
+                        });
+                        format!("Profil kaydedildi: {name}")
+                    }
+                };
+
+                save_profiles(&panel);
+                refresh_profile_cards(&panel);
+                panel.info(&message);
             }
         });
     }
+
+    {
+        let weak = window.as_weak();
+        let panel = panel.clone();
+        app.on_apply_profile(move |index| {
+            if let Some(window) = weak.upgrade() {
+                let profiles = panel.profiles.borrow();
+                if let Some(profile) = profiles.get(index as usize) {
+                    write_config(&window, &profile.config);
+                    drop(profiles);
+                    // A profile remembers flags, not which phone was plugged in
+                    // the day it was saved — but `serial` is one of its fields,
+                    // so writing it back pointed the next launch at that old
+                    // device while the ticked row, the label and the count all
+                    // still said otherwise. The ticked rows are the authority.
+                    let ticked = panel
+                        .selected
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .first()
+                        .cloned()
+                        .unwrap_or_default();
+                    window.global::<Cfg>().set_serial(ticked.as_str().into());
+                    refresh_command(&window);
+                    // Applying is not editing: a later save makes a new profile.
+                    panel.editing_profile.set(None);
+                    panel.info(&tr!("Profil uygulandı."));
+                }
+            }
+        });
+    }
+
+    {
+        let panel = panel.clone();
+        app.on_delete_profile(move |index| {
+            let index = index as usize;
+            if index < panel.profiles.borrow().len() {
+                // Deleting shifts every later index, so an edit in flight would
+                // otherwise write back to the wrong profile.
+                panel.editing_profile.set(None);
+                let removed = panel.profiles.borrow_mut().remove(index);
+                save_profiles(&panel);
+                refresh_profile_cards(&panel);
+                panel.info(&format!("Profil silindi: {}", removed.name));
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let panel = panel.clone();
+        app.on_edit_profile(move |index| {
+            if let Some(window) = weak.upgrade() {
+                let applied = {
+                    let profiles = panel.profiles.borrow();
+                    profiles.get(index as usize).map(|p| p.config.clone())
+                };
+                if let Some(config) = applied {
+                    write_config(&window, &config);
+                    refresh_command(&window);
+                    // Editing a profile is applying it, opening the form, and
+                    // remembering which one to write back to.
+                    panel.editing_profile.set(Some(index as usize));
+                    let app = window.global::<App>();
+                    app.set_tab("config".into());
+                    app.set_section("video".into());
+                    let name = panel
+                        .profiles
+                        .borrow()
+                        .get(index as usize)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default();
+                    panel.info(&tr!("\"{}\" düzenleniyor — kaydedince üzerine yazılacak.", name));
+                }
+            }
+        });
+    }
+}
+
+/// The log pane's own two buttons.
+fn wire_the_log(window: &PanelWindow, panel: &Rc<Panel>) {
+    let app = window.global::<App>();
+
+    {
+        let panel = panel.clone();
+        app.on_clear_log(move || {
+            while panel.log.row_count() > 0 {
+                panel.log.remove(0);
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let panel = panel.clone();
+        app.on_copy_log(move || {
+            // Copy what the user is looking at. Copying every row while a
+            // filter is on hands back something they did not ask for.
+            let filter = weak
+                .upgrade()
+                .map(|window| window.global::<App>().get_log_filter().to_string())
+                .unwrap_or_else(|| "all".to_string());
+
+            let text: Vec<String> = panel
+                .log
+                .iter()
+                .filter(|row| filter == "all" || row.level.to_lowercase() == filter)
+                .map(|row| format!("{} {} {}", row.time, row.level, row.message))
+                .collect();
+
+            set_clipboard(&text.join("\n"));
+            panel.info(&tr!("{} satır panoya kopyalandı{}.", text.len(), if filter == "all" { String::new() } else { tr!(" ({} süzgeci)", filter) }));
+        });
+    }
+}
+
+/// Device queries that run the client once and print a list.
+fn wire_the_queries(window: &PanelWindow, panel: &Rc<Panel>) {
+    let app = window.global::<App>();
+
+    {
+        let weak = window.as_weak();
+        let panel = panel.clone();
+        app.on_list_encoders(move || query_device(&weak, &panel, "--list-encoders"));
+    }
+    {
+        let weak = window.as_weak();
+        let panel = panel.clone();
+        app.on_list_apps(move || query_device(&weak, &panel, "--list-apps"));
+    }
+    {
+        let weak = window.as_weak();
+        let panel = panel.clone();
+        app.on_list_cameras(move || query_device(&weak, &panel, "--list-cameras"));
+    }
+}
+
+/// Sending things to the device that are not input: files, and the clipboard.
+fn wire_the_transfers(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
+    let app = window.global::<App>();
 
     {
         let weak = window.as_weak();
@@ -1162,6 +1214,7 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
             });
         });
     }
+
     {
         let panel = panel.clone();
         app.on_send_clipboard(move || {
