@@ -317,6 +317,22 @@ and none of them needed a phone to find. What each was held to:
   returns EINVAL for a rate of zero — so raw lost the recording's audio track as well.
   Proved against libavcodec rather than against the server's own stream; the device end
   of that is still to do.
+- **"Düzenle" pointed the next launch at a phone nobody had ticked.** `Cfg.serial` is
+  written from two directions — the Devices tab ticks rows into it, and the configuration
+  form has a field of its own — and `read_config` copies that field into every profile
+  saved, so a profile quietly carries whichever device was plugged in the day it was
+  written. `write_config` puts it back unconditionally. "Uygula" knew this and restored the
+  tick afterwards, with a comment saying the ticked rows are the authority; "Düzenle" and
+  "Varsayılanlara dön" did not, so pressing either left the Devices tab showing B ticked,
+  the label saying B and the count saying one, while the command bar and the next "Başlat"
+  went to A. Nothing resyncs it: the device list is refreshed by the Yenile button and by
+  the connect and pair paths, never on a timer. All three go through one helper now.
+  There is no window in a unit test, so the invariant is tested where it lives — every
+  `write_config` call site has to settle the serial within a few lines, by the helper or, for
+  autostart, by the explicit `set_serial` whose whole subject is the device that has just
+  appeared. Run against the source as it was before this commit, the same rule flags
+  `wiring.rs:74` and `wiring.rs:467` and passes `wiring.rs:417`, which is exactly the two
+  buttons that were wrong and the one that was right.
 - **The panel showed the wrong card for four of its own failures.** Run against the old
   classifier, on messages this program really produces: a missing `scrcpy-server` came
   out as "adb bulunamadı" with a file picker for the adb that had just worked, two

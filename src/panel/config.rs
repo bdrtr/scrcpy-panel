@@ -349,3 +349,60 @@ pub(super) fn refresh_profile_cards(panel: &Rc<Panel>) {
         .collect();
     panel.profile_cards.set_vec(cards);
 }
+
+#[cfg(test)]
+mod tests {
+    /// Every path that rewrites the form has to say again which device is
+    /// ticked.
+    ///
+    /// `write_config` assigns `Cfg.serial` from the config it is handed, and a
+    /// saved profile carries whatever serial was in the form the day it was
+    /// written — `read_config` copies it in. So a button that replaces the form
+    /// and then walks away leaves the launch pointed at that old device while
+    /// the ticked row, the selection label and the count all still say
+    /// otherwise, and nothing rescans: the device list is refreshed by buttons,
+    /// not by a timer. "Uygula" restored the tick and said so in a comment;
+    /// "Düzenle" and "Varsayılanlara dön" did not, and the launch followed the
+    /// profile.
+    ///
+    /// There is no window in a unit test, so the invariant is checked where it
+    /// lives — at the call sites. Each `write_config` has to be followed,
+    /// within a few lines, by something that settles the serial: the helper for
+    /// the three that answer to a tick, or an explicit `set_serial` for
+    /// autostart, whose whole subject is the device that has just appeared.
+    #[test]
+    fn nothing_rewrites_the_form_and_leaves_the_serial_behind() {
+        // This file is where `write_config` is defined and is the one place it
+        // is never called from — and scanning it would only find the string
+        // literals in this test.
+        let files = [
+            ("panel/wiring.rs", include_str!("wiring.rs")),
+            ("panel/mod.rs", include_str!("mod.rs")),
+            ("panel/session_run.rs", include_str!("session_run.rs")),
+            ("panel/devices.rs", include_str!("devices.rs")),
+        ];
+
+        let mut found = 0;
+        for (name, source) in files {
+            let lines: Vec<&str> = source.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                // The definition is not a call, and neither is this test.
+                if !line.contains("write_config(")
+                    || line.contains("fn write_config")
+                    || line.trim_start().starts_with("///")
+                {
+                    continue;
+                }
+                found += 1;
+                let window = lines[i..lines.len().min(i + 8)].join("\n");
+                assert!(
+                    window.contains("restore_the_ticked_serial")
+                        || window.contains("set_serial"),
+                    "{name}:{} rewrites the form and never settles Cfg.serial:\n{window}",
+                    i + 1
+                );
+            }
+        }
+        assert_eq!(found, 4, "the scan found {found} write_config calls, not the four there are");
+    }
+}

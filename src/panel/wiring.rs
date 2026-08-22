@@ -14,9 +14,6 @@ use super::*;
 /// `opts` is the command line the panel itself was started with, which the
 /// form does not cover: the panel builds its own options for a session, but
 /// --push-target belongs to the file transfer rather than to a session.
-/// `opts` is the command line the panel itself was started with, which the
-/// form does not cover: the panel builds its own options for a session, but
-/// --push-target belongs to the file transfer rather than to a session.
 ///
 /// One `on_` handler apiece, grouped by what they act on. This was a single
 /// function of five hundred and ninety lines — twenty-seven blocks that shared
@@ -30,6 +27,29 @@ pub(super) fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
     wire_the_queries(window, panel);
     wire_the_transfers(window, panel, opts);
 }
+/// Put the ticked device back into the form after something has rewritten it.
+///
+/// `Cfg.serial` is written from two directions. The Devices tab ticks rows into
+/// it, and the configuration form has a field of its own — which `read_config`
+/// copies into every profile that gets saved, so a profile quietly carries
+/// whichever phone was plugged in the day it was written. `write_config` then
+/// puts that back, unconditionally.
+///
+/// So any button that replaces the form has to be told again which device is
+/// actually ticked, or the next "Başlat" goes somewhere the tick, the label and
+/// the count all disagree with. "Uygula" had this and said so in a comment;
+/// "Düzenle" and "Varsayılanlara dön" did not.
+fn restore_the_ticked_serial(window: &PanelWindow, panel: &Rc<Panel>) {
+    let ticked = panel
+        .selected
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    window.global::<Cfg>().set_serial(ticked.as_str().into());
+}
+
 /// The form itself: what recomputes the command bar, what saves a setting, and
 /// the two buttons that act on the whole form rather than on a device.
 pub(super) fn wire_the_form(window: &PanelWindow, panel: &Rc<Panel>) {
@@ -72,6 +92,9 @@ pub(super) fn wire_the_form(window: &PanelWindow, panel: &Rc<Panel>) {
         app.on_reset_defaults(move || {
             if let Some(window) = weak.upgrade() {
                 write_config(&window, &PanelConfig::default());
+                // Returning the flags to their defaults is not unticking a
+                // device, and the default serial is the empty string.
+                restore_the_ticked_serial(&window, &panel);
                 refresh_command(&window);
                 panel.editing_profile.set(None);
                 panel.info(&tr!("Yapılandırma varsayılanlara döndürüldü."));
@@ -417,18 +440,8 @@ pub(super) fn wire_the_profiles(window: &PanelWindow, panel: &Rc<Panel>) {
                     write_config(&window, &profile.config);
                     drop(profiles);
                     // A profile remembers flags, not which phone was plugged in
-                    // the day it was saved — but `serial` is one of its fields,
-                    // so writing it back pointed the next launch at that old
-                    // device while the ticked row, the label and the count all
-                    // still said otherwise. The ticked rows are the authority.
-                    let ticked = panel
-                        .selected
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .first()
-                        .cloned()
-                        .unwrap_or_default();
-                    window.global::<Cfg>().set_serial(ticked.as_str().into());
+                    // the day it was saved. The ticked rows are the authority.
+                    restore_the_ticked_serial(&window, &panel);
                     refresh_command(&window);
                     // Applying is not editing: a later save makes a new profile.
                     panel.editing_profile.set(None);
@@ -465,6 +478,9 @@ pub(super) fn wire_the_profiles(window: &PanelWindow, panel: &Rc<Panel>) {
                 };
                 if let Some(config) = applied {
                     write_config(&window, &config);
+                    // Editing is applying with the form left open, so it owes
+                    // the tick the same answer applying does.
+                    restore_the_ticked_serial(&window, &panel);
                     refresh_command(&window);
                     // Editing a profile is applying it, opening the form, and
                     // remembering which one to write back to.
