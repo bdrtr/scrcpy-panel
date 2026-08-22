@@ -44,5 +44,11 @@ lto = true
 strip = true
 opt-level = 3
 
+[dev-dependencies]
+# Only for the shader's own test, which needs a wgpu device of its own rather
+# than the one Slint hands out inside a window. Already in the tree: wgpu
+# depends on it.
+pollster = "0.4"
+
 [build-dependencies]
 slint-build = "1.17"

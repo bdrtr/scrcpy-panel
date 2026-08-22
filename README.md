@@ -575,10 +575,57 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   to 1.25 ms a frame — 0.56 uploading and converting, 0.69 drawing. Against the fourth
   byte's 1.42 that is 0.17 ms, for Slint's WGPU renderer, its `unstable-wgpu-29` texture
   import, and a `wgpu` dependency. So it stays behind `--features wgpu`, where
-  `frame_cost` uses it and the client does not. It is correct: its picture matches
-  swscale's to a mean of 0.703 of 255, worst 3, read back off the card, and to 0.123 as the
-  window draws it — the same fixed-point-against-floating-point difference this file already
-  found between swscale's own two paths. `CHECK=1` runs all of that.
+  `frame_cost` uses it and the client does not.
+- **Those two figures are the one claim here that is not yet current.** Sampling became
+  loading, which ought to cost nothing and did not appear to — re-run after the change the
+  shader reads 1.21 ms a frame, 0.67 drawing and 0.54 converting. But the RGBA arm of that
+  same run read 2.40 rather than 1.42, and the run had ten review agents on the CPU, so
+  neither arm is worth writing down: they have to come off one quiet machine together
+  before the ledger above means anything. Two things make that harder than it sounds. The
+  window has to be on screen — occluded, the compositor stops sending frame callbacks and
+  the run never finishes, which is what a stalled `frame_cost` is. And the two arms it
+  prints are disjoint rather than nested, so a frame costs their sum; the line used to say
+  "of it" and now prints the total.
+- **It read the wrong chroma sample at every odd width, and the test that would have said so
+  did not exist.** Two comments in `src/ui/yuv.rs` named `the_shader_and_swscale_agree` as
+  the thing holding it to swscale; there was no such test. What there was is `CHECK=1` in
+  `frame_cost`, which printed a mean and a worst and asserted on neither, at a default size
+  that is even — and even is exactly where the fault is invisible. The shader sampled all
+  three planes with one normalised coordinate, and that coordinate is the *luma* plane's:
+  the chroma planes are ceil(w/2) by ceil(h/2), which at an even width covers the same
+  picture and at an odd one covers half a chroma texel more, so the same fraction lands a
+  texel to the side for every other column from the middle of the picture onwards. Against
+  swscale that read a mean of 16.5 of 255 at 1081x2400 where 1080x2400 read 0.70. It loads
+  the texel by index now — floor(x/2), floor(y/2), which is what 4:2:0 means — and 1081x2400
+  reads what the even size reads. The sampler is gone with it; nothing filters these.
+- **And swscale is not the reference at an odd height, which is why the shader is now held
+  to the definition instead.** Converting YUV420P to RGB24 unscaled, swscale replicates each
+  chroma row down two output rows — what the shader does — only while the chroma plane's
+  height doubles exactly into the picture's. At an odd height ceil(h/2) rows have to reach h,
+  which is not a doubling, so it builds a vertical scaler and blends two chroma rows instead.
+  Measured against libswscale directly, with a flat luma and each chroma row labelled: 8x10
+  reads every output row as a pure chroma row, weights 0.00 and 0.99; 8x11 reads 0.293,
+  0.849, 0.575, 0.043; 1080x2399 and 640x481 read 0.238 and 0.732 alternating. `SWS_POINT`
+  does not put it back — it takes the nearest row of the rescaled grid, still not floor(y/2).
+  So an odd height was never a comparison of two implementations of one thing, and holding
+  the shader to swscale there was measuring the choice of filter: on a deliberately noisy
+  frame, 37.8 of 255. The first of the two tests now holds the shader to a CPU reference of
+  the same definition — floor(x/2), floor(y/2), BT.601 limited — at eight sizes, odd ones
+  included, and with the mirror on as well as off: mean under 0.5 of 255 and worst 2, which
+  is f32 on the card against f64 here and nothing else. The second keeps the cross-check
+  against swscale where the two really are doing the same arithmetic.
+- **swscale does not always fill the row, either — and this one was not only the shader's.**
+  Pre-filling the destination with a sentinel and giving it a row exactly the width of the
+  picture — which is what the test did, and what the decoder does every frame — it leaves the
+  last `width % 16` columns untouched whenever that is between one and seven. 641 loses one,
+  68 loses four, 1079 loses seven; 1080, 1081 and 1082 lose none. Swept over every width from
+  8 to 400 and every even one to 1600 with no exception — and then found not to be a property
+  of libswscale at all: it belongs to the x86 SIMD converter this machine dispatches to, and
+  under `av_force_cpu_flags(0)` the same sweep says odd widths lose one and even widths lose
+  none. The two agree at 640, 641, 65 and 1080 and disagree at 68, 1079 and 1081. So the
+  reference measures how much of itself is real rather than predicting it, and the client's
+  fix does not depend on the rule either. Give the row 32 bytes of slack and every converter
+  fills every column.
 - Two things that check said and should not have. Slint's own `take_snapshot` returns a
   blank buffer rather than an error on the OpenGL renderer here — and two blanks compare
   equal, so the first version of the check reported a perfect match between paths it had not

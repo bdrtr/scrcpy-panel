@@ -4923,6 +4923,7 @@ dependencies = [
  "gilrs",
  "libc",
  "log",
+ "pollster",
  "rfd",
  "rusb",
  "serde",

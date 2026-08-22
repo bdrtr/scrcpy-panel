@@ -18,7 +18,9 @@
 //!
 //! `WGPU=1` asks for the WGPU renderer, `SLINT_BACKEND=winit-femtovg` for the
 //! OpenGL one — with both linked in the default is not the default any more.
-//! `CHECK=1` skips the timing and holds the shader to what swscale draws.
+//! `CHECK=1` skips the timing and prints how far the shader is from swscale,
+//! on screen and off it. It asserts nothing — `cargo test --features wgpu
+//! the_shader` is what holds the conversion to anything.
 //!
 //! Takes a `WIDTHxHEIGHT` and a frame count: `frame_cost 1080x2400 600`.
 
@@ -243,12 +245,16 @@ fn main() {
                     }
                     state.tally.frames += 1;
                     let Some(window) = weak.upgrade() else { return };
-                    let finished = state
-                        .runs
-                        .first()
-                        .map(|(_, count, _)| state.tally.frames >= *count)
-                        .unwrap_or(true);
-                    if finished {
+                    // Asking the event loop to quit does not stop it drawing:
+                    // the frame already in flight arrives here afterwards, with
+                    // no run left to attribute it to. Reporting an empty list
+                    // used to take the last run off it a second time and take
+                    // the process with it — after every number had been
+                    // printed, so the panic cost nothing but looked like one.
+                    let Some(&(_, count, _)) = state.runs.first() else {
+                        return;
+                    };
+                    if state.tally.frames >= count {
                         let (name, _, _) = state.runs.remove(0);
                         report(name, &state.tally);
                         state.tally = Tally::default();
@@ -458,10 +464,19 @@ fn report(name: &str, tally: &Tally) {
     let each = |d: Duration| d.as_secs_f64() * 1000.0 / frames;
     let wall = tally.started.map(|at| at.elapsed()).unwrap_or_default();
     let cpu = cpu_time() - tally.cpu_at_start;
+    // The two are disjoint: the drawing timer is stopped at `AfterRendering`
+    // before the conversion for the next frame is timed, so a frame costs the
+    // sum of them. This line used to say "of it", which read as though the
+    // conversion were inside the drawing, and the total a frame — the number
+    // worth comparing between runs — had to be added up by hand.
     let converting = if tally.converting.is_zero() {
         String::new()
     } else {
-        format!(", {:.2} of it uploading and converting", each(tally.converting))
+        format!(
+            " and {:.2} uploading and converting, {:.2} in all",
+            each(tally.converting),
+            each(tally.drawing + tally.converting),
+        )
     };
     println!(
         "{name:>24}: {:.2} ms a frame drawing{converting}, {:.2} of CPU, {:.1} frames a second",
@@ -498,9 +513,9 @@ fn convert_one(state: &mut State) -> Image {
     let frame = &state.planes[index];
     let strides = [frame.stride(0), frame.stride(1), frame.stride(2)];
     let planes: [&[u8]; 3] = [
-        plane_bytes(frame, 0),
-        plane_bytes(frame, 1),
-        plane_bytes(frame, 2),
+        frame.data(0),
+        frame.data(1),
+        frame.data(2),
     ];
     state
         .converter
@@ -510,25 +525,14 @@ fn convert_one(state: &mut State) -> Image {
         .expect("a converted frame")
 }
 
-/// A plane as the bytes the upload wants: whole rows, padding and all, because
-/// `write_texture` is told the stride rather than given packed rows.
-#[cfg(feature = "wgpu")]
-fn plane_bytes(frame: &ffmpeg_next::frame::Video, plane: usize) -> &[u8] {
-    let rows = if plane == 0 {
-        frame.height() as usize
-    } else {
-        (frame.height() as usize).div_ceil(2)
-    };
-    let stride = frame.stride(plane);
-    unsafe {
-        std::slice::from_raw_parts((*frame.as_ptr()).data[plane], stride * rows)
-    }
-}
-
-/// Whether the shader draws what swscale draws. Not byte for byte — one is
-/// floating point on a card and the other is fixed point on a CPU — but the
-/// same picture, which a wrong matrix or a plane read at the wrong stride would
-/// not be.
+/// Whether the shader draws what swscale draws, on screen and off it, printed
+/// rather than asserted.
+///
+/// The assertions live in `src/ui/yuv.rs` now, and they had to: this prints a
+/// mean and a worst and holds them to nothing, at one size, and the size it
+/// defaults to is even — which is exactly where the chroma index it was meant
+/// to be watching could not go wrong. What it does that a unit test cannot is
+/// the on-screen half, comparing what the window actually drew.
 #[cfg(feature = "wgpu")]
 fn check(state: &mut State) -> (Image, SharedPixelBuffer<Rgb8Pixel>) {
     use ffmpeg_next::format::Pixel;
