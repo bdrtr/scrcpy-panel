@@ -1040,6 +1040,24 @@ msgstr "Mirroring the screen"
 msgid "Hata · cihaz"
 msgstr "Error · device"
 
+msgid "Hata · ayar"
+msgstr "Error · setting"
+
+msgid "Seçenekler çelişiyor"
+msgstr "The options contradict each other"
+
+msgid "Sesi kapatan seçenek ile ses olmadan çıkmayı isteyen seçenek bir arada işaretli. Ses bölümünde ikisinden birini kaldırın."
+msgstr "The option that turns audio off and the option that quits when there is no audio are both ticked. Untick one of the two in the Audio section."
+
+msgid "Hata · sunucu"
+msgstr "Error · server"
+
+msgid "scrcpy-server bulunamadı"
+msgstr "scrcpy-server was not found"
+
+msgid "Cihaza gönderilecek sunucu dosyası yok. scrcpy paketini kurun ya da scrcpy-server dosyasını çalıştırılabilir dosyanın yanına koyun; indirme adresi aşağıdaki çıktıda."
+msgstr "The server file that gets sent to the device is missing. Install the scrcpy package, or put scrcpy-server next to the executable; the download address is in the output below."
+
 msgid "Cihaz bulunamadı"
 msgstr "No device found"
 

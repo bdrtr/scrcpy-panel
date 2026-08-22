@@ -52,24 +52,48 @@ pub fn classify(text: &str) -> Failure {
     let lower = text.to_lowercase();
     let has = |needle: &str| lower.contains(needle);
 
-    // The client says this itself when nothing is plugged in, and adb says the
-    // second one when several are and no serial was given.
-    if has("no device") || has("device selection failed") {
+    // Two of the user's own boxes, refused before any device work. It goes
+    // first because the message names audio twice and used to land on the audio
+    // card below, which says the Android version may be too old, advises
+    // turning audio off — it already is — and offers nothing to press.
+    if has("contradict") {
+        return Failure {
+            tag: "Hata · ayar",
+            title: "Seçenekler çelişiyor",
+            detail: "Sesi kapatan seçenek ile ses olmadan çıkmayı isteyen seçenek bir arada \
+                     işaretli. Ses bölümünde ikisinden birini kaldırın.",
+            remedy: Remedy::OpenSettings,
+        };
+    }
+
+    // Several devices and no serial. Above the no-device card, not below it:
+    // `Session::start` wraps every outcome of device selection in "Device
+    // selection failed", this one included, and that phrase used to be enough
+    // for the card below to claim it — so two phones plugged in were reported
+    // as none, with advice to plug one in.
+    if has("more than one device")
+        || has("multiple devices")
+        || has("devices connected")
+        || has("use --serial")
+    {
+        return Failure {
+            tag: "Hata · cihaz",
+            title: "Birden fazla cihaz bağlı",
+            detail: "Hangisinin yansıtılacağı belirsiz. Cihazlar sekmesinden birini işaretleyin.",
+            remedy: Remedy::None,
+        };
+    }
+
+    // The client says the first when nothing is plugged in, and the second when
+    // something is but the filter — --select-usb, --select-tcpip — excluded all
+    // of it.
+    if has("no device") || has("device among") {
         return Failure {
             tag: "Hata · cihaz",
             title: "Cihaz bulunamadı",
             detail: "USB kablosunu takın ve cihazdaki USB hata ayıklama istemini onaylayın. \
                      Kablosuz bir cihazı Cihazlar sekmesindeki TCP/IP alanından bağlayın.",
             remedy: Remedy::RestartAdb,
-        };
-    }
-
-    if has("more than one device") || has("multiple devices") {
-        return Failure {
-            tag: "Hata · cihaz",
-            title: "Birden fazla cihaz bağlı",
-            detail: "Hangisinin yansıtılacağı belirsiz. Cihazlar sekmesinden birini işaretleyin.",
-            remedy: Remedy::None,
         };
     }
 
@@ -83,7 +107,14 @@ pub fn classify(text: &str) -> Failure {
         };
     }
 
-    if has("offline") || has("connection closed") || has("connection reset") {
+    // The third is adb's own words for a serial that was there a moment ago:
+    // "device 'R58M31XABCD' not found". It used to reach the adb card at the
+    // bottom, which offers to go looking for an adb that is working.
+    if has("offline")
+        || has("connection closed")
+        || has("connection reset")
+        || (has("device '") && has("not found"))
+    {
         return Failure {
             tag: "Hata · bağlantı",
             title: "Cihaz çevrimdışı",
@@ -102,6 +133,21 @@ pub fn classify(text: &str) -> Failure {
             detail: "Cihazdaki sunucu ile istemci aynı sürüm olmalı. \
                      Ayarlar'dan bu istemcinin beklediği sürümde bir scrcpy-server seçin.",
             remedy: Remedy::OpenSettings,
+        };
+    }
+
+    // Not adb, and not a version mismatch: there is no scrcpy-server to send.
+    // The bare words "not found" used to carry this to the adb card, so a
+    // missing server file was reported as a missing adb and answered with a
+    // file picker for the adb that had just worked.
+    if has("scrcpy-server not found") {
+        return Failure {
+            tag: "Hata · sunucu",
+            title: "scrcpy-server bulunamadı",
+            detail: "Cihaza gönderilecek sunucu dosyası yok. scrcpy paketini kurun ya da \
+                     scrcpy-server dosyasını çalıştırılabilir dosyanın yanına koyun; \
+                     indirme adresi aşağıdaki çıktıda.",
+            remedy: Remedy::None,
         };
     }
 
@@ -136,7 +182,15 @@ pub fn classify(text: &str) -> Failure {
         };
     }
 
-    if has("already in use") || has("could not find any port") || has("bind") {
+    // "Could not set up reverse tunnel on ports 27183..27199" is what this
+    // client bails with when the range is exhausted; the other three phrases
+    // are upstream C scrcpy's and adb's. Without the first, the one failure
+    // this card exists for fell through to the generic card.
+    if has("tunnel on ports")
+        || has("already in use")
+        || has("could not find any port")
+        || has("bind")
+    {
         return Failure {
             tag: "Hata · port",
             title: "Port kullanımda",
@@ -157,8 +211,12 @@ pub fn classify(text: &str) -> Failure {
         };
     }
 
-    if has("no such file") || has("not found") || has("program not found") || has("os error 2")
-    {
+    // "not found" on its own used to be here as well, and it was too much: it
+    // claimed the missing server file, a device that had gone away, and
+    // "Video codec not found in FFmpeg" — none of which is adb, and all of
+    // which were answered with a file picker for it. A missing binary shows up
+    // as the io error below.
+    if has("no such file") || has("program not found") || has("os error 2") {
         return Failure {
             tag: "Hata · adb",
             title: "adb bulunamadı",
@@ -181,9 +239,11 @@ mod tests {
     use super::*;
 
     /// Each of these is a message this program or adb really produces.
-    #[test]
-    fn real_messages_land_on_the_card_that_names_them() {
-        let cases: &[(&str, &str)] = &[
+    ///
+    /// "Really" is the word that had to be earned: the port case used to be
+    /// upstream C scrcpy's wording, which nothing here can emit, so the card
+    /// was green in the test and unreachable in the program.
+    const REAL_MESSAGES: &[(&str, &str)] = &[
             (
                 "error: device unauthorized.\nThis adb server's $ADB_VENDOR_KEYS is not set",
                 "Cihaz yetkilendirilmemiş",
@@ -197,6 +257,30 @@ mod tests {
             (
                 "adb: error: failed to get feature set: more than one device/emulator",
                 "Birden fazla cihaz bağlı",
+            ),
+            (
+                "Device selection failed: 2 devices connected. Use --serial to select one: \
+                 [\"R58M31XABCD\", \"192.168.1.42:5555\"]",
+                "Birden fazla cihaz bağlı",
+            ),
+            (
+                "Device selection failed: No USB device among [\"192.168.1.42:5555\"]",
+                "Cihaz bulunamadı",
+            ),
+            (
+                "--require-audio and --no-audio contradict each other",
+                "Seçenekler çelişiyor",
+            ),
+            (
+                "scrcpy-server not found. Download from:\n\
+                 https://github.com/Genymobile/scrcpy/releases/download/v4.1/scrcpy-server-v4.1\n\
+                 and place it next to the executable.",
+                "scrcpy-server bulunamadı",
+            ),
+            (
+                "Failed to push /usr/share/scrcpy/scrcpy-server to /data/local/tmp: \
+                 ADB error: device 'R58M31XABCD' not found",
+                "Cihaz çevrimdışı",
             ),
             (
                 "ERROR: The server version (2.4) does not match the client (4.1)",
@@ -215,7 +299,8 @@ mod tests {
                 "Dosya yazılamıyor",
             ),
             (
-                "Could not find any port in range 27183:27199",
+                "Failed to open ADB tunnel: Could not set up forward tunnel on ports \
+                 27183..27199",
                 "Port kullanımda",
             ),
             (
@@ -226,10 +311,53 @@ mod tests {
                 "Failed to run adb: No such file or directory (os error 2)",
                 "adb bulunamadı",
             ),
-        ];
-        for (text, title) in cases {
+    ];
+
+    #[test]
+    fn real_messages_land_on_the_card_that_names_them() {
+        for (text, title) in REAL_MESSAGES {
             assert_eq!(classify(text).title, *title, "for {text:?}");
         }
+    }
+
+    /// Every word on a card exists in the .po.
+    ///
+    /// `show_failure` translates the four strings where they meet the
+    /// interface — `tr!(card.title)` and the rest — and an argument that is not
+    /// a literal is invisible to the scanner in `i18n.rs`, so the cards are
+    /// checked here instead. Without this a new card is Turkish in an English
+    /// panel and nothing says so.
+    #[test]
+    fn every_card_can_be_translated() {
+        let po = include_str!("../../lang/en/LC_MESSAGES/scrcpy-slint.po");
+        let mut missing = Vec::new();
+        let mut check = |text: &str| {
+            let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
+            if !po.contains(&format!("msgid \"{escaped}\"")) {
+                missing.push(text.to_string());
+            }
+        };
+        for (text, _) in REAL_MESSAGES {
+            let card = classify(text);
+            check(card.tag);
+            check(card.title);
+            check(card.detail);
+            if let Some(label) = card.remedy.label() {
+                check(label);
+            }
+        }
+        let generic = classify("something nobody has seen before");
+        check(generic.tag);
+        check(generic.title);
+        check(generic.detail);
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "{} card string(s) with no msgid:\n  {}",
+            missing.len(),
+            missing.join("\n  ")
+        );
     }
 
     /// An unauthorized device also mentions "adb"; the specific card has to win.
