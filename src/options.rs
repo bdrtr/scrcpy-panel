@@ -1,5 +1,27 @@
 use clap::Parser;
 
+/// The audio sources the v4.1 server's `AudioSource` knows, in the order its
+/// own error message lists them.
+///
+/// Read off the server rather than remembered: `strings` on the `classes.dex`
+/// inside `/usr/share/scrcpy/scrcpy-server` has exactly these, and
+/// `scrcpy --audio-source=<anything else>` prints the same list back. The one
+/// to watch is `mic-voice-communication`: there is no bare
+/// `voice-communication`, though the panel used to offer one.
+pub const AUDIO_SOURCES: [&str; 11] = [
+    "output",
+    "mic",
+    "playback",
+    "mic-unprocessed",
+    "mic-camcorder",
+    "mic-voice-recognition",
+    "mic-voice-communication",
+    "voice-call",
+    "voice-call-uplink",
+    "voice-call-downlink",
+    "voice-performance",
+];
+
 /// scrcpyrust — Mirror Android devices on your computer (Rust implementation)
 #[derive(Parser, Debug, Clone)]
 #[command(name = "scrcpyrust", version, about)]
@@ -247,8 +269,10 @@ pub struct Options {
     #[arg(long)]
     pub audio_encoder: Option<String>,
 
-    /// Audio source: output, mic
-    #[arg(long)]
+    /// Audio source. The eleven the server's `AudioSource` knows; anything
+    /// else it throws `IllegalArgumentException` over, which arrives as a
+    /// connection timeout rather than as a refusal.
+    #[arg(long, value_parser = AUDIO_SOURCES)]
     pub audio_source: Option<String>,
 
     /// Video source: display (default) or camera

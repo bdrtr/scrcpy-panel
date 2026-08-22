@@ -405,6 +405,122 @@ pub fn tag_file_name(path: &str, tag: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Every value the panel's pickers offer has to survive the whole way to
+    /// the binary.
+    ///
+    /// This is the same question `--video-bit-rate=8M` failed once already —
+    /// the panel offered a command line the client's own parser would not take
+    /// — asked of the pickers rather than of the text boxes. It found a second
+    /// one: section 02 offered `voice-communication`, which is not one of the
+    /// eleven audio sources the server knows. Nothing caught it, because the
+    /// panel only checks flag *names* against `SUPPORTED` and the client's
+    /// `--audio-source` had no `value_parser` at all, so the string went all
+    /// the way to the phone and came back as
+    /// `IllegalArgumentException: Audio source voice-communication not
+    /// supported` — which reaches the user as "Timeout waiting for server
+    /// connection", four lines of Java after the fact.
+    ///
+    /// The path under test is the launching one, translations and all:
+    /// `to_client_args` is what turns `toDevice` into `to-device` and expands
+    /// `8M`, so a picker value that needs translating is tested through its
+    /// translation rather than around it.
+    #[test]
+    fn every_value_the_panel_offers_is_one_the_binary_takes() {
+        use clap::Parser;
+
+        // include_str! takes a literal, so the sections are listed. A new one
+        // has to be added here; `defaults_match_the_ui` in command/mod.rs is
+        // what notices a Cfg field that reaches nothing at all.
+        let sections: [(&str, &str); 8] = [
+            ("section01_video", include_str!("../../../ui/config/section01_video.slint")),
+            ("section02_audio", include_str!("../../../ui/config/section02_audio.slint")),
+            ("section03_record", include_str!("../../../ui/config/section03_record.slint")),
+            ("section04_control", include_str!("../../../ui/config/section04_control.slint")),
+            ("section05_vdisplay", include_str!("../../../ui/config/section05_vdisplay.slint")),
+            ("section06_camera", include_str!("../../../ui/config/section06_camera.slint")),
+            ("section07_window", include_str!("../../../ui/config/section07_window.slint")),
+            ("section08_network", include_str!("../../../ui/config/section08_network.slint")),
+        ];
+
+        let mut checked = 0;
+        let mut skipped = Vec::new();
+        for (name, source) in sections {
+            for (field, values) in pickers(source) {
+                let key = field.replace('-', "_");
+                for value in &values {
+                    let mut form =
+                        serde_json::to_value(PanelConfig::default()).expect("it serialises");
+                    if form.get(&key).is_none() {
+                        // A picker bound to something the form does not carry
+                        // reaches no command line at all. That is a different
+                        // fault and a different test's.
+                        skipped.push(format!("{name}: Cfg.{field}"));
+                        break;
+                    }
+                    form[&key] = serde_json::Value::String(value.clone());
+                    let config: PanelConfig =
+                        serde_json::from_value(form).expect("it deserialises");
+
+                    let (accepted, _dropped) = config.to_client_args();
+                    let mut argv = vec!["scrcpy-slint".to_string()];
+                    argv.extend(accepted.clone());
+                    if let Err(e) = crate::options::Options::try_parse_from(&argv) {
+                        panic!(
+                            "{name} offers Cfg.{field}={value:?}, which the binary refuses.\n\
+                             The panel built: {accepted:?}\n{e}"
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+        }
+
+        // A parser that silently stopped finding pickers would pass every
+        // assertion above by making none of them.
+        assert!(
+            checked >= 40,
+            "only {checked} picker values were checked, which means the .slint \
+             scan stopped finding them; skipped: {skipped:?}"
+        );
+    }
+
+    /// The `values:` a `Sel` offers, keyed by the `Cfg` field it writes into.
+    ///
+    /// `Sel` falls back to the label when there is no value for it
+    /// (`option = root.values.length > i ? root.values[i] : label` in
+    /// components.slint), so a picker with labels and no values offers its
+    /// labels — which is how `--video-codec` is written. The last array before
+    /// the binding is therefore the right one to read: `values:` where there is
+    /// one, `labels:` where there is not.
+    fn pickers(source: &str) -> Vec<(String, Vec<String>)> {
+        let mut out = Vec::new();
+        for (before, after) in source
+            .match_indices("value <=> Cfg.")
+            .map(|(at, _)| (&source[..at], &source[at + "value <=> Cfg.".len()..]))
+        {
+            let Some(field) = after.split(';').next().map(str::trim) else { continue };
+            let values = match (before.rfind("values:"), before.rfind("labels:")) {
+                (Some(v), Some(l)) if v > l => &before[v..],
+                (Some(v), None) => &before[v..],
+                (_, Some(l)) => &before[l..],
+                (None, None) => continue,
+            };
+            // Strings, in order, up to the end of that one array.
+            let array = values.split_once("];").map(|(a, _)| a).unwrap_or(values);
+            let mut quoted = Vec::new();
+            let mut rest = array;
+            while let Some((_, tail)) = rest.split_once('"') {
+                let Some((value, tail)) = tail.split_once('"') else { break };
+                quoted.push(value.to_string());
+                rest = tail;
+            }
+            if !quoted.is_empty() {
+                out.push((field.to_string(), quoted));
+            }
+        }
+        out
+    }
+
     /// A bit rate that cannot be expanded without wrapping is passed on as it
     /// was written. `99999999999999M` used to come out the other side as a
     /// perfectly plausible small number.

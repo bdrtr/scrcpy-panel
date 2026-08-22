@@ -80,6 +80,7 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | `--mouse-bind` | works — parsed, with 6 tests; malformed input warns and keeps the default |
 | `--shortcut-mod` | works — scrcpy's `+` and `,` syntax, checked against the phone for all four spellings |
 | `--video-bit-rate`, `--audio-bit-rate` | work — scrcpy's K and M suffixes; 2M and 8M measured at 1.51 and 3.37 Mbps |
+| `--audio-source` | works — `mic-voice-communication` records 198 Opus frames over 3.93 s; the other ten are the server's own list |
 | Ayarlar: adb path, adb port, record dir, screenshot dir | consulted at runtime |
 | Ayarlar: autostart profile, version check, log to disk | work |
 | Recording started and stopped mid-session | works — 568 video + 552 Opus frames over 11 s |
@@ -375,6 +376,33 @@ and none of them needed a phone to find. What each was held to:
   added later cannot slip through as the wrong half. Two tests: the window's eleven still
   answer with no channel at all, and the device's four still reach the device when there is
   one — which is what says the fix did not move the device's half into the window's.
+- **And the panel offered an audio source the server has never had.** Section 02's picker
+  listed `voice-communication`. scrcpy 4.1 has eleven audio sources and that is not one of
+  them — the real name is `mic-voice-communication` — and nothing between the picker and the
+  phone said so, because the panel only checks flag *names* against `SUPPORTED` and
+  `--audio-source` was a bare `Option<String>` with no `value_parser` while thirteen of its
+  neighbours in the same file have one. Put to the Redmi, the string went the whole way:
+  the server threw `IllegalArgumentException: Audio source voice-communication not
+  supported` at `Options.parse(Options.java:385)`, and what reached the user was four lines
+  of Java followed by `Failed to connect to server: Timeout waiting for server connection`.
+  The correct name on the same phone records: `--no-video --audio-source=mic-voice-communication
+  --record` gives 198 Opus frames, 380160 samples, 3.93 s, 62 KB. The eleven are now a
+  `value_parser`, read off the server rather than remembered — `strings` on the
+  `classes.dex` inside `/usr/share/scrcpy/scrcpy-server` has exactly them, and
+  `scrcpy --audio-source=<anything else>` prints the same list back — and the picker offers
+  all eleven instead of six-and-a-mistake.
+- **The test that would have caught it now asks the question of every picker.** `--video-bit-rate=8M`
+  and `voice-communication` are the same fault twice: a value the panel offers that the
+  binary refuses. `every_value_the_panel_offers_is_one_the_binary_takes` reads the eight
+  `ui/config/section*.slint` files at compile time, pulls each `Sel`'s values — falling back
+  to its labels the way `Sel` itself does when there are no values, which is how
+  `--video-codec` is written — and pushes each one through `to_client_args` into
+  `Options::try_parse_from`. Through `to_client_args` rather than around it, so a value that
+  needs translating on the way (`toDevice` becomes `to-device`, `8M` becomes `8000000`) is
+  tested through its translation. Forty-plus values, and it counts them so that a scan which
+  quietly stopped finding pickers fails rather than passes. Reverting only the one-word
+  picker fix makes it fail with the offending value, the flag the panel built, and clap's
+  own "a similar value exists: 'mic-voice-communication'".
 - **The control queue would throw away the finger coming up.** `QUEUE_LIMIT` is
   documented as the limit "for droppable control messages" and nothing in the code knew
   which those were: sixty touches is one drag, and the release that ends it went over the

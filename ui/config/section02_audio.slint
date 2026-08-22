@@ -38,8 +38,12 @@ export component SectionAudio inherits VerticalLayout {
                         @tr("mic — mikrofon"),
                         @tr("mic-unprocessed"),
                         @tr("mic-camcorder"),
+                        @tr("mic-voice-recognition"),
+                        @tr("mic-voice-communication"),
                         @tr("voice-call"),
-                        @tr("voice-communication"),
+                        @tr("voice-call-uplink"),
+                        @tr("voice-call-downlink"),
+                        @tr("voice-performance"),
                     ];
                     values: [
                         "output",
@@ -47,8 +51,12 @@ export component SectionAudio inherits VerticalLayout {
                         "mic",
                         "mic-unprocessed",
                         "mic-camcorder",
+                        "mic-voice-recognition",
+                        "mic-voice-communication",
                         "voice-call",
-                        "voice-communication",
+                        "voice-call-uplink",
+                        "voice-call-downlink",
+                        "voice-performance",
                     ];
                     value <=> Cfg.audio-source;
                     changed => { Cfg.changed(); }
