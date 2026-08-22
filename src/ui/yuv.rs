@@ -12,12 +12,13 @@
 //! same fragment that does the colour — where on the CPU it was the one pass
 //! over the frame that could not be avoided.
 //!
-//! Behind the `wgpu` feature, and not wired into the client: measured before
-//! the conversion became a texture load rather than a sample, it came
-//! to 1.25 ms a frame against 1.42 for simply handing Slint an RGBA buffer,
-//! which needs no card, no unstable API and no renderer switch. 0.17 ms is not
-//! worth those. `examples/frame_cost.rs` is what uses it, and what found that
-//! out; the README's roadmap has the ledger.
+//! Behind the `wgpu` feature, and not wired into the client: it comes to 1.25 ms
+//! a frame, and simply handing Slint an RGBA buffer costs 0.91 on the renderer
+//! the client actually uses — which needs no card, no unstable API and no
+//! renderer switch. The shader is the dearer of the two by 0.34 ms, not the
+//! cheaper: it beats an RGBA upload on the WGPU renderer by 1.14, and getting
+//! onto that renderer costs more than that. `examples/frame_cost.rs` is what
+//! uses it, and what found that out; the README has the ledger.
 
 // Nothing in the client calls this — see above. It is kept because it is the
 // measurement roadmap item 7 turns on, and because it is where the conversion
@@ -381,6 +382,12 @@ impl YuvToRgb {
     /// A texture-to-buffer copy wants its rows a multiple of 256 bytes, so the
     /// rows come back padded and are cut down to the picture here — every
     /// caller wants them packed.
+    ///
+    /// It reads the texture `convert` wrote last, which is the one before
+    /// `next`. Called before the first `convert` of a size it would read one
+    /// that `build_for` had only just created and nothing had drawn into; every
+    /// caller converts first, and there is nothing sensible for it to return if
+    /// one did not.
     pub fn read_back(&self, width: u32, height: u32) -> Vec<u8> {
         let previous = (self.next + RING - 1) % RING;
         let row = (width as usize * 4).div_ceil(256) * 256;

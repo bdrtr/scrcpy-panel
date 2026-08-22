@@ -570,22 +570,41 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   the middle and 393 for the first four. All three are the same order, which is the encoder
   rather than the conversion; what proves the tail exactly is the test that holds it to a
   whole-picture conversion at six sizes, byte for byte.
-- **The shader is written and measured, and does not earn its keep.** `src/ui/yuv.rs`
-  uploads the YUV420P planes as three R8 textures and converts them in one pass, which comes
-  to 1.25 ms a frame — 0.56 uploading and converting, 0.69 drawing. Against the fourth
-  byte's 1.42 that is 0.17 ms, for Slint's WGPU renderer, its `unstable-wgpu-29` texture
-  import, and a `wgpu` dependency. So it stays behind `--features wgpu`, where
-  `frame_cost` uses it and the client does not.
-- **Those two figures are the one claim here that is not yet current.** Sampling became
-  loading, which ought to cost nothing and did not appear to — re-run after the change the
-  shader reads 1.21 ms a frame, 0.67 drawing and 0.54 converting. But the RGBA arm of that
-  same run read 2.40 rather than 1.42, and the run had ten review agents on the CPU, so
-  neither arm is worth writing down: they have to come off one quiet machine together
-  before the ledger above means anything. Two things make that harder than it sounds. The
-  window has to be on screen — occluded, the compositor stops sending frame callbacks and
-  the run never finishes, which is what a stalled `frame_cost` is. And the two arms it
-  prints are disjoint rather than nested, so a frame costs their sum; the line used to say
-  "of it" and now prints the total.
+- **The shader is written and measured, and does not earn its keep — though not for the
+  reason this used to give.** `src/ui/yuv.rs` uploads the YUV420P planes as three R8
+  textures and converts them in one pass, which comes to 1.25 ms a frame: 0.70 drawing and
+  0.55 uploading and converting. Those two are disjoint rather than nested, so a frame costs
+  their sum; the harness used to print the second as "of it" and now prints the total. The
+  figure did not move when the conversion became a texture load rather than a sample —
+  1.25 both times, to two decimal places, over two runs.
+- **The number it was being compared against does not exist.** This bullet used to end
+  "against the fourth byte's 1.42 that is 0.17 ms", and 1.42 is in no run and contradicts
+  this same file, which records 2.52 for the RGBA upload on the WGPU renderer two bullets
+  down. Measured again over both renderers in one sitting, from one binary, at 1080x2400:
+
+  | a frame costs | OpenGL renderer | WGPU renderer |
+  |---|---|---|
+  | packed RGB, a new one every time | 2.93 | 3.93 and 12.60 |
+  | the same frame again | 0.01 | 0.65, 0.67 |
+  | a new one, already RGBA | 0.91 | 2.39, 2.42 |
+  | the planes and the shader | — | 1.25, 1.25 |
+
+  Every figure already written down is confirmed — 0.02 for the OpenGL floor, 0.68 for the
+  WGPU one, 0.94 for the RGBA upload, 2.52 for the same upload on WGPU — except 1.42, which
+  is the one that was wrong. The packed-RGB row is the only one that will not repeat, and it
+  is not load-bearing for anything here.
+- **So the ledger reads the other way up, and says the same thing louder.** On the renderer
+  the shader needs, it beats handing Slint RGBA by 1.14 ms — but nothing would put the
+  client on that renderer for its own sake, and the shader cannot be reached from the one it
+  uses. The choice is 1.25 ms with a WGPU renderer, an `unstable-wgpu-29` texture import and
+  a `wgpu` dependency, against **0.91 with none of them**. It is 0.34 ms dearer than what
+  ships, where this used to claim it was 0.17 cheaper. So it stays behind `--features wgpu`,
+  where `frame_cost` uses it and the client does not.
+- `frame_cost` will not run with its window occluded: the compositor stops sending frame
+  callbacks to a surface nobody can see, and the run hangs rather than failing. Taking these
+  needed `env -u WAYLAND_DISPLAY DISPLAY=:1`, which puts it on Xwayland where nothing
+  throttles it — and even there the OpenGL renderer stalled twice before a run came back
+  whole.
 - **It read the wrong chroma sample at every odd width, and the test that would have said so
   did not exist.** Two comments in `src/ui/yuv.rs` named `the_shader_and_swscale_agree` as
   the thing holding it to swscale; there was no such test. What there was is `CHECK=1` in
@@ -737,9 +756,10 @@ curl -L -o target/release/scrcpy-server \
    now, which swscale does for 0.48 against RGB24's 0.59 and which leaves the decoder's own
    cost where it was, 3.1 ms a frame either way. **3.0 ms a frame, off the thread that draws
    and takes input** — 4.04 ms a draw against 0.98 in a live session on the Redmi, measured
-   both ways with the same probe. The shader that was meant to be this item is written and measured and
-   comes to 1.25 ms against the fourth byte's 1.42 — 0.17 for a WGPU renderer and an
-   unstable API — so it lives behind `--features wgpu` and the client does not use it.
+   both ways with the same probe. The shader that was meant to be this item is written and
+   measured and comes to 1.25 ms against the fourth byte's 0.91 on the renderer that ships —
+   it is 0.34 ms *dearer*, because the WGPU renderer it needs taxes every frame more than the
+   shader saves — so it lives behind `--features wgpu` and the client does not use it.
    `cargo run --release --example frame_cost` is the measurement
 8. ~~Fill in what upstream left out: virtual display (`--new-display`), the rest of camera,
    OTG~~ — done
