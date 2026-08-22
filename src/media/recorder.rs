@@ -267,24 +267,7 @@ unsafe fn open_and_record(
 ) -> Result<()> {
     ffi::av_log_set_level(ffi::AV_LOG_WARNING);
 
-    // --record-format wins; otherwise infer from the extension, which is what
-    // C's sc_recorder_get_format_name does. The flag used to parse and then be
-    // read by nobody, so a .mp4 name always produced an mp4 whatever was asked.
-    let selector = match format {
-        Some(explicit) if !explicit.is_empty() && explicit != "auto" => explicit,
-        _ => std::path::Path::new(filename)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("mp4"),
-    };
-    let fmt_name = match selector {
-        "mkv" | "mka" => "matroska",
-        "m4a"         => "mp4",
-        "opus"        => "opus",
-        "flac"        => "flac",
-        "wav"         => "wav",
-        _             => "mp4",
-    };
+    let fmt_name = muxer_format_for(filename, format);
 
     let cfilename = CString::new(filename).unwrap();
     let cfmt = CString::new(fmt_name).unwrap();
@@ -300,6 +283,63 @@ unsafe fn open_and_record(
     let muxer = Muxer(ctx);
 
     // Add video stream (if video enabled)
+    let vid_idx = add_the_video_stream(ctx, has_video, vi)?;
+
+    // Add audio stream
+    let aud_idx = add_the_audio_stream(ctx, has_audio, audio_codec_id)?;
+
+    // Open output file for writing
+    let ret = ffi::avio_open(&mut (*ctx).pb, cfilename.as_ptr(), ffi::AVIO_FLAG_WRITE as c_int);
+    if ret < 0 { anyhow::bail!("avio_open failed ({})", ret); }
+
+    take_the_config_packets(
+        lock, cvar, ctx, vid_idx, aud_idx, has_audio, audio_expects_config, rotation,
+    );
+
+    // 4. Write header
+    let ret = ffi::avformat_write_header(ctx, std::ptr::null_mut());
+    if ret < 0 { anyhow::bail!("avformat_write_header failed ({})", ret); }
+    log::info!("Recording started → {} ({})", filename, fmt_name);
+
+    write_the_packets(lock, cvar, ctx, vid_idx, aud_idx);
+
+    ffi::av_write_trailer(ctx);
+    drop(muxer);
+
+    Ok(())
+}
+
+/// Which muxer the file wants.
+///
+/// `--record-format` wins; otherwise it is inferred from the extension, which
+/// is what C's `sc_recorder_get_format_name` does. The flag used to parse and
+/// then be read by nobody, so a `.mp4` name produced an mp4 whatever was asked
+/// for — which is the sort of thing that is easy to get wrong again and cheap
+/// to pin, now that it is a function taking two strings and returning a third.
+fn muxer_format_for(filename: &str, format: Option<&str>) -> &'static str {
+    let selector = match format {
+        Some(explicit) if !explicit.is_empty() && explicit != "auto" => explicit,
+        _ => std::path::Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("mp4"),
+    };
+    match selector {
+        "mkv" | "mka" => "matroska",
+        "m4a"         => "mp4",
+        "opus"        => "opus",
+        "flac"        => "flac",
+        "wav"         => "wav",
+        _             => "mp4",
+    }
+}
+
+/// The video stream, or -1 where there is no video.
+unsafe fn add_the_video_stream(
+    ctx: *mut ffi::AVFormatContext,
+    has_video: bool,
+    vi: &Option<VideoCodecInfo>,
+) -> Result<c_int> {
     let vid_idx: c_int = if has_video {
         let vi = vi.as_ref().context("No video codec info received")?;
         let vpar = ffi::avcodec_parameters_alloc();
@@ -317,8 +357,16 @@ unsafe fn open_and_record(
     } else {
         -1
     };
+    Ok(vid_idx)
+}
 
-    // Add audio stream
+/// The audio stream, or -1 where there is none — which is also what a server
+/// that declined audio leaves behind.
+unsafe fn add_the_audio_stream(
+    ctx: *mut ffi::AVFormatContext,
+    has_audio: bool,
+    audio_codec_id: Option<u32>,
+) -> Result<c_int> {
     let aud_idx: c_int = if has_audio {
         if let Some(acid) = audio_codec_id {
             let apar = ffi::avcodec_parameters_alloc();
@@ -334,11 +382,21 @@ unsafe fn open_and_record(
             (*astream).index
         } else { -1 }
     } else { -1 };
+    Ok(aud_idx)
+}
 
-    // Open output file for writing
-    let ret = ffi::avio_open(&mut (*ctx).pb, cfilename.as_ptr(), ffi::AVIO_FLAG_WRITE as c_int);
-    if ret < 0 { anyhow::bail!("avio_open failed ({})", ret); }
-
+/// Wait for the config packets and turn them into extradata.
+#[allow(clippy::too_many_arguments)]
+unsafe fn take_the_config_packets(
+    lock: &Mutex<RecorderState>,
+    cvar: &Condvar,
+    ctx: *mut ffi::AVFormatContext,
+    vid_idx: c_int,
+    aud_idx: c_int,
+    has_audio: bool,
+    audio_expects_config: bool,
+    rotation: u16,
+) {
     // 3. Wait for config packets → extradata (SPS/PPS for H.264)
     //
     // A recording started at launch sees the config packet first, so taking the
@@ -400,12 +458,16 @@ unsafe fn open_and_record(
             }
         }
     }
+}
 
-    // 4. Write header
-    let ret = ffi::avformat_write_header(ctx, std::ptr::null_mut());
-    if ret < 0 { anyhow::bail!("avformat_write_header failed ({})", ret); }
-    log::info!("Recording started → {} ({})", filename, fmt_name);
-
+/// The packet loop, which is where a recording is actually made.
+unsafe fn write_the_packets(
+    lock: &Mutex<RecorderState>,
+    cvar: &Condvar,
+    ctx: *mut ffi::AVFormatContext,
+    vid_idx: c_int,
+    aud_idx: c_int,
+) {
     // 5. Main packet loop — mirrors C's sc_recorder_process_packets
     // The two streams share one clock, so nothing can be written until the
     // first packet of each has been seen. These hold them meanwhile: the loop
@@ -514,11 +576,6 @@ unsafe fn open_and_record(
         let pts = last.pts.saturating_sub(pts_origin.max(0));
         write_pkt(ctx, &last, vid_idx, pts, 100_000, &mut vlast);
     }
-
-    ffi::av_write_trailer(ctx);
-    drop(muxer);
-
-    Ok(())
 }
 
 /// Write `--record-orientation` into the stream as a display matrix.
@@ -625,6 +682,27 @@ unsafe fn write_pkt(
 
 #[cfg(test)]
 mod tests {
+
+    /// `--record-format` used to parse and be read by nobody. These are the
+    /// six the selector knows and the two ways of asking.
+    #[test]
+    fn the_format_is_the_flag_then_the_extension() {
+        // The flag wins wherever it says something.
+        assert_eq!(muxer_format_for("out.mp4", Some("mkv")), "matroska");
+        assert_eq!(muxer_format_for("out.mkv", Some("mp4")), "mp4");
+        // "auto" and empty are not a format; they hand it back to the name.
+        for asked in [None, Some(""), Some("auto")] {
+            assert_eq!(muxer_format_for("out.mkv", asked), "matroska");
+            assert_eq!(muxer_format_for("out.opus", asked), "opus");
+            assert_eq!(muxer_format_for("out.flac", asked), "flac");
+            assert_eq!(muxer_format_for("out.wav", asked), "wav");
+            assert_eq!(muxer_format_for("out.m4a", asked), "mp4");
+            assert_eq!(muxer_format_for("out.mka", asked), "matroska");
+        }
+        // Anything else, including no extension at all, is an mp4.
+        assert_eq!(muxer_format_for("out.webm", None), "mp4");
+        assert_eq!(muxer_format_for("recording", None), "mp4");
+    }
     use super::*;
 
     /// A packet with nowhere to go must not be taken out of the queue.
