@@ -171,7 +171,16 @@ pub fn shell_exec(serial: &str, shell_args: &[&str]) -> Result<ShellHandle> {
                         println!("[server] {}", line);
                     }
                     Ok(_) => {}
-                    Err(_) => break,
+                    Err(e) => {
+                        // The socket went, which is how this thread is meant to
+                        // end: `ShellHandle`'s Drop shuts it down. A read
+                        // deadline would arrive here looking exactly the same,
+                        // which is why the stream is given none — say which it
+                        // was rather than have the server's log stop
+                        // mid-session with nothing to show for it.
+                        log::debug!("The shell reader stopped: {e}");
+                        break;
+                    }
                 }
             }
         })

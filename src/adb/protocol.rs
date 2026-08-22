@@ -208,10 +208,20 @@ pub fn shell(serial: &str, command: &str) -> Result<TcpStream> {
     conn.send_command(&cmd)?;
     conn.read_status()?;
 
-    // Return the raw stream — caller reads shell output from it
+    // Return the raw stream — caller reads shell output from it, with no
+    // deadline on it at all.
+    //
+    // It used to carry a five-minute one, which is a deadline on a *quiet*
+    // shell rather than on a slow one: `SO_RCVTIMEO` is per read and is reset
+    // by any byte that arrives. The device-side server says its piece when it
+    // starts and is then silent for as long as the session runs, so five
+    // minutes in the reader would get `WouldBlock`, `shell_exec` would read
+    // that as end of stream and stop, and everything the server printed
+    // afterwards — the exception that killed it, say — went nowhere. What ends
+    // this stream is `ShellHandle`'s Drop shutting it down, which is what
+    // `dropping_a_shell_handle_lets_its_reader_go` holds it to.
     let stream = conn.into_stream();
-    // Set longer timeout for shell commands
-    stream.set_read_timeout(Some(Duration::from_secs(300))).ok();
+    stream.set_read_timeout(None).ok();
     Ok(stream)
 }
 
@@ -223,6 +233,13 @@ mod tests {
     /// test so that a port set by one cannot be read by another.
     #[test]
     fn the_port_follows_adbs_own_environment_variable() {
+        // `adb_port` reads the panel's setting before the environment, so this
+        // takes the same turn as the tests that write that setting.
+        let _turn = crate::adb::settings::TESTS_TAKE_TURNS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::adb::settings::set("", "");
+
         // Safety: single-threaded within this test, and the variable is
         // restored before it ends.
         let before = std::env::var("ANDROID_ADB_SERVER_PORT").ok();
