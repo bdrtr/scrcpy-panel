@@ -899,7 +899,13 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
                 // Only a USB device needs switching over; one already reached
                 // by address is on the network already.
                 if !usb_serial.contains(':') {
-                    let _ = crate::adb::device::enable_tcpip(&usb_serial, 5555);
+                    // Said rather than swallowed. It carries on either way: a
+                    // device switched over on some earlier day is reachable at
+                    // the address whether or not this attempt worked, and the
+                    // connect below is the thing that decides.
+                    if let Err(e) = crate::adb::device::enable_tcpip(&usb_serial, 5555) {
+                        panel.warn(&tr!("adb tcpip başarısız: {}", e));
+                    }
                 }
 
                 match crate::adb::device::connect(&addr) {

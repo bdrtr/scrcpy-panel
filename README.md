@@ -155,15 +155,36 @@ found something: `adb connect` exits 0 whether it worked or not — a closed por
 unroutable address and a name that will not resolve all print a refusal and return success
 — so the panel had been showing a failed connect as an ordinary info line and refreshing
 the device list underneath it. It reads adb's words now, and the three refusals adb 1.0.41
-actually prints are in the test. What that cannot cover is the other
-half — no adb operation has been run through the new module against a phone yet, so
-`tcpip`, `pair`, `install`, `push` and `screencap` are, for now, only as good as their
-arguments look. The push, at least, is no longer among the untried: it has a fake daemon
-of its own — sixty lines of `TcpListener` that speaks enough of adb's protocol to take
-one — which holds the framing to account rather than skipping to the end. The transport,
-the switch to sync mode, the path with its mode, 100 KB arriving as two chunks because a
-chunk is 64 KB, the modification time on DONE, the file coming back byte for byte, and a
-daemon answering FAIL having its words carried out to the caller.
+actually prints are in the test.
+
+The rest of the module has since been put through the same thing, and it caught the same
+bug a second time. `tcpip`, `pair`, `install`, `push`, `screencap` and `key_event` are all
+run against the real adb with nothing attached now, and every one has to come back as an
+error rather than as an empty success. Five did. **`enable_tcpip` could not fail.** It
+asked `Command::status().is_ok()`, which answers whether adb *ran* — it does, and then
+exits 1 saying "error: no devices/emulators found" — so it slept two seconds on the thread
+the panel draws with and reported that a device nobody could see had been switched to
+TCP/IP, with adb's complaint going to the terminal where the panel could not show it. It
+reads the output now and only waits once the switch has really been asked for; the test
+holds the refusal to under a second, since the wait is the tell, and the whole probe runs
+in 0.07. The panel says what went wrong instead of discarding it, and carries on to the
+connect either way — a device switched over on some earlier day is reachable whether or not
+this attempt worked.
+
+Two smaller things came with it. `refused` was looking for a capital F in `Failure` while
+`did_not_connect` handed it a lowercased string, so that arm was unreachable down one of
+its two paths; nothing adb says about a connect carries `Failure` without also carrying
+`error:`, so nothing was getting through the gap, and it is folded and pinned either way
+rather than left to that. And the command in that test's own doc comment,
+`--ignored --nocapture adb_here`, matches no test — the name is `what_adb_says_here` — so
+anyone following the source rather than this file ran nothing at all and saw it pass.
+
+What none of it covers is a device answering. The push, at least, is no longer among the
+untried: it has a fake daemon of its own — sixty lines of `TcpListener` that speaks enough
+of adb's protocol to take one — which holds the framing to account rather than skipping to
+the end. The transport, the switch to sync mode, the path with its mode, 100 KB arriving as
+two chunks because a chunk is 64 KB, the modification time on DONE, the file coming back
+byte for byte, and a daemon answering FAIL having its words carried out to the caller.
 
 ### The files no review had looked at
 

@@ -824,6 +824,9 @@ msgstr "Enter an address to connect to."
 msgid "adb connect başarısız: {}"
 msgstr "adb connect failed: {}"
 
+msgid "adb tcpip başarısız: {}"
+msgstr "adb tcpip failed: {}"
+
 msgid "Eşleştirme için adres ve kod gerekli."
 msgstr "Pairing needs both an address and a code."
 

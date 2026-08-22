@@ -187,16 +187,29 @@ pub fn restart_server() -> Result<()> {
 
 /// Put a USB device into TCP/IP mode so it can be reached over the network.
 ///
-/// The sleep is the device restarting its adb daemon on the new transport;
-/// connecting before it has is what makes the first attempt fail. This was
-/// written twice — here and in the session — with different waits.
+/// This used to ask `status()` whether it worked, and `status()` answers a
+/// different question: whether adb *ran*, which it does whether or not it did
+/// anything. With nothing attached `adb tcpip 5555` exits 1 saying "error: no
+/// devices/emulators found", and this returned `Ok(())` — after sleeping two
+/// seconds, on the thread the panel draws with, for a device that was never
+/// switched. `status()` also lets adb's complaint out to the terminal, where
+/// the panel cannot show it. Same shape as the `connect` bug in `4d89657`, one
+/// function up.
+///
+/// The words are read as well as the status, for the reason `did_not_connect`
+/// exists: adb's exit code is not a reliable account of what happened.
 pub fn enable_tcpip(serial: &str, port: u16) -> Result<()> {
     let mut command = for_device(serial);
     command.args(["tcpip", &port.to_string()]);
-    let started = command.status().is_ok();
-    if started {
-        std::thread::sleep(std::time::Duration::from_secs(2));
+    let said = output_of(command, "tcpip")?;
+    if refused(&said) {
+        bail!("{}", last_line(&said));
     }
+    // Only once it really has been asked. The sleep is the device restarting
+    // its adb daemon on the new transport; connecting before it has is what
+    // makes the first attempt fail. This was written twice — here and in the
+    // session — with different waits.
+    std::thread::sleep(std::time::Duration::from_secs(2));
     Ok(())
 }
 
@@ -302,7 +315,11 @@ fn transfer(mut command: Command, what: &str) -> Result<String> {
 /// status on its own would call a failed install a success. This lived in the
 /// panel, where nothing could test it.
 pub fn refused(said: &str) -> bool {
-    said.contains("Failure") || said.contains("error:") || said.contains("adb: ")
+    // Folded, because `did_not_connect` lowercases before it gets here and a
+    // capital F could then never match: the `Failure` arm was unreachable down
+    // that path and looked like cover it was not giving.
+    let said = said.to_lowercase();
+    said.contains("failure") || said.contains("error:") || said.contains("adb: ")
 }
 
 /// The last thing adb said that was not blank — which is where it puts the
@@ -327,7 +344,7 @@ mod tests {
     /// commands are spelled the way adb expects and that the error paths come
     /// back as errors rather than as empty successes. It needs adb installed,
     /// so it is not run by default:
-    /// `cargo test --release -- --ignored --nocapture adb_here`
+    /// `cargo test --release -- --ignored --nocapture what_adb_says`
     #[test]
     #[ignore]
     fn what_adb_says_here() {
@@ -364,6 +381,41 @@ mod tests {
         // back empty.
         assert_eq!(property("no-such-device", "ro.build.version.release"), "");
         assert_eq!(screen_size("no-such-device"), "");
+
+        // The wireless switch, which is the one that used to be unable to fail.
+        // With nothing attached adb exits 1 and says "error: no
+        // devices/emulators found", and the old code read `status().is_ok()` —
+        // true, because adb ran — slept two seconds and reported success.
+        let began = std::time::Instant::now();
+        match enable_tcpip("", 5555) {
+            Ok(()) => panic!("tcpip with nothing attached came back as a success"),
+            Err(e) => println!("tcpip refused, as it should be: {e:#}"),
+        }
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(1),
+            "it waited {:?} for a device it had just been told is not there",
+            began.elapsed()
+        );
+
+        // And the rest of the operations that had never been run at all. None
+        // of these can reach a device; every one of them has to come back as an
+        // error rather than as an empty success, which is the failure this
+        // module keeps finding.
+        let file = std::env::temp_dir().join("scrcpy-slint-adb-probe");
+        std::fs::write(&file, b"probe").expect("a file to offer adb");
+        for (what, result) in [
+            ("pair", pair("127.0.0.1:1", "123456").map(|s| s.to_string())),
+            ("install", install("no-such-device", &file)),
+            ("push", push("no-such-device", &file, "/sdcard/")),
+            ("screencap", screencap("no-such-device").map(|b| format!("{} bytes", b.len()))),
+            ("key_event", key_event("no-such-device", "KEYCODE_HOME").map(|()| String::new())),
+        ] {
+            match result {
+                Ok(said) => panic!("{what} with no device came back as a success: {said:?}"),
+                Err(e) => println!("{what} refused, as it should be: {e:#}"),
+            }
+        }
+        let _ = std::fs::remove_file(&file);
     }
 
     /// What adb says when a connect does not happen, and it is not the exit
@@ -384,6 +436,32 @@ mod tests {
             "Successfully paired to 192.168.1.44:37241 [guid=adb-abc]",
         ] {
             assert!(!did_not_connect(said), "taken as a failure: {said}");
+        }
+    }
+
+    /// `refused` is read twice over — once on adb's own words and once on those
+    /// words lowercased, by `did_not_connect` — and it used to look for a
+    /// capital F, so the arm that catches an install's `Failure` was dead down
+    /// the second path. Nothing adb says about a connect carries `Failure`
+    /// without also carrying `error:`, so nothing was getting through; this
+    /// pins it either way rather than leaving it to that.
+    #[test]
+    fn a_refusal_is_a_refusal_in_either_case() {
+        for said in [
+            "Failure [INSTALL_FAILED_ALREADY_EXISTS]",
+            "failure [install_failed_already_exists]",
+            "adb: error: failed to stat remote object '/sdcard/x'",
+            "error: no devices/emulators found",
+        ] {
+            assert!(refused(said), "taken as a success: {said}");
+            assert!(refused(&said.to_lowercase()), "lowercased, taken as a success: {said}");
+        }
+        for said in [
+            "1 file pushed, 0 skipped. 12.3 MB/s (5 bytes in 0.000s)",
+            "Success",
+            "restarting in TCP mode port: 5555",
+        ] {
+            assert!(!refused(said), "taken as a refusal: {said}");
         }
     }
 
