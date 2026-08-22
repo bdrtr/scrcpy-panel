@@ -82,6 +82,7 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | Ayarlar: autostart profile, version check, log to disk | work |
 | Recording started and stopped mid-session | works — 568 video + 552 Opus frames over 11 s |
 | Recording with audio | works — this had never worked; every test had used --no-audio |
+| `--no-video --record` | works — all four codecs into their own container, 3.99 s each off a silent phone |
 | Several devices selected and started together | implemented, needs a second device to try |
 | `--max-size`, `--max-fps`, `--time-limit` | work |
 | `--list-encoders/-displays/-cameras/-apps` | work |
@@ -246,6 +247,19 @@ and none of them needed a phone to find. What each was held to:
   one. The same eight-second run now writes 131 KB of matroska, and `ffprobe` reads back an
   AAC track at 48000 Hz, 2 channels, 8.003 seconds. Video-and-audio recording is unchanged:
   h264 1080x2400 with opus beside it, over 6.16 seconds.
+- **The four audio-only containers were then tried one at a time, and the one that looks
+  broken is not.** Four seconds each off the silent Redmi, `--no-video --record` into the
+  container `muxer_format_for` picks for that codec: opus into `.opus`, 1035 bytes, 200
+  packets; aac into `.m4a`, 65825 bytes, 187 packets; raw into `.wav`, 766030 bytes; flac
+  into `.flac`, 8930 bytes, 46 packets. All four decode — 3.99 seconds for three of them,
+  and exactly 46 × 4096 samples for the FLAC, which is 3.92 s and one short block. The
+  1 KB Opus file is not a truncated one either: it is a silent room at 2 kbit/s, and it
+  decodes to the same 3.99 s the 65 KB AAC does. **`ffprobe` reads no duration at all from
+  the FLAC**, and its STREAMINFO carries a total-sample count of zero and an all-zero MD5
+  where ffmpeg's own encoder writes 191488 and a checksum. That is the container being
+  remuxed rather than encoded: hand ffmpeg those very same packets with `-c:a copy` and its
+  own muxer writes `N/A` too. The sample count belongs to whoever encoded the stream, and
+  that is the phone.
 - **The two silences sounded the same, and only one of them had a voice.** A decoder that
   refuses every packet says so after fifty; a decoder that *accepts* every packet and
   returns no frame said nothing, at any level — `decode` gives back `Ok(None)`, which is
