@@ -857,6 +857,13 @@ impl VideoDecoder {
             // converters. A hole that survives a wider row is worth a line in
             // the log: the picture is still better than the direct write would
             // have left it, and nothing here can do more about it.
+            // Both fillings again, and *intersected* again. Counting each run
+            // on its own says a picture is full of holes, because a picture is
+            // full of bytes: at 1058x2000 about one byte in 130 of a real
+            // screen happens to be 0xAA, and the first version of this check
+            // reported 49005 of them as unwritten on a conversion that had in
+            // fact written every one.
+            let mut left: Option<Vec<usize>> = None;
             for canary in [0xAAu8, 0x55] {
                 self.scratch.fill(canary);
                 unsafe {
@@ -870,19 +877,32 @@ impl VideoDecoder {
                         self.scratch.as_mut_ptr(),
                     );
                 }
-                let left = (0..height as usize)
-                    .flat_map(|row| self.scratch[row * padded..][..row_bytes].iter())
-                    .filter(|byte| **byte == canary)
-                    .count();
-                if left == 0 {
+                let still: Vec<usize> = match left {
+                    None => (0..height as usize)
+                        .flat_map(|row| {
+                            let start = row * padded;
+                            (start..start + row_bytes)
+                                .filter(|at| self.scratch[*at] == canary)
+                                .collect::<Vec<_>>()
+                        })
+                        .collect(),
+                    Some(first) => first
+                        .into_iter()
+                        .filter(|at| self.scratch[*at] == canary)
+                        .collect(),
+                };
+                if still.is_empty() {
+                    left = None;
                     break;
                 }
-                if canary == 0x55 {
-                    log::warn!(
-                        "{left} bytes of the picture are still unwritten with {ROW_SLACK} \
-                         bytes of slack on the row"
-                    );
-                }
+                left = Some(still);
+            }
+            if let Some(left) = left {
+                log::warn!(
+                    "{} bytes of the picture are still unwritten with {ROW_SLACK} bytes \
+                     of slack on the row",
+                    left.len()
+                );
             }
             self.scratch.fill(0);
             return Write::Padded;

@@ -730,6 +730,19 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   now, `Padded`, which converts through a row 64 bytes wider than the picture and copies it in
   a row at a time. `--max-size` cannot reach an affected width, since it rounds down to a
   multiple of eight; `--crop` and `--new-display` pass their size straight through and can.
+- **And a phone was pointed at it.** `--crop=1058:2000:0:0` — 1058 is two past a multiple of
+  sixteen — mirrored off the Redmi says, at info level, `swscale left 2 of the 1058 columns
+  unwritten — [1056, 1057] — so the picture goes through a row wider than itself`, and then
+  chooses `Padded`. The same session at the device's own 1080 loses nothing and stays on
+  `Tail`, which is what it did before any of this. So the fault is in the device's real
+  stream and not a property of the frames it was found with, and the cure is chosen only
+  where there is something to cure.
+- The cure is checked on the frame that found the fault, and the first version of that check
+  was wrong in a way worth writing down. It counted the canary bytes left inside the picture
+  after the padded conversion, and a picture is made of bytes: about one in 130 of a screen
+  off this phone happens to be 0xAA, so it reported 49005 of them as unwritten on a
+  conversion that had written every one. It intersects the two fillings now, which is what
+  the detection twenty lines above it always did, and a healthy run says nothing at all.
 - Two things that check said and should not have. Slint's own `take_snapshot` returns a
   blank buffer rather than an error on the OpenGL renderer here — and two blanks compare
   equal, so the first version of the check reported a perfect match between paths it had not
