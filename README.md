@@ -335,6 +335,12 @@ and none of them needed a phone to find. What each was held to:
   arrival scheduling for one run it fails. The bound is a lower one on purpose — a loaded
   machine can only make the gaps longer.
 
+  The first frame does not wait. There is nothing yet for it to be smoothed against, and
+  holding it would mean `--video-buffer=200` costing a fifth of a second of black before the
+  session appeared. It is upstream's `first_frame_asap`, which both of upstream's own call
+  sites pass, and it fires exactly once — on the push that sets the clock, and only while
+  nothing is queued ahead of it.
+
   What this cannot reach is downstream. The window's pump polls on a 4 ms timer and draws the
   newest frame it finds, so releases are re-quantised to 4 ms whatever the buffer does: a
   fifth of a frame at 16.7 ms, and the floor on what smoothing here is worth. Its stop is prompt now as well — it waited in a `sleep` no notification

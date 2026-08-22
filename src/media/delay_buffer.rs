@@ -66,6 +66,8 @@ struct DelayBufferInner {
 /// Delay buffer that holds frames for a configurable duration
 pub struct DelayBuffer {
     inner: Arc<(Mutex<DelayBufferInner>, Condvar)>,
+    /// A second handle on the way out, for the one frame that does not wait.
+    output: Sender<DecodedFrame>,
     _thread: Option<thread::JoinHandle<()>>,
 }
 
@@ -86,6 +88,7 @@ impl DelayBuffer {
         ));
 
         let inner_clone = inner.clone();
+        let straight_through = output.clone();
         let thread = thread::Builder::new()
             .name("scrcpy-delaybuf".into())
             .spawn(move || {
@@ -97,6 +100,7 @@ impl DelayBuffer {
 
         Self {
             inner,
+            output: straight_through,
             _thread: Some(thread),
         }
     }
@@ -109,9 +113,27 @@ impl DelayBuffer {
         let (lock, cvar) = &*self.inner;
         let mut state = lock.lock().unwrap();
 
+        let first = !state.clock.is_set();
         if let Some(pts) = frame.pts {
             state.clock.update(micros_now(), pts);
         }
+
+        // The very first frame does not wait. There is nothing yet for it to be
+        // jittered against, and holding it would mean a window that shows
+        // nothing for the whole of the delay before the session appears —
+        // `--video-buffer=200` would cost a fifth of a second of black at
+        // startup for no gain. Upstream calls this `first_frame_asap` and both
+        // of its own call sites pass it.
+        //
+        // Only while the queue is empty, which on the first frame of a session
+        // it is: a frame that arrived without a timestamp is already queued
+        // behind nothing, and this one must not overtake it.
+        if first && state.queue.is_empty() {
+            drop(state);
+            let _ = self.output.send(frame);
+            return;
+        }
+
         let pts = frame.pts;
         state.queue.push_back(DelayedFrame { frame, pts });
 
@@ -255,13 +277,32 @@ mod tests {
         frame
     }
 
-    /// A frame is held for the delay and then let through.
+    /// The first frame does not wait: it is what opens the window, and there
+    /// is nothing yet for it to be smoothed against.
+    #[test]
+    fn the_first_frame_opens_the_window_at_once() {
+        let (tx, rx) = bounded(4);
+        let buffer = DelayBuffer::new(400, tx);
+        let pushed = Instant::now();
+        buffer.push(a_frame_at(0));
+
+        assert!(
+            rx.recv_timeout(Duration::from_millis(100)).is_ok(),
+            "the first frame was held back"
+        );
+        assert!(pushed.elapsed() < Duration::from_millis(200), "and it was slow about it");
+    }
+
+    /// Every frame after it is held for the delay and then let through.
     #[test]
     fn a_frame_waits_its_turn() {
         let (tx, rx) = bounded(4);
         let buffer = DelayBuffer::new(150, tx);
+        buffer.push(a_frame_at(0));
+        rx.recv_timeout(Duration::from_millis(300)).expect("the first frame");
+
         let pushed = Instant::now();
-        buffer.push(a_frame());
+        buffer.push(a_frame_at(1_000));
 
         assert!(
             rx.recv_timeout(Duration::from_millis(40)).is_err(),
