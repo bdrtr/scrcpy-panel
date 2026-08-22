@@ -4,6 +4,7 @@ mod control;
 mod display;
 mod i18n;
 mod input;
+mod logging;
 mod media;
 mod mirror_host;
 mod options;
@@ -39,17 +40,14 @@ pub const SCRCPY_SERVER_VERSION: &str = "4.1";
 pub static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn main() -> Result<()> {
-    // Slint drags in zbus for accessibility and portals, and it logs its D-Bus
-    // handshake at info level. Quiet it unless the user asks for it.
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info,zbus=warn,tracing=warn"),
-    )
-    .format_timestamp_millis()
-    .init();
+    // Parsed before the logger is installed, because --verbosity is what the
+    // logger is built from. Nothing logs in between: clap writes its own
+    // refusals, and --help and --version leave from inside `parse`.
+    let opts = Options::parse();
+    logging::init(&opts.verbosity);
 
     install_signal_handlers();
 
-    let opts = Options::parse();
     log::info!("scrcpy-slint {} — Rust scrcpy client with a Slint UI", VERSION);
 
     // Taken before the options are moved into the run, because the whole point

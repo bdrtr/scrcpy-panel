@@ -317,6 +317,38 @@ and none of them needed a phone to find. What each was held to:
   returns EINVAL for a rate of zero — so raw lost the recording's audio track as well.
   Proved against libavcodec rather than against the server's own stream; the device end
   of that is still to do.
+- **The panel's log did not have the session in it, and the file its checkbox names had
+  even less.** There was no `log::Log` implementation in the program at all: `env_logger` went
+  straight onto the terminal, and the panel kept a second, unrelated log of its own. So a line
+  went to one place or the other and never to both. Everything in `session/`, `media/`,
+  `control/` and `adb/` reached stderr and nothing else — which for a panel started from a
+  desktop launcher or from the tray is a stream nobody is reading — while the tab headed
+  "Süreç çıktısı" and `~/.config/scrcpy-slint/panel.log` held only the lines the panel writes
+  by hand. Worse, the two writers into that tab were not the same writer: `append_log`, which
+  carries a windowed session's output, wrote into the model directly and never touched the
+  file, so the checkbox could be ticked and the file still not contain what the tab was
+  showing. Measured on the Redmi with the settings this machine actually has
+  (`mirror_mode: embedded`, `log_to_disk: true`), copied into a config directory of its own so
+  nothing real was touched: a `--panel --start` session put **26 lines on the terminal, 24 of
+  them from `scrcpy_slint::` modules, and 6 lines in `panel.log` — none of them among the 24**.
+  Which device, which server jar, which tunnel port, which codec, which decoder: all of it on
+  a stream the panel's own user cannot see. The same run now writes **25 lines and a run
+  boundary**, the terminal is unchanged at 26 and byte-for-byte the same format, and every line
+  in the file carries a full date where it used to carry a bare time of day — appended to
+  across three days, it used to read as one long session. The one line still on the terminal
+  and not in the file is `[server] INFO: Device: [Xiaomi] Redmi 2209116AG (Android 13)`, which
+  is the device's own log printed with `println!` and never offered to the log crate at all.
+  `src/logging.rs` is the one logger; the panel installs a channel on it with `listen()` and
+  drains it on a timer, because the decoder, the recorder and the demuxer all log from threads
+  of their own and a Slint model belongs to the event loop. Two edges needed measuring rather
+  than assuming. Lines written before a window exists are held and handed over in order, so the
+  log starts where the process does rather than where the window does — six lines, on this run.
+  And the drain timer stops when the event loop does, so the last lines of a run went to the
+  terminal and died in the channel; there is one more drain after the loop returns. That was
+  four lines, and they were the four that say how the session ended: `Interrupted`, the audio
+  frame total, `End of video stream`, `Oturum durduruldu.` Three tests: the date arithmetic
+  against six known instants including two leap-day edges, the level-name mapping, and a record
+  actually coming back out of the second sink — the held one first, the live one second.
 - **"Düzenle" pointed the next launch at a phone nobody had ticked.** `Cfg.serial` is
   written from two directions — the Devices tab ticks rows into it, and the configuration
   form has a field of its own — and `read_config` copies that field into every profile
@@ -1109,6 +1141,7 @@ ui/
 └── tabs/            # the six non-configuration tabs
 src/
 ├── main.rs          # entry point and the standalone mirror window
+├── logging.rs       # one log::Log, two sinks: the terminal and whoever is listening
 ├── session/         # a session without a window: server, tunnel, pipeline threads
 ├── mirror_host.rs   # drives a MirrorView wherever it is mounted
 ├── panel/           # the control panel: command building, devices, profiles

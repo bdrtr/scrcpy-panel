@@ -104,6 +104,14 @@ struct Panel {
 
     /// "Günlüğü diske yaz": the open panel.log, kept rather than reopened once
     /// per line, and a flag so a directory we cannot write to is reported once.
+    /// Drains the logger's second sink into the Log tab. A dropped Slint timer
+    /// stops firing, so it is held here rather than in `run`'s stack frame.
+    log_drain: RefCell<Option<slint::Timer>>,
+    /// The other end of that sink. Held on the panel rather than captured by
+    /// the timer, because the timer stops with the event loop and the last
+    /// lines of a run — "Interrupted", the frame totals, "Oturum durduruldu." —
+    /// are written after it has: they used to die in the channel.
+    log_lines: RefCell<Option<std::sync::mpsc::Receiver<crate::logging::Line>>>,
     log_file: RefCell<Option<std::fs::File>>,
     log_disk_failed: Cell<bool>,
     /// "Cihaz bulunduğunda ilk profili başlat": the serial the autostart has
@@ -168,6 +176,8 @@ pub fn run(opts: &Options) -> Result<()> {
         selected: Arc::new(Mutex::new(Vec::new())),
         pending: RefCell::new(None),
         pending_timer: RefCell::new(None),
+        log_drain: RefCell::new(None),
+        log_lines: RefCell::new(None),
         log_file: RefCell::new(None),
         log_disk_failed: Cell::new(false),
         autostarted: RefCell::new(None),
@@ -189,6 +199,13 @@ pub fn run(opts: &Options) -> Result<()> {
     apply_language(&window);
     refresh_adb_settings(&window);
     window.global::<App>().set_adb_status(adb_status().into());
+
+    // Before the first line: every `log::info!` in the client now reaches this
+    // window as well as the terminal, which is what makes an embedded session's
+    // own output — the decoder, the recorder, the demuxer, all of them on their
+    // own threads — visible to a panel started from a launcher with no terminal
+    // behind it. See `crate::logging`.
+    start_the_log_drain(&panel);
 
     refresh_profile_cards(&panel);
     wire(&window, &panel, opts);
@@ -258,6 +275,12 @@ pub fn run(opts: &Options) -> Result<()> {
     drop(autostart);
     drop(version_check);
     stop_session(&panel);
+
+    // The timer stops with the event loop, so everything logged from here down
+    // — the interrupt, the frame totals, "Oturum durduruldu." — would otherwise
+    // be written to the terminal and left in the channel. Measured: five lines
+    // short, and they were the five that say how the session ended.
+    panel.drain_the_log(usize::MAX);
     Ok(())
 }
 
@@ -269,6 +292,23 @@ impl Panel {
             || self.pending.borrow().is_some()
     }
 
+    /// Move what the logger has waiting into the Log tab and the file.
+    ///
+    /// `limit` is per call. Something that has started warning once per frame —
+    /// a V4L2 sink that has lost its device does exactly that — must not be
+    /// able to hold the event loop while the window catches up with it.
+    fn drain_the_log(&self, limit: usize) {
+        let lines = self.log_lines.borrow();
+        let Some(receiver) = lines.as_ref() else { return };
+        // Collected before recording, because `record` logs on a failed open
+        // and that would be a send into the receiver being iterated.
+        let batch: Vec<_> = receiver.try_iter().take(limit).collect();
+        drop(lines);
+        for line in batch {
+            self.record(&line.stamp, line.level.as_str(), &line.message);
+        }
+    }
+
     fn info(&self, message: &str) {
         self.push_log("INFO", message);
     }
@@ -277,28 +317,34 @@ impl Panel {
         self.push_log("WARN", message);
     }
 
+    /// The panel's own lines go out the same door every other line does.
+    ///
+    /// This used to write the row itself *and* call the log crate, which made
+    /// it the only line in the program that reached both places — and left
+    /// every line from `session/`, `media/` and `control/` reaching only the
+    /// terminal. Now there is one direction: everything is logged, and
+    /// `record` below is what the drain calls with whatever comes back.
     fn push_log(&self, level: &str, message: &str) {
-        // Also through the log crate. The panel's own lines used to exist only
-        // inside the window, so anything it refused to do — an invalid flag, a
-        // transfer that failed — was invisible to a terminal, to a log file,
-        // and to anyone debugging it.
         match level {
             "ERROR" => log::error!("{message}"),
             "WARN" => log::warn!("{message}"),
             _ => log::info!("{message}"),
         }
+    }
 
-        // The panel's own clock only needs to order lines, not date them.
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| {
-                let secs = d.as_secs() % 86400;
-                format!("{:02}:{:02}:{:02}", secs / 3600, (secs / 60) % 60, secs % 60)
-            })
-            .unwrap_or_default();
+    /// Put one line in the Log tab, and on disk if the setting is on.
+    ///
+    /// The single writer. `stamp` is the full `2026-08-22T21:00:39.213Z` the
+    /// logger made when the line happened; the tab shows the time of day out of
+    /// it, because a column of dates that are all today is a column of noise,
+    /// while the file gets the whole thing — it is appended to across days.
+    fn record(&self, stamp: &str, level: &str, message: &str) {
+        // `2026-08-22T21:00:39.213Z` -> `21:00:39`. A line with no stamp of its
+        // own is a child process's, whose own timestamp is already in the text.
+        let clock = stamp.get(11..19).unwrap_or("");
 
         self.log.push(LogRow {
-            time: stamp.as_str().into(),
+            time: clock.into(),
             level: level.into(),
             message: message.into(),
         });
@@ -309,7 +355,16 @@ impl Panel {
             self.log.remove(0);
         }
 
-        self.append_to_disk(&stamp, level, message);
+        // The file is the durable half, so a line that arrived without a stamp
+        // of its own gets one here rather than going into it undated.
+        let owned;
+        let for_disk = if stamp.is_empty() {
+            owned = crate::logging::now();
+            owned.as_str()
+        } else {
+            stamp
+        };
+        self.append_to_disk(for_disk, level, message);
     }
 
     /// "Günlüğü diske yaz": mirror the line into ~/.config/scrcpy-slint/panel.log.
@@ -342,7 +397,19 @@ impl Panel {
                 let _ = std::fs::create_dir_all(parent);
             }
             match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-                Ok(file) => *slot = Some(file),
+                Ok(mut file) => {
+                    // Where this run starts. The file is appended to for as
+                    // long as the setting stays on, so without a boundary three
+                    // days of panels read as one long confusing session — and
+                    // the lines themselves used to carry a time of day and no
+                    // date at all.
+                    let _ = writeln!(
+                        file,
+                        "--- scrcpy-slint {} — {stamp} ---",
+                        crate::VERSION
+                    );
+                    *slot = Some(file);
+                }
                 Err(e) => {
                     // Not `self.warn`: that would come straight back into here.
                     log::warn!("Cannot open {}: {e}", path.display());
@@ -750,9 +817,18 @@ fn report(weak: &slint::Weak<PanelWindow>, transfer: Transfer) {
     });
 }
 
-fn append_log(window: &PanelWindow, line: &str) {
-    let app = window.global::<App>();
-    let model = app.get_log();
+/// A line a windowed session's own process printed.
+///
+/// It used to write into the model directly, which made it the second writer
+/// into a log with one file behind it — and the file was the other writer's.
+/// So "Günlüğü diske yaz" was ticked, `panel.log` was named right under the tab
+/// showing these lines, and not one of them was in it. It goes through `record`
+/// now, like everything else.
+///
+/// The stamp is empty on purpose: these lines arrive already carrying the
+/// child's own `env_logger` timestamp, and stamping the column as well would
+/// date the line twice, a tick apart.
+fn append_log(_window: &PanelWindow, line: &str) {
     let level = if line.contains("ERROR") {
         "ERROR"
     } else if line.contains("WARN") {
@@ -760,18 +836,25 @@ fn append_log(window: &PanelWindow, line: &str) {
     } else {
         "INFO"
     };
-    // The session's own timestamps are already in the line; keep them there and
-    // leave the panel's column empty rather than stamping it twice.
-    if let Some(model) = model.as_any().downcast_ref::<VecModel<LogRow>>() {
-        model.push(LogRow {
-            time: "".into(),
-            level: level.into(),
-            message: line.into(),
-        });
-        while model.row_count() > 500 {
-            model.remove(0);
-        }
-    }
+    with_panel(|panel| panel.record("", level, line));
+}
+
+/// Drain the logger's second sink into the window, once every tenth of a second.
+///
+/// A timer rather than a callback straight from `log::Log::log`, because that
+/// is called from the decoder's thread, the recorder's and the demuxer's, and a
+/// Slint model belongs to the event loop. The channel does the crossing; this
+/// does the arriving.
+fn start_the_log_drain(panel: &Rc<Panel>) {
+    panel.log_lines.replace(Some(crate::logging::listen()));
+    let timer = slint::Timer::default();
+    let panel_for_drain = panel.clone();
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(100),
+        move || panel_for_drain.drain_the_log(200),
+    );
+    panel.log_drain.replace(Some(timer));
 }
 
 
