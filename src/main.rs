@@ -24,7 +24,7 @@ use input::slint_input::WindowAction;
 use input::gamepads::Gamepads;
 use input::uhid::UhidInput;
 use mirror_host::{
-    attach, optimal_window_size, start_audio, window_size, FlexDisplay, MirrorUpdate,
+    attach, Attachment, optimal_window_size, start_audio, window_size, FlexDisplay, MirrorUpdate,
     FLEX_POLL_INTERVAL,
 };
 use options::Options;
@@ -237,6 +237,215 @@ fn run_otg(opts: Options) -> Result<()> {
     Ok(())
 }
 
+/// Flags that parse and then do nothing here, said once at the top rather
+/// than left to be discovered by their silence.
+fn warn_about_the_flags(opts: &Options) {
+    if opts.render_driver.is_some() {
+        log::warn!(
+            "--render-driver applies to the old SDL renderer and is ignored; \
+             set SLINT_BACKEND to pick a Slint backend instead"
+        );
+    }
+    if opts.flex_display && opts.v4l2_sink.is_some() {
+        log::warn!(
+            "--v4l2-sink is told its size once and cannot follow --flex-display; \
+             the sink will stop at the first resize"
+        );
+    }
+    if opts.gamepad == "aoa" {
+        log::warn!(
+            "--gamepad=aoa needs USB and the AOA protocol; UHID is the one that works over \
+             the control socket, so nothing will be forwarded"
+        );
+    }
+    for (name, mode) in [("--keyboard", &opts.keyboard), ("--mouse", &opts.mouse)] {
+        if !matches!(mode.as_str(), "sdk" | "uhid" | "aoa" | "disabled") {
+            log::warn!("{name}={mode} is not a mode this client has; falling back to SDK");
+        }
+    }
+}
+
+/// Everything window-specific about driving the mirror, in one closure.
+fn make_the_mirror_updater(window: &MirrorWindow) -> Rc<dyn Fn(MirrorUpdate)> {
+    // Everything window-specific about driving the mirror is this one closure.
+    let apply: Rc<dyn Fn(MirrorUpdate)> = {
+        let weak = window.as_weak();
+        Rc::new(move |update| {
+            let Some(window) = weak.upgrade() else { return };
+            let mirror = window.global::<Mirror>();
+            match update {
+                MirrorUpdate::Frame(image) => mirror.set_frame(image),
+                MirrorUpdate::Geometry { aspect, rotation, frame_width, frame_height } => {
+                    mirror.set_display_aspect(aspect);
+                    mirror.set_rotation(rotation);
+                    mirror.set_frame_width(frame_width as i32);
+                    mirror.set_frame_height(frame_height as i32);
+                }
+                MirrorUpdate::Live(live) => {
+                    mirror.set_live(live);
+                    if !live {
+                        // The placeholder is drawn over the picture, not
+                        // instead of it, so a frame left behind here is the
+                        // stopped session still on screen underneath "waiting
+                        // for a picture" — and, at 1080x2400 in RGBA, ten
+                        // megabytes held for as long as the window is open.
+                        // Live goes false once, before a session's first frame,
+                        // and never on a stall, so this cannot blank a running
+                        // mirror: what it clears is the previous session's last
+                        // frame, which the new one would otherwise show until
+                        // its own first frame arrived.
+                        mirror.set_frame(slint::Image::default());
+                    }
+                }
+            }
+        })
+    };
+    apply
+}
+
+/// Connect the video and the control channel to the window, and give the
+/// shortcuts somewhere to act.
+#[allow(clippy::too_many_arguments)]
+fn attach_the_session(
+    video: session::VideoStream,
+    controller: Option<Rc<crate::control::controller::Controller>>,
+    window: &MirrorWindow,
+    opts: &Options,
+    apply: Rc<dyn Fn(MirrorUpdate)>,
+    reason: &Rc<Cell<&'static str>>,
+) -> Attachment {
+    let attachment = {
+        let weak = window.as_weak();
+        let reason_for_action = reason.clone();
+        attach(
+            video,
+            controller.clone(),
+            &window.global::<Mirror>(),
+            opts,
+            apply,
+            move |action, (frame_w, frame_h), orientation| {
+                let Some(window) = weak.upgrade() else { return };
+                let w = window.window();
+                match action {
+                    WindowAction::Quit => {
+                        reason_for_action.set("MOD+q");
+                        let _ = slint::quit_event_loop();
+                    }
+                    WindowAction::ToggleFullscreen => w.set_fullscreen(!w.is_fullscreen()),
+                    WindowAction::ResizeToFit => {
+                        let (width, height) = optimal_window_size(frame_w, frame_h, orientation);
+                        w.set_size(slint::PhysicalSize::new(width, height));
+                        log::info!("Resized window to fit: {}x{}", width, height);
+                    }
+                    WindowAction::PixelPerfect => {
+                        let (width, height) = if orientation.swaps_dimensions() {
+                            (frame_h, frame_w)
+                        } else {
+                            (frame_w, frame_h)
+                        };
+                        w.set_size(slint::PhysicalSize::new(width, height));
+                        log::info!("Resized to pixel-perfect: {}x{}", width, height);
+                    }
+                    _ => {}
+                }
+            },
+            {
+                let reason = reason.clone();
+                move || {
+                    reason.set("the end of the video stream");
+                    let _ = slint::quit_event_loop();
+                }
+            },
+        )
+    };
+    attachment
+}
+
+/// --gamepad=uhid: the gamepads on this desk, as gamepads on the device.
+///
+/// The timer comes back with them because a dropped Slint timer stops firing.
+fn start_the_gamepads(
+    opts: &Options,
+    controller: &Option<Rc<crate::control::controller::Controller>>,
+) -> (slint::Timer, Option<Rc<std::cell::RefCell<Gamepads>>>) {
+    // The gamepads on this desk, as gamepads on the device. gilrs is a queue
+    // rather than something to wait on, so it is read on a timer of its own.
+    let gamepad_poll = slint::Timer::default();
+    let gamepads = (opts.gamepad == "uhid")
+        .then(Gamepads::new)
+        .flatten()
+        .map(|gamepads| Rc::new(std::cell::RefCell::new(gamepads)));
+    if let (Some(gamepads), Some(controller)) = (gamepads.as_ref(), controller.as_ref()) {
+        gamepads.borrow_mut().attach(controller.clone());
+        let gamepads = gamepads.clone();
+        gamepad_poll.start(
+            slint::TimerMode::Repeated,
+            input::gamepads::POLL_INTERVAL,
+            move || gamepads.borrow_mut().poll(),
+        );
+    }
+    (gamepad_poll, gamepads)
+}
+
+/// --flex-display: the device's display follows the window, which means
+/// telling it the size every time the window settles on a new one.
+fn start_flex_display(
+    opts: &Options,
+    window: &MirrorWindow,
+    controller: &Option<Rc<crate::control::controller::Controller>>,
+    attachment: &Attachment,
+) -> slint::Timer {
+    // --flex-display: the device's display follows the window, which means
+    // telling it the size every time the window settles on a new one.
+    let flex_display = slint::Timer::default();
+    if opts.flex_display {
+        match controller.clone() {
+            Some(controller) => {
+                let weak = window.as_weak();
+                let orientation = attachment.orientation.clone();
+                let mut flex = FlexDisplay::new();
+                flex_display.start(slint::TimerMode::Repeated, FLEX_POLL_INTERVAL, move || {
+                    let Some(window) = weak.upgrade() else { return };
+                    let size = window.window().size();
+                    let Some((width, height)) =
+                        flex.poll((size.width, size.height), orientation.get())
+                    else {
+                        return;
+                    };
+                    log::info!("Flex display: asking for {}x{}", width, height);
+                    controller.push_msg(ControlMsg::ResizeDisplay { width, height });
+                });
+            }
+            // The resize is a control message, so there is nowhere to send it.
+            None => log::warn!("--flex-display needs control, which --no-control turns off"),
+        }
+    }
+    flex_display
+}
+
+/// --time-limit stops the session from the client side; it is not a server
+/// option, though this client used to send it as one.
+fn start_the_time_limit(opts: &Options, reason: &Rc<Cell<&'static str>>) -> slint::Timer {
+    // --time-limit stops the session from the client side; it is not a server
+    // option, though this client used to send it as one.
+    let time_limit = slint::Timer::default();
+    if let Some(seconds) = opts.time_limit.filter(|&s| s > 0) {
+        log::info!("Time limit: {} s", seconds);
+        time_limit.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_secs(seconds as u64),
+            {
+                let reason = reason.clone();
+                move || {
+                    reason.set("the time limit");
+                    let _ = slint::quit_event_loop();
+                }
+            },
+        );
+    }
+    time_limit
+}
+
 /// `--no-video`: the session with no picture in it at all.
 ///
 /// There is nothing to draw and nothing to drain — the audio pipeline feeds the
@@ -365,29 +574,7 @@ fn run(opts: Options) -> Result<()> {
         return run_otg(opts);
     }
 
-    if opts.render_driver.is_some() {
-        log::warn!(
-            "--render-driver applies to the old SDL renderer and is ignored; \
-             set SLINT_BACKEND to pick a Slint backend instead"
-        );
-    }
-    if opts.flex_display && opts.v4l2_sink.is_some() {
-        log::warn!(
-            "--v4l2-sink is told its size once and cannot follow --flex-display; \
-             the sink will stop at the first resize"
-        );
-    }
-    if opts.gamepad == "aoa" {
-        log::warn!(
-            "--gamepad=aoa needs USB and the AOA protocol; UHID is the one that works over \
-             the control socket, so nothing will be forwarded"
-        );
-    }
-    for (name, mode) in [("--keyboard", &opts.keyboard), ("--mouse", &opts.mouse)] {
-        if !matches!(mode.as_str(), "sdk" | "uhid" | "aoa" | "disabled") {
-            log::warn!("{name}={mode} is not a mode this client has; falling back to SDK");
-        }
-    }
+    warn_about_the_flags(&opts);
 
     let mut session = session::Session::start(&opts)?;
     let had_audio = session.audio.is_some();
@@ -480,39 +667,7 @@ fn run(opts: Options) -> Result<()> {
         w.set_size(slint::PhysicalSize::new(win_w, win_h));
     }
 
-    // Everything window-specific about driving the mirror is this one closure.
-    let apply: Rc<dyn Fn(MirrorUpdate)> = {
-        let weak = window.as_weak();
-        Rc::new(move |update| {
-            let Some(window) = weak.upgrade() else { return };
-            let mirror = window.global::<Mirror>();
-            match update {
-                MirrorUpdate::Frame(image) => mirror.set_frame(image),
-                MirrorUpdate::Geometry { aspect, rotation, frame_width, frame_height } => {
-                    mirror.set_display_aspect(aspect);
-                    mirror.set_rotation(rotation);
-                    mirror.set_frame_width(frame_width as i32);
-                    mirror.set_frame_height(frame_height as i32);
-                }
-                MirrorUpdate::Live(live) => {
-                    mirror.set_live(live);
-                    if !live {
-                        // The placeholder is drawn over the picture, not
-                        // instead of it, so a frame left behind here is the
-                        // stopped session still on screen underneath "waiting
-                        // for a picture" — and, at 1080x2400 in RGBA, ten
-                        // megabytes held for as long as the window is open.
-                        // Live goes false once, before a session's first frame,
-                        // and never on a stall, so this cannot blank a running
-                        // mirror: what it clears is the previous session's last
-                        // frame, which the new one would otherwise show until
-                        // its own first frame arrived.
-                        mirror.set_frame(slint::Image::default());
-                    }
-                }
-            }
-        })
-    };
+    let apply = make_the_mirror_updater(&window);
 
     // Kept out of `attach` as well, because --flex-display sends messages of its
     // own that have nothing to do with input.
@@ -524,67 +679,9 @@ fn run(opts: Options) -> Result<()> {
         uhid.attach(Some(controller.clone()), &opts, &session.serial);
     }
 
-    let attachment = {
-        let weak = window.as_weak();
-        let reason_for_action = reason.clone();
-        attach(
-            video,
-            controller.clone(),
-            &window.global::<Mirror>(),
-            &opts,
-            apply,
-            move |action, (frame_w, frame_h), orientation| {
-                let Some(window) = weak.upgrade() else { return };
-                let w = window.window();
-                match action {
-                    WindowAction::Quit => {
-                        reason_for_action.set("MOD+q");
-                        let _ = slint::quit_event_loop();
-                    }
-                    WindowAction::ToggleFullscreen => w.set_fullscreen(!w.is_fullscreen()),
-                    WindowAction::ResizeToFit => {
-                        let (width, height) = optimal_window_size(frame_w, frame_h, orientation);
-                        w.set_size(slint::PhysicalSize::new(width, height));
-                        log::info!("Resized window to fit: {}x{}", width, height);
-                    }
-                    WindowAction::PixelPerfect => {
-                        let (width, height) = if orientation.swaps_dimensions() {
-                            (frame_h, frame_w)
-                        } else {
-                            (frame_w, frame_h)
-                        };
-                        w.set_size(slint::PhysicalSize::new(width, height));
-                        log::info!("Resized to pixel-perfect: {}x{}", width, height);
-                    }
-                    _ => {}
-                }
-            },
-            {
-                let reason = reason.clone();
-                move || {
-                    reason.set("the end of the video stream");
-                    let _ = slint::quit_event_loop();
-                }
-            },
-        )
-    };
+    let attachment = attach_the_session(video, controller.clone(), &window, &opts, apply, &reason);
 
-    // The gamepads on this desk, as gamepads on the device. gilrs is a queue
-    // rather than something to wait on, so it is read on a timer of its own.
-    let gamepad_poll = slint::Timer::default();
-    let gamepads = (opts.gamepad == "uhid")
-        .then(Gamepads::new)
-        .flatten()
-        .map(|gamepads| Rc::new(std::cell::RefCell::new(gamepads)));
-    if let (Some(gamepads), Some(controller)) = (gamepads.as_ref(), controller.as_ref()) {
-        gamepads.borrow_mut().attach(controller.clone());
-        let gamepads = gamepads.clone();
-        gamepad_poll.start(
-            slint::TimerMode::Repeated,
-            input::gamepads::POLL_INTERVAL,
-            move || gamepads.borrow_mut().poll(),
-        );
-    }
+    let (gamepad_poll, gamepads) = start_the_gamepads(&opts, &controller);
 
     // Nothing may inject an input that is already on its way as a HID report.
     if let Some(ref uhid) = uhid {
@@ -593,49 +690,9 @@ fn run(opts: Options) -> Result<()> {
         input.set_uhid_mouse(uhid.mouse_attached());
     }
 
-    // --flex-display: the device's display follows the window, which means
-    // telling it the size every time the window settles on a new one.
-    let flex_display = slint::Timer::default();
-    if opts.flex_display {
-        match controller.clone() {
-            Some(controller) => {
-                let weak = window.as_weak();
-                let orientation = attachment.orientation.clone();
-                let mut flex = FlexDisplay::new();
-                flex_display.start(slint::TimerMode::Repeated, FLEX_POLL_INTERVAL, move || {
-                    let Some(window) = weak.upgrade() else { return };
-                    let size = window.window().size();
-                    let Some((width, height)) =
-                        flex.poll((size.width, size.height), orientation.get())
-                    else {
-                        return;
-                    };
-                    log::info!("Flex display: asking for {}x{}", width, height);
-                    controller.push_msg(ControlMsg::ResizeDisplay { width, height });
-                });
-            }
-            // The resize is a control message, so there is nowhere to send it.
-            None => log::warn!("--flex-display needs control, which --no-control turns off"),
-        }
-    }
+    let flex_display = start_flex_display(&opts, &window, &controller, &attachment);
 
-    // --time-limit stops the session from the client side; it is not a server
-    // option, though this client used to send it as one.
-    let time_limit = slint::Timer::default();
-    if let Some(seconds) = opts.time_limit.filter(|&s| s > 0) {
-        log::info!("Time limit: {} s", seconds);
-        time_limit.start(
-            slint::TimerMode::SingleShot,
-            std::time::Duration::from_secs(seconds as u64),
-            {
-                let reason = reason.clone();
-                move || {
-                    reason.set("the time limit");
-                    let _ = slint::quit_event_loop();
-                }
-            },
-        );
-    }
+    let time_limit = start_the_time_limit(&opts, &reason);
 
     let interrupt = watch_for_interrupt(reason.clone());
 
