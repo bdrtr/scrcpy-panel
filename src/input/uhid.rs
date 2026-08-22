@@ -250,16 +250,16 @@ impl Uhid {
                 // the message reaches it. Without a controller there is nowhere
                 // to queue it, which is a failure.
                 match self.controller.as_ref() {
-                    Some(controller) => {
-                        controller.push_msg(ControlMsg::UhidCreate {
-                            id,
-                            vendor_id: 0,
-                            product_id: 0,
-                            name: None,
-                            report_desc: report_desc.to_vec(),
-                        });
-                        true
-                    }
+                    // And whether it was queued is what this returns: saying
+                    // "true" for a create the queue had refused is the very
+                    // thing the comment above is about, one step further out.
+                    Some(controller) => controller.push_msg(ControlMsg::UhidCreate {
+                        id,
+                        vendor_id: 0,
+                        product_id: 0,
+                        name: None,
+                        report_desc: report_desc.to_vec(),
+                    }),
                     None => false,
                 }
             }

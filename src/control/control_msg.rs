@@ -174,6 +174,29 @@ fn to_i16fp(value: f32) -> i16 {
 }
 
 impl ControlMsg {
+    /// Whether losing this message costs nothing but smoothness.
+    ///
+    /// The queue behind the control socket is bounded, and something has to
+    /// give when it fills. A pointer that moved is superseded by the next move,
+    /// so a lost one costs a little smoothness and nothing else. A pointer that
+    /// was *lifted* is superseded by nothing: lose that and the device goes on
+    /// believing the finger is down — the drag never ends — until some later
+    /// click happens to deliver a fresh release. A key's release is the whole
+    /// of the difference between a keystroke and a character repeating for
+    /// ever. Everything that is not a move waits its turn instead.
+    pub fn is_droppable(&self) -> bool {
+        match self {
+            ControlMsg::InjectTouch { action, .. } => {
+                *action == AMOTION_ACTION_MOVE || *action == AMOTION_ACTION_HOVER_MOVE
+            }
+            // A notch not scrolled is a notch not scrolled; it leaves nothing
+            // on the device in a state that needs undoing.
+            ControlMsg::InjectScroll { .. } => true,
+            _ => false,
+        }
+    }
+
+
     /// Serialize this control message into bytes for the wire protocol
     pub fn serialize(&self) -> io::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(128);

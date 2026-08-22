@@ -1179,12 +1179,21 @@ fn wire(window: &PanelWindow, panel: &Rc<Panel>, opts: &Options) {
             let controller = panel.controller.borrow().clone();
             match controller {
                 Some(controller) => {
-                    controller.push_msg(ControlMsg::SetClipboard {
+                    // Whether it was queued at all is the only thing this side
+                    // can know — the device makes it its clipboard when the
+                    // message arrives. It used to say "sent" either way, so a
+                    // control channel that had died reported success for a
+                    // message nobody had taken.
+                    let queued = controller.push_msg(ControlMsg::SetClipboard {
                         sequence: 0,
                         paste: false,
                         text,
                     });
-                    panel.info(&tr!("Pano cihaza gönderildi."));
+                    if queued {
+                        panel.info(&tr!("Pano cihaza gönderildi."));
+                    } else {
+                        panel.warn(&tr!("Pano gönderilemedi: denetim kanalı yanıt vermiyor."));
+                    }
                 }
                 None => panel.warn(
                     "Panoyu göndermek için gömülü bir oturum gerekiyor \

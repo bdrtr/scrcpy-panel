@@ -890,6 +890,9 @@ msgstr "The clipboard is empty."
 msgid "Pano cihaza gönderildi."
 msgstr "The clipboard was sent to the device."
 
+msgid "Pano gönderilemedi: denetim kanalı yanıt vermiyor."
+msgstr "The clipboard could not be sent: the control channel is not answering."
+
 msgid "Bu bayraklar istemcide henüz yok, atlandı: {}"
 msgstr "These flags do not exist in the client yet and were skipped: {}"
 
