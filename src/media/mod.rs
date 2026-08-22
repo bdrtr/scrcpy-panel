@@ -1,3 +1,4 @@
+pub mod clock;
 pub mod audio_decoder;
 pub mod demuxer;
 pub mod decoder;

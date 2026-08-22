@@ -312,12 +312,32 @@ and none of them needed a phone to find. What each was held to:
   were showing in Turkish in an English panel; a test now walks the Rust source for
   `tr!` calls and holds every one to the generated table, and a second walks the error
   cards, whose strings reach `tr!` as variables and are invisible to the first.
-- **`--video-buffer` shifts the stream; it does not smooth it.** The file said it
-  "smooths out network jitter", and it cannot as written: a frame's release time is its
-  arrival plus a constant, so the spacing on the way out is the spacing on the way in.
-  Doing what upstream does needs the frame's own timestamp carried through the decoder,
-  which `DecodedFrame` does not have. The claim is gone and a test pins what the file
-  actually does. Its stop is prompt now as well — it waited in a `sleep` no notification
+- **`--video-buffer` smooths the stream now, and it did not before.** It used to release a
+  frame at the moment it *arrived* plus a constant, so the spacing on the way out reproduced
+  the spacing on the way in exactly — three frames arriving in a 2 ms burst left as a 2 ms
+  burst N ms later. That is a shift, not a smoothing, and the difference is the whole reason
+  the option exists. A frame is released on its own timestamp now, which is what the device
+  recorded and therefore what the screen actually had. `DecodedFrame` carries the timestamp
+  (`src/media/clock.rs` is upstream's `sc_clock`, ported: an additive offset averaged over
+  thirty-two points with a startup ramp, and the same truncating division, because the offset
+  is negative and a shift would floor it). Three of upstream's precautions came with it: the
+  deadline is re-derived on every wake rather than fixed at push, since each new frame
+  improves the offset; it is clamped to `now + delay` from the moment the frame was picked
+  up, without which a timestamp discontinuity — a rotation, a stream reset — freezes the
+  window for exactly the size of the jump; and a frame past its deadline is released rather
+  than dropped, because this buffer has no way to hand one back to the frame pool and a pool
+  that can only shrink leaves the decoder allocating ten megabytes a frame for the rest of
+  the session. A stream that arrives without timestamps keeps the old behaviour rather than
+  losing the buffer.
+
+  `a_burst_leaves_spread_out_again` is the test, and it has teeth: three frames pushed
+  together but stamped 60 ms apart have to leave at least 80 ms apart, and put back on
+  arrival scheduling for one run it fails. The bound is a lower one on purpose — a loaded
+  machine can only make the gaps longer.
+
+  What this cannot reach is downstream. The window's pump polls on a 4 ms timer and draws the
+  newest frame it finds, so releases are re-quantised to 4 ms whatever the buffer does: a
+  fifth of a frame at 16.7 ms, and the floor on what smoothing here is worth. Its stop is prompt now as well — it waited in a `sleep` no notification
   could cut short, so a buffer told to stop held its thread, and the join behind it, for
   the rest of the delay: with the sleep put back, the new test measures the join waiting
   2.95 s of a 3 s delay for a buffer that had been told to go.

@@ -44,6 +44,14 @@ pub struct DecodedFrame {
     pub buffer: SharedPixelBuffer<Rgba8Pixel>,
     pub width: u32,
     pub height: u32,
+    /// The frame's own timestamp, in scrcpy's time base — microseconds, on the
+    /// device's clock. `None` where libavcodec produced a frame without one,
+    /// which a stream whose every packet carries a pts should not do.
+    ///
+    /// Carried so that `--video-buffer` can release a frame at the moment it
+    /// belongs to rather than a fixed distance after the moment it happened to
+    /// arrive. Nothing else reads it.
+    pub pts: Option<i64>,
 }
 
 impl DecodedFrame {
@@ -53,6 +61,7 @@ impl DecodedFrame {
             buffer: SharedPixelBuffer::new(0, 0),
             width: 0,
             height: 0,
+            pts: None,
         }
     }
 }
@@ -491,13 +500,23 @@ impl VideoDecoder {
 
     /// Process a decoded frame — handle hw transfer and format conversion
     fn process_frame(&mut self, output: &mut DecodedFrame) -> Result<()> {
-        if self.hw_active && self.av_frame.format() == self.hw_pix_fmt {
+        // Read off `av_frame` in both cases, and before the branch.
+        // `av_hwframe_transfer_data` does not copy frame properties and
+        // `transfer_hw_frame` copies only the size, so a timestamp taken from
+        // the converted frame would be missing on every hardware frame — and
+        // hardware is the default. Assigned unconditionally, because these
+        // come from a pool: a `None` that left the field alone would hand the
+        // delay buffer the previous occupant's timestamp.
+        let pts = self.av_frame.timestamp().or_else(|| self.av_frame.pts());
+        let converted = if self.hw_active && self.av_frame.format() == self.hw_pix_fmt {
             // Hardware frame — bring it back to system memory for swscale
             self.transfer_hw_frame()?;
             self.convert_to_rgb(&self.sw_frame as *const _, output)
         } else {
             self.convert_to_rgb(&self.av_frame as *const _, output)
-        }
+        };
+        output.pts = pts;
+        converted
     }
 
     /// Transfer a hardware frame to software (GPU → CPU).
