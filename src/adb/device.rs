@@ -199,18 +199,59 @@ pub fn restart_server() -> Result<()> {
 /// The words are read as well as the status, for the reason `did_not_connect`
 /// exists: adb's exit code is not a reliable account of what happened.
 pub fn enable_tcpip(serial: &str, port: u16) -> Result<()> {
-    let mut command = for_device(serial);
-    command.args(["tcpip", &port.to_string()]);
-    let said = output_of(command, "tcpip")?;
-    if refused(&said) {
-        bail!("{}", last_line(&said));
+    let wanted = port.to_string();
+
+    // Asked first, because both answers are worth having before anything is
+    // switched. A device already listening on the port needs nothing done to
+    // it — and adb's own reply cannot say that, since it restarts adbd and
+    // reports the closure either way. And a serial nothing answers to is a
+    // serial there is no point waiting on afterwards: adb's refusal is then
+    // the whole story, which is what keeps this prompt when the panel is
+    // pointed at a device that has gone.
+    if property(serial, "service.adb.tcp.port") == wanted {
+        return Ok(());
     }
-    // Only once it really has been asked. The sleep is the device restarting
-    // its adb daemon on the new transport; connecting before it has is what
-    // makes the first attempt fail. This was written twice — here and in the
-    // session — with different waits.
-    std::thread::sleep(std::time::Duration::from_secs(2));
-    Ok(())
+    let present = !property(serial, "ro.build.version.release").is_empty();
+
+    let mut command = for_device(serial);
+    command.args(["tcpip", &wanted]);
+    let said = output_of(command, "tcpip");
+
+    if !present {
+        return match said {
+            Err(e) => Err(e),
+            Ok(said) if !said.trim().is_empty() => bail!("{}", last_line(&said)),
+            Ok(_) => bail!("there is no device {serial:?} to switch"),
+        };
+    }
+
+    // What adb said is not the answer either way. It tears down the transport
+    // it is speaking over in order to do this, so a switch that worked comes
+    // back as "error: closed" or as the device not being found about half the
+    // time. Timed on the Redmi: adb replies at 14 ms, the transport closes at
+    // 67, the device leaves the list at 327, and the device's own
+    // `service.adb.tcp.port` reads 5555 at 878.
+    //
+    // So ask the device. That is an observation it makes about itself rather
+    // than one adb makes about a socket it has just closed, and it ends the
+    // fixed two-second sleep this used to do over the top of the question: it
+    // returns as soon as the device says so, and says so if it never does.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if property(serial, "service.adb.tcp.port") == wanted {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    match said {
+        Err(e) => Err(e),
+        Ok(said) if refused(&said) => bail!("{}", last_line(&said)),
+        Ok(said) => bail!("adb said {said:?} and the device is not listening on {port}"),
+    }
 }
 
 /// `adb connect`, giving back whatever it said so the caller can show it.
@@ -311,9 +352,19 @@ fn transfer(mut command: Command, what: &str) -> Result<String> {
 
 /// Whether adb's own words say the transfer did not happen.
 ///
-/// `adb install` reports a refused install on stdout and still exits 0, so the
-/// status on its own would call a failed install a success. This lived in the
-/// panel, where nothing could test it.
+/// This used to say that `adb install` reports a refused install and still
+/// exits 0, which is why reading the words matters. Put to a device — a file
+/// that is not an apk, on the Redmi with adb 1.0.41 — that is not what happens:
+/// it exits 1, and says both "adb: failed to install …" and the device's own
+/// "Failure [INSTALL_PARSE_FAILED_NOT_APK …]". The claim may have been an older
+/// adb's, and it is not this one's.
+///
+/// What a device does confirm is the same point about `push`: a push into
+/// somewhere read-only prints "1 file pushed, 0 skipped" *and then* the error,
+/// on different streams. A caller reading the first line, or the exit status of
+/// an adb that gives zero, calls that a success — which is what `last_line`
+/// exists for, and it is checked against a real refusal in
+/// `what_a_device_says_here`.
 pub fn refused(said: &str) -> bool {
     // Folded, because `did_not_connect` lowercases before it gets here and a
     // capital F could then never match: the `Failure` arm was unreachable down
@@ -382,12 +433,15 @@ mod tests {
         assert_eq!(property("no-such-device", "ro.build.version.release"), "");
         assert_eq!(screen_size("no-such-device"), "");
 
-        // The wireless switch, which is the one that used to be unable to fail.
-        // With nothing attached adb exits 1 and says "error: no
-        // devices/emulators found", and the old code read `status().is_ok()` —
-        // true, because adb ran — slept two seconds and reported success.
+        // The wireless switch, which is the one that used to be unable to fail:
+        // the old code read `status().is_ok()` — true, because adb ran, even
+        // as it exited 1 — then slept two seconds and reported success.
+        //
+        // Named rather than left empty. An empty serial means "whichever device
+        // there is", so with a phone plugged in this asks the *phone*, and the
+        // first version of this test really did switch one over.
         let began = std::time::Instant::now();
-        match enable_tcpip("", 5555) {
+        match enable_tcpip("no-such-device", 5555) {
             Ok(()) => panic!("tcpip with nothing attached came back as a success"),
             Err(e) => println!("tcpip refused, as it should be: {e:#}"),
         }
@@ -416,6 +470,153 @@ mod tests {
             }
         }
         let _ = std::fs::remove_file(&file);
+    }
+
+    /// The other half of this module, and the one it could not reach until a
+    /// phone was plugged in: what each operation does when it *works*.
+    ///
+    /// `cargo test --release -- --ignored --nocapture --test-threads=1
+    /// what_a_device_says`. It skips itself rather than failing where there is
+    /// no device, so it costs nothing to leave in the same run as
+    /// `what_adb_says_here` — but not in the same *thread pool*: they both
+    /// reach for the one phone, and run together the first version of this
+    /// switched the device out from under the other one.
+    ///
+    /// It leaves the device as it found it. The file it pushes is removed, the
+    /// install it asks for is one the device is meant to refuse, and the TCP/IP
+    /// switch is put back to USB before it returns.
+    #[test]
+    #[ignore]
+    fn what_a_device_says_here() {
+        let Some(device) = list_detailed()
+            .ok()
+            .and_then(|found| found.into_iter().find(Device::is_usable))
+        else {
+            eprintln!("no usable device attached, so the device half is unchecked");
+            return;
+        };
+        let serial = device.serial.clone();
+        println!(
+            "on {} ({serial}), Android {}, {}",
+            device.name, device.android, device.screen
+        );
+
+        // The list asks each usable device what it is; a row that came back
+        // without those is a row the panel would show half-filled.
+        assert!(!device.android.is_empty(), "a usable device with no version");
+        assert!(
+            device.screen.contains('x'),
+            "a usable device with no screen size: {:?}",
+            device.screen
+        );
+        assert_eq!(property(&serial, "ro.build.version.release"), device.android);
+        assert_eq!(screen_size(&serial), device.screen);
+
+        // The one operation whose answer is bytes rather than words. `exec-out`
+        // is there so no shell rewrites the line endings on the way back, and
+        // the magic is what says it did not.
+        let shot = screencap(&serial).expect("a screenshot");
+        println!("screencap: {} bytes", shot.len());
+        assert!(
+            shot.starts_with(b"\x89PNG\r\n\x1a\n"),
+            "that is not a PNG: {:02x?}",
+            &shot[..8.min(shot.len())]
+        );
+
+        let file = std::env::temp_dir().join("scrcpy-slint-device-probe");
+        std::fs::write(&file, b"probe").expect("a file to push");
+
+        let said = push(&serial, &file, "/sdcard/Download/").expect("a push");
+        println!("push: {said}");
+        assert!(
+            shell(&serial, &["ls", "/sdcard/Download/scrcpy-slint-device-probe"])
+                .contains("scrcpy-slint-device-probe"),
+            "the push reported success and the file is not there"
+        );
+        shell(&serial, &["rm", "-f", "/sdcard/Download/scrcpy-slint-device-probe"]);
+
+        // And the same push somewhere it cannot go, which is the one worth
+        // having a device for: adb prints "1 file pushed, 0 skipped" *and then*
+        // the error, on this device with the two on different streams. A caller
+        // reading the first line calls that a success, and so does one reading
+        // the exit status on an adb that gives zero.
+        match push(&serial, &file, "/system/") {
+            Ok(said) => panic!("a push into /system came back as a success: {said:?}"),
+            Err(e) => {
+                let e = format!("{e:#}");
+                println!("a refused push: {e}");
+                assert!(
+                    !e.contains("file pushed"),
+                    "the reason carried is adb's success line, not its error: {e}"
+                );
+            }
+        }
+
+        // An install the device is meant to refuse. Not a real apk, so nothing
+        // is installed and nothing has to be removed; what is being checked is
+        // that `Failure` on the device's own lips comes back as an error.
+        let not_an_apk = std::env::temp_dir().join("scrcpy-slint-not-an-apk.apk");
+        std::fs::write(&not_an_apk, b"not an apk").expect("a file to offer");
+        match install(&serial, &not_an_apk) {
+            Ok(said) => panic!("an install that did not happen came back as {said:?}"),
+            Err(e) => println!("a refused install: {e:#}"),
+        }
+
+        key_event(&serial, "KEYCODE_WAKEUP").expect("a key event");
+
+        // The switch this module got wrong twice. It cannot be read off what
+        // adb says — adb closes the transport it is speaking over to do it, and
+        // reports the closure — so the device is asked instead, and this is
+        // where that gets checked against a device that really switches.
+        let began = std::time::Instant::now();
+        enable_tcpip(&serial, 5555).expect("the wireless switch");
+        println!("tcpip: the device says 5555 after {:?}", began.elapsed());
+        assert_eq!(
+            property(&serial, "service.adb.tcp.port"),
+            "5555",
+            "it came back happy and the device is not listening"
+        );
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(3),
+            "the switch took {:?}, which is longer than waiting blindly used to",
+            began.elapsed()
+        );
+        let back = shell(&serial, &["--", "usb"]);
+        println!("and back: {}", back.trim());
+
+        // And wait for it to be a device again before letting go. Switching
+        // modes takes the transport down and the next thing to ask gets an
+        // empty answer rather than an error — which is how a run of this
+        // alongside `what_adb_says_here` listed the phone as usable with no
+        // Android version and no screen size against it.
+        let settled = std::time::Instant::now();
+        while property(&serial, "ro.build.version.release").is_empty()
+            && settled.elapsed() < std::time::Duration::from_secs(10)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        println!("usb again after {:?}", settled.elapsed());
+
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(&not_an_apk);
+    }
+
+    /// `adb shell …` for the test's own housekeeping, which the module proper
+    /// has no reason to expose.
+    #[cfg(test)]
+    fn shell(serial: &str, args: &[&str]) -> String {
+        let mut command = for_device(serial);
+        if args.first() == Some(&"--") {
+            command.args(&args[1..]);
+        } else {
+            command.arg("shell").args(args);
+        }
+        let output = command.output().expect("adb ran");
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
     }
 
     /// What adb says when a connect does not happen, and it is not the exit

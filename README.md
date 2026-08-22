@@ -179,7 +179,34 @@ rather than left to that. And the command in that test's own doc comment,
 `--ignored --nocapture adb_here`, matches no test — the name is `what_adb_says_here` — so
 anyone following the source rather than this file ran nothing at all and saw it pass.
 
-What none of it covers is a device answering. The push, at least, is no longer among the
+**And then a phone was plugged in, which is the half none of that could reach.**
+`what_a_device_says_here` runs the same operations against a device and holds each to what
+it should do when it works: the list's row filled in and agreeing with `getprop` and
+`wm size`, a screenshot that really is a PNG, a push that lands and can be found afterwards,
+a push into `/system` that is refused, an install of something that is not an apk that the
+device rejects, a key event, and the wireless switch. It leaves the device as it found it.
+
+Two things came back different from what this file said. **`adb install` does not exit 0 on
+a refusal here** — offered a file that is not an apk, adb 1.0.41 exits 1 and says both
+"adb: failed to install …" and the device's own "Failure [INSTALL_PARSE_FAILED_NOT_APK …]".
+That claim, which is the stated reason `refused` exists, may have been an older adb's; it is
+not this one's. What the device does confirm is the same point about **push**: pushed
+somewhere read-only it prints "1 file pushed, 0 skipped" *and then* the error, on two
+different streams, so a caller reading the first line calls a failure a success. That is
+what `last_line` is for and it is now checked against a real refusal.
+
+**And the wireless switch had to be written a third time.** Reading adb's words was still
+wrong, because `adb tcpip` tears down the transport it is speaking over in order to do the
+thing, and then reports the closure: about half of ten switches came back "error: closed" or
+"device not found" for a switch that had worked, one of them with the device's own
+`service.adb.tcp.port` already reading 5555. Timed on the Redmi, adb replies at 14 ms, the
+transport closes at 67, the device leaves the list at 327, and the property reads 5555 at
+878. So the client asks the device rather than adb, and returns the moment it answers —
+878, 888 and 997 ms over three runs, against the two seconds it used to sleep blind. Going
+back the other way is slower and worth knowing: `adb usb` and the device is answering again
+after 5.06 s.
+
+What none of it covers is the protocol side. The push, at least, is no longer among the
 untried: it has a fake daemon of its own — sixty lines of `TcpListener` that speaks enough
 of adb's protocol to take one — which holds the framing to account rather than skipping to
 the end. The transport, the switch to sync mode, the path with its mode, 100 KB arriving as
