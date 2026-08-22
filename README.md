@@ -79,6 +79,7 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | `--no-video-playback` | works — 170 frames recorded with nothing drawn |
 | `--mouse-bind` | works — parsed, with 6 tests; malformed input warns and keeps the default |
 | `--shortcut-mod` | works — scrcpy's `+` and `,` syntax, checked against the phone for all four spellings |
+| `--video-bit-rate`, `--audio-bit-rate` | work — scrcpy's K and M suffixes; 2M and 8M measured at 1.51 and 3.37 Mbps |
 | Ayarlar: adb path, adb port, record dir, screenshot dir | consulted at runtime |
 | Ayarlar: autostart profile, version check, log to disk | work |
 | Recording started and stopped mid-session | works — 568 video + 552 Opus frames over 11 s |
@@ -316,6 +317,21 @@ and none of them needed a phone to find. What each was held to:
   Left and right stay one flag, which is Slint's limit rather than the parse's, and the
   default here stays `lalt` where scrcpy's is `lalt,lsuper` — a difference worth knowing
   about rather than one to change quietly.
+- **The command line the panel prints for copying did not run on the binary that printed
+  it.** `command/mod.rs` opens by saying the preview is "canonical scrcpy flags, so it can be
+  copied into a terminal" — and `--video-bit-rate=8M`, which is the form scrcpy's own help
+  prints, came back from this client's argument parser as `invalid digit found in string`.
+  The panel had been getting away with it: `expand_bit_rate` turns 8M into 8000000 behind
+  the preview's back before launching, and a test named
+  `bit_rates_are_expanded_for_the_client_but_not_for_the_preview` pins exactly that
+  asymmetry. So the one path that never went through the panel — a human copying the line
+  the panel offers — was the one that failed. `--video-bit-rate` and `--audio-bit-rate` take
+  the suffix now, in either case, and refuse `8G`, `eight` and `9999M` with a sentence rather
+  than folding them into a plausible small number. Put to the Redmi under the same motion,
+  the suffix reaches the phone's encoder and changes what comes back: `2M` records 1.51 Mbps
+  and `8M` records 3.37 Mbps over about seven seconds each. The 8M run is under its ceiling
+  because the picture did not need the bits, which is what a cap is. The panel still expands
+  before launching; that is belt and braces now rather than the thing holding it up.
   The test had been asserting on upstream's wording under a comment saying these are
   messages "this program or adb really produces".
 - **The control queue would throw away the finger coming up.** `QUEUE_LIMIT` is

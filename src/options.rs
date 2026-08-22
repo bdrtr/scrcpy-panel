@@ -28,8 +28,8 @@ pub struct Options {
     #[arg(long)]
     pub max_fps: Option<String>,
 
-    /// Video bit rate in bps (default 8M)
-    #[arg(short = 'b', long, default_value = "8000000")]
+    /// Video bit rate in bps, with an optional K or M suffix (default 8M)
+    #[arg(short = 'b', long, default_value = "8000000", value_parser = bit_rate)]
     pub video_bit_rate: u32,
 
     /// Video codec: h264, h265, av1
@@ -235,8 +235,8 @@ pub struct Options {
     #[arg(long)]
     pub time_limit: Option<u32>,
 
-    /// Audio bit rate in bps (default 128K)
-    #[arg(long, default_value = "128000")]
+    /// Audio bit rate in bps, with an optional K or M suffix (default 128K)
+    #[arg(long, default_value = "128000", value_parser = bit_rate)]
     pub audio_bit_rate: u32,
 
     /// Video encoder name (e.g. OMX.qcom.video.encoder.avc)
@@ -557,6 +557,32 @@ pub fn rgb_from_hex(value: &str) -> Option<(u8, u8, u8)> {
 
 /// `--background-color`, refused at the command line rather than silently
 /// falling back to the default colour when it is mistyped.
+/// scrcpy's bit rates take an optional `K` or `M` suffix, and `--video-bit-rate=8M`
+/// is the form its own help prints.
+///
+/// Only plain digits were read here, so that line came back "invalid digit found
+/// in string" — including when it was the panel that had written it. The panel's
+/// preview offers canonical scrcpy flags for copying into a terminal, and
+/// `expand_bit_rate` had to turn 8M into 8000000 behind its back before the
+/// client would take its own suggestion.
+fn bit_rate(value: &str) -> Result<u32, String> {
+    let text = value.trim();
+    let (digits, multiplier) = if let Some(digits) = text.strip_suffix(['K', 'k']) {
+        (digits, 1_000u64)
+    } else if let Some(digits) = text.strip_suffix(['M', 'm']) {
+        (digits, 1_000_000u64)
+    } else {
+        (text, 1)
+    };
+    let count: u64 = digits
+        .parse()
+        .map_err(|_| format!("`{value}` is not a bit rate: digits, optionally followed by K or M"))?;
+    count
+        .checked_mul(multiplier)
+        .and_then(|bits| u32::try_from(bits).ok())
+        .ok_or_else(|| format!("`{value}` is larger than a bit rate can be"))
+}
+
 fn hex_colour(value: &str) -> Result<String, String> {
     match rgb_from_hex(value) {
         Some(_) => Ok(value.to_string()),
@@ -808,5 +834,34 @@ mod tests {
         assert!(parse(&[]).key_repeat_forwarded());
         assert!(parse(&["--forward-key-repeat"]).key_repeat_forwarded());
         assert!(!parse(&["--no-key-repeat"]).key_repeat_forwarded());
+    }
+
+    /// scrcpy writes bit rates with a suffix — 8M is what its own help prints,
+    /// and what the panel puts in the command line it offers for copying. This
+    /// client refused all of them, so that command line did not run on the
+    /// binary that printed it.
+    #[test]
+    fn a_bit_rate_takes_the_suffix_scrcpy_writes() {
+        let rate = |flag: &str| {
+            Options::try_parse_from(["scrcpy-slint", flag]).map(|o| o.video_bit_rate)
+        };
+        assert_eq!(rate("--video-bit-rate=8M").unwrap(), 8_000_000);
+        assert_eq!(rate("--video-bit-rate=128K").unwrap(), 128_000);
+        assert_eq!(rate("--video-bit-rate=2m").unwrap(), 2_000_000, "either case");
+        assert_eq!(rate("--video-bit-rate=4000000").unwrap(), 4_000_000, "and no suffix at all");
+
+        assert_eq!(
+            Options::try_parse_from(["scrcpy-slint", "--audio-bit-rate=96K"])
+                .unwrap()
+                .audio_bit_rate,
+            96_000
+        );
+
+        assert!(rate("--video-bit-rate=8G").is_err(), "a suffix it does not know");
+        assert!(rate("--video-bit-rate=eight").is_err(), "not a number");
+        assert!(
+            rate("--video-bit-rate=9999M").is_err(),
+            "a number so large that expanding it would wrap, refused rather than folded"
+        );
     }
 }
