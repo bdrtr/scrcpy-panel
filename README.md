@@ -626,6 +626,23 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   reference measures how much of itself is real rather than predicting it, and the client's
   fix does not depend on the rule either. Give the row 32 bytes of slack and every converter
   fills every column.
+- **The decoder had been losing those columns for real, and the probe that picks its write
+  could not see it.** `choose_write` converts the first frame of each size into a buffer with
+  room to spare and reads the room back, twice with a different filling, because the failure
+  it was written for is swscale *overrunning* the window's buffer. A converter that writes
+  *short* leaves that room alone, comes back as the safest of the three, and gets the direct
+  write — straight into the window's buffer, with the columns it declined to fill left
+  holding whatever was there before: black on a fresh buffer, the previous frame on a
+  recycled one. Proved rather than argued: at 66x64 the direct write leaves columns 64 and 65
+  untouched by two conversions with two different fillings, which is
+  `the_conversion_fills_every_column` in `src/media/decoder.rs`. It had never shown up because
+  every width in the suite — 1080, 1081, 64 — is one of the ones that loses nothing, and
+  because the test that would have caught it compares against the same swscale call, so the
+  hole was on both sides of its comparison. The same two fillings answer the new question at
+  no extra cost: a byte left alone by both runs was never written. There is a fourth write
+  now, `Padded`, which converts through a row 64 bytes wider than the picture and copies it in
+  a row at a time. `--max-size` cannot reach an affected width, since it rounds down to a
+  multiple of eight; `--crop` and `--new-display` pass their size straight through and can.
 - Two things that check said and should not have. Slint's own `take_snapshot` returns a
   blank buffer rather than an error on the OpenGL renderer here — and two blanks compare
   equal, so the first version of the check reported a perfect match between paths it had not

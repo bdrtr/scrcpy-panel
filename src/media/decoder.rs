@@ -110,7 +110,31 @@ enum Write {
     /// which is the cost the direct write exists to avoid. The answer when the
     /// converter overruns *and* draws the tail differently on its own.
     Scratch,
+    /// The whole picture through `scratch` at a *wider* row than the picture,
+    /// and copied in a row at a time. The answer to the opposite failure: a
+    /// converter that writes less than the row rather than more. Given a row
+    /// with no slack in it swscale declines to fill the last `width % 16`
+    /// columns whenever that is between one and seven, and the direct write
+    /// leaves them holding whatever the window's buffer held before — the
+    /// previous frame, on a recycled one. Give the row 32 bytes and it fills
+    /// them; this leaves 64.
+    Padded,
 }
+
+/// Slack on the end of a padded row, in bytes. swscale fills a row out to a
+/// multiple of sixteen pixels, and what it will not do is fill one it has no
+/// room to round up. Measured against libswscale over every width from 8 to 400
+/// and every even one to 1600: nothing is lost at 32 bytes or more, and 1079
+/// needed only 4 while 66 needed 32, so the minimum is not a simple function of
+/// the width and this is the round number above all of them.
+///
+/// That sweep asked one converter, though — how many columns go missing is the
+/// SIMD path's business rather than libswscale's, and under
+/// `av_force_cpu_flags(0)` the pattern changes shape — so `choose_write` does
+/// not take this number on trust. It converts the first frame of each size
+/// through the padded row as well and looks for the same canary again, and says
+/// so if a hole survives.
+const ROW_SLACK: usize = 64;
 
 /// Room past the last row of a scratch buffer for swscale to overrun into. It
 /// fills the row out to a multiple of sixteen pixels, which into RGBA is 32 bytes
@@ -689,6 +713,25 @@ impl VideoDecoder {
                 }
                 dst.copy_from_slice(&self.scratch[..needed]);
             }
+            Write::Padded => {
+                let padded = row_bytes + ROW_SLACK;
+                unsafe {
+                    scale_into(
+                        scaler,
+                        source,
+                        0,
+                        height,
+                        chroma_shift,
+                        padded,
+                        self.scratch.as_mut_ptr(),
+                    );
+                }
+                // A row at a time, because the rows are not adjacent any more.
+                for row in 0..height as usize {
+                    dst[row * row_bytes..][..row_bytes]
+                        .copy_from_slice(&self.scratch[row * padded..][..row_bytes]);
+                }
+            }
         }
 
         output.width = width;
@@ -752,6 +795,10 @@ impl VideoDecoder {
         // alone. The conversion is the same both times, so what stays in
         // `scratch` to be compared against below is the same picture either way.
         let mut past = 0;
+        // The same two fillings answer the opposite question at the same time:
+        // which bytes *inside* the picture were never written. A byte left
+        // alone by both runs was left alone.
+        let mut untouched: Option<Vec<usize>> = None;
         for canary in [0xAAu8, 0x55] {
             self.scratch.clear();
             self.scratch.resize(needed + SLACK, canary);
@@ -771,7 +818,76 @@ impl VideoDecoder {
                 .rposition(|byte| *byte != canary)
                 .map_or(0, |at| at + 1);
             past = past.max(reached);
+
+            untouched = Some(match untouched {
+                None => self.scratch[..needed]
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, byte)| **byte == canary)
+                    .map(|(at, _)| at)
+                    .collect(),
+                Some(first) => first
+                    .into_iter()
+                    .filter(|at| self.scratch[*at] == canary)
+                    .collect(),
+            });
         }
+
+        // A converter that writes short is the first thing to rule out, because
+        // it is the one failure the other three writes all share: every one of
+        // them hands swscale a row exactly the width of the picture, so every
+        // one of them gets the same hole. Only a wider row fills it.
+        let short = untouched.unwrap_or_default();
+        if !short.is_empty() {
+            let columns: std::collections::BTreeSet<usize> =
+                short.iter().map(|at| at % row_bytes / 4).collect();
+            log::info!(
+                "swscale left {} of the {} columns unwritten — {:?} — so the picture goes \
+                 through a row wider than itself",
+                columns.len(),
+                row_bytes / 4,
+                columns.iter().take(8).collect::<Vec<_>>(),
+            );
+
+            let padded = row_bytes + ROW_SLACK;
+            self.scratch = vec![0; padded * height as usize + SLACK];
+
+            // And check the cure on the same frame, since the disease was a
+            // rule about swscale that turned out to belong to one of its
+            // converters. A hole that survives a wider row is worth a line in
+            // the log: the picture is still better than the direct write would
+            // have left it, and nothing here can do more about it.
+            for canary in [0xAAu8, 0x55] {
+                self.scratch.fill(canary);
+                unsafe {
+                    scale_into(
+                        scaler,
+                        source,
+                        0,
+                        height,
+                        chroma_shift,
+                        padded,
+                        self.scratch.as_mut_ptr(),
+                    );
+                }
+                let left = (0..height as usize)
+                    .flat_map(|row| self.scratch[row * padded..][..row_bytes].iter())
+                    .filter(|byte| **byte == canary)
+                    .count();
+                if left == 0 {
+                    break;
+                }
+                if canary == 0x55 {
+                    log::warn!(
+                        "{left} bytes of the picture are still unwritten with {ROW_SLACK} \
+                         bytes of slack on the row"
+                    );
+                }
+            }
+            self.scratch.fill(0);
+            return Write::Padded;
+        }
+
         if past == 0 {
             self.scratch = Vec::new();
             return Write::Direct;
@@ -1035,6 +1151,98 @@ mod tests {
             decoder.write = chosen;
             println!(
                 "{width}x{height}: {:?}, and the whole conversion wrote {past} bytes past it",
+                decoder.write
+            );
+        }
+    }
+
+    /// swscale does not always fill the row, and the probe that picks the write
+    /// cannot see when it does not.
+    ///
+    /// `choose_write` reads its canary back out of the room *past* the picture,
+    /// because the failure it was written for is an overrun. A converter that
+    /// writes *short* leaves that room untouched, reports itself as the safest
+    /// of the three, and gets the direct write — straight into the window's
+    /// buffer, with the columns it declined to fill left holding whatever the
+    /// buffer held before. On a recycled buffer that is the previous frame.
+    ///
+    /// It declines whenever the destination row is exactly the picture — which
+    /// is what the direct write is — and `width % 16` is between one and seven:
+    /// then that many columns on the right are never written. Measured against
+    /// libswscale directly over every width from 8 to 400 and every even one to
+    /// 1600, without exception; 641 loses one, 68 loses four, 1079 loses seven,
+    /// and 1080, 1081 and 1082 lose none, which is why no size in
+    /// `the_split_conversion_matches_a_whole_one` had ever shown it. That test
+    /// could not have shown it in any case: its reference is the same swscale
+    /// call, so the hole is in both sides of its comparison.
+    ///
+    /// `--crop` and `--new-display` are the ways a session gets such a width;
+    /// `--max-size` is not, because it rounds down to a multiple of eight.
+    #[test]
+    fn the_conversion_fills_every_column() {
+        use ffmpeg_next::format::Pixel;
+        ffmpeg_next::init().unwrap();
+
+        for (width, height) in [
+            (1080u32, 2400u32), // the ordinary one, and a control
+            (64, 64),           // a multiple of sixteen, also a control
+            (66, 64),           // two columns short
+            (68, 64),           // four
+            (1090, 64),         // two, at a width a phone could really send
+            (1079, 64),         // seven, the widest hole
+        ] {
+            let mut decoder =
+                VideoDecoder::new(CodecType::H264, width, height, false).expect("a decoder");
+            let mut source = ffmpeg_next::frame::Video::new(Pixel::YUV420P, width, height);
+            for plane in 0..source.planes() {
+                for (i, byte) in source.data_mut(plane).iter_mut().enumerate() {
+                    *byte = (i.wrapping_mul(37 + plane) % 251) as u8;
+                }
+            }
+
+            // Twice, with a different filling each time, for the same reason
+            // `choose_write` does it twice: what swscale writes is picture, and
+            // a picture can be any byte. A byte both runs left alone was left
+            // alone.
+            let mut output = DecodedFrame::empty();
+            let mut untouched: Option<Vec<bool>> = None;
+            for canary in [0xAAu8, 0x55] {
+                decoder
+                    .convert_to_rgb(&source as *const _, &mut output)
+                    .expect("a conversion");
+                output.buffer.make_mut_bytes().fill(canary);
+                decoder
+                    .convert_to_rgb(&source as *const _, &mut output)
+                    .expect("a second conversion into the recycled buffer");
+                let bytes = output.buffer.as_bytes();
+                let still: Vec<bool> = (0..width as usize)
+                    .map(|column| {
+                        (0..height as usize).all(|row| {
+                            bytes[(row * width as usize + column) * 4..][..3]
+                                == [canary; 3]
+                        })
+                    })
+                    .collect();
+                untouched = Some(match untouched {
+                    None => still,
+                    Some(first) => first
+                        .iter()
+                        .zip(still)
+                        .map(|(a, b)| *a && b)
+                        .collect(),
+                });
+            }
+
+            let holes: Vec<usize> = untouched
+                .expect("two runs")
+                .iter()
+                .enumerate()
+                .filter(|(_, empty)| **empty)
+                .map(|(column, _)| column)
+                .collect();
+            assert!(
+                holes.is_empty(),
+                "{width}x{height}: {:?} left columns {holes:?} unwritten",
                 decoder.write
             );
         }
