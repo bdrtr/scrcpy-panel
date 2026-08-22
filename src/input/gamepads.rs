@@ -88,6 +88,20 @@ fn trigger_value(value: f32) -> i16 {
     (value.clamp(0.0, 1.0) * i16::MAX as f32) as i16
 }
 
+/// The same, for a trigger that arrives as an axis rather than as a button.
+///
+/// Every gilrs `AxisChanged` value is on -1..1 — `axis_value` computes
+/// `raw / range * 2 - 1` — so a trigger reported that way sits at -1 when it is
+/// released and reaches +1 only when it is pulled flat out. Handing that
+/// straight to `trigger_value`, which clamps the negative half away, made the
+/// whole first half of the pull read as nothing and crammed 0..32767 into the
+/// second half. A pad with an entry in SDL's database never comes this way —
+/// its triggers arrive as `ButtonChanged`, which really is 0..1 — so this is
+/// the road every pad the database has not heard of takes.
+fn trigger_from_axis(value: f32) -> i16 {
+    trigger_value((value + 1.0) / 2.0)
+}
+
 /// The gamepads, and the device they are plugged into.
 pub struct Gamepads {
     gilrs: Gilrs,
@@ -185,7 +199,7 @@ impl Gamepads {
                 EventType::AxisChanged(axis, value, _) => {
                     if let Some((sdl, invert)) = sdl_axis(axis) {
                         let value = if sdl >= 4 {
-                            trigger_value(value)
+                            trigger_from_axis(value)
                         } else {
                             stick_value(value, invert)
                         };
@@ -259,6 +273,21 @@ mod tests {
         assert_eq!(trigger_value(0.0), 0);
         assert_eq!(trigger_value(1.0), i16::MAX);
         assert_eq!(trigger_value(-1.0), 0, "clamped rather than mirrored");
+    }
+
+    /// A trigger that comes in as an axis is on -1..1 like every other gilrs
+    /// axis: released is -1, not 0. Read as though it were 0..1, half the
+    /// travel does nothing at all.
+    #[test]
+    fn a_trigger_that_arrives_as_an_axis_starts_at_minus_one() {
+        assert_eq!(trigger_from_axis(-1.0), 0, "released");
+        assert_eq!(trigger_from_axis(0.0), i16::MAX / 2, "half pulled");
+        assert_eq!(trigger_from_axis(1.0), i16::MAX, "flat out");
+        assert!(
+            trigger_value(-0.5) == trigger_value(-1.0),
+            "which is the reading that was being made: the lower half is flat"
+        );
+        assert!(trigger_from_axis(-0.5) > 0, "and is not, once it is converted");
     }
 
     /// A value beyond the ends is a value the device would read as the other

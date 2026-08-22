@@ -148,6 +148,24 @@ pub struct HidGamepad {
     slots: [GamepadSlot; MAX_GAMEPADS],
 }
 
+/// The identity upstream scrcpy gives its UHID gamepad, and the reason the
+/// descriptor above means anything.
+///
+/// Android chooses a key layout by vendor and product first, by device name
+/// second, and falls back to `Generic.kl`. This descriptor's sticks and
+/// triggers reach the kernel as ABS_X, ABS_Y, ABS_RX, ABS_RY, ABS_Z and
+/// ABS_RZ, and only the Xbox 360 layout routes those where a game expects
+/// them: `Vendor_045e_Product_028e.kl` maps 0x02 to LTRIGGER and 0x05 to
+/// RTRIGGER, where `Generic.kl` maps them to Z and RZ. With a vendor and
+/// product of zero — which is what this used to send, under the name "scrcpy
+/// gamepad 0" — nothing matched, so the triggers arrived as the right stick's
+/// two axes and the right stick arrived nowhere a game looks. The report
+/// descriptor was already byte-identical to scrcpy's; this is the other half
+/// of the same port.
+const XBOX_360_VENDOR: u16 = 0x045e;
+const XBOX_360_PRODUCT: u16 = 0x028e;
+const XBOX_360_NAME: &str = "Microsoft X-Box 360 Pad";
+
 impl HidGamepad {
     pub fn new() -> Self {
         Self {
@@ -173,9 +191,9 @@ impl HidGamepad {
 
         controller.push_msg(ControlMsg::UhidCreate {
             id: hid_id,
-            vendor_id: 0,
-            product_id: 0,
-            name: Some(format!("scrcpy gamepad {}", idx)),
+            vendor_id: XBOX_360_VENDOR,
+            product_id: XBOX_360_PRODUCT,
+            name: Some(XBOX_360_NAME.to_string()),
             report_desc: GAMEPAD_REPORT_DESC.to_vec(),
         });
         log::info!("UHID gamepad {} opened (slot {}, hid_id={})", gamepad_id, idx, hid_id);
@@ -305,5 +323,61 @@ fn dpad_value(buttons: u32) -> u8 {
         (false, false, true,  false) => 7,
         (true,  false, true,  false) => 8,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The gamepad has to introduce itself as the pad the descriptor describes.
+    ///
+    /// Android reads the vendor and product to pick a key layout, and the four
+    /// slots share one identity on purpose: which pad is which is carried by
+    /// the UHID id, not by the name.
+    #[test]
+    fn a_gamepad_arrives_as_an_xbox_360_pad() {
+        let (controller, queue) = Controller::collecting();
+        let mut pads = HidGamepad::new();
+        assert!(pads.open(7, &controller));
+
+        match queue.try_recv().expect("a create was pushed") {
+            ControlMsg::UhidCreate {
+                id,
+                vendor_id,
+                product_id,
+                name,
+                report_desc,
+            } => {
+                assert_eq!(id, HID_ID_GAMEPAD_FIRST);
+                assert_eq!(vendor_id, 0x045e, "Microsoft");
+                assert_eq!(product_id, 0x028e, "the Xbox 360 controller");
+                assert_eq!(name.as_deref(), Some("Microsoft X-Box 360 Pad"));
+                assert_eq!(report_desc, GAMEPAD_REPORT_DESC.to_vec());
+            }
+            other => panic!("not a create: {other:?}"),
+        }
+    }
+
+    /// Four pads take four slots and four ids, and the fifth is refused rather
+    /// than given somebody else's.
+    #[test]
+    fn the_slots_run_out_rather_than_collide() {
+        let (controller, queue) = Controller::collecting();
+        let mut pads = HidGamepad::new();
+        let mut ids = Vec::new();
+        for gamepad in 0..4 {
+            assert!(pads.open(gamepad, &controller), "pad {gamepad}");
+            if let Ok(ControlMsg::UhidCreate { id, .. }) = queue.try_recv() {
+                ids.push(id);
+            }
+        }
+        assert_eq!(ids, vec![
+            HID_ID_GAMEPAD_FIRST,
+            HID_ID_GAMEPAD_FIRST + 1,
+            HID_ID_GAMEPAD_FIRST + 2,
+            HID_ID_GAMEPAD_FIRST + 3,
+        ]);
+        assert!(!pads.open(4, &controller), "there is no fifth slot");
     }
 }
