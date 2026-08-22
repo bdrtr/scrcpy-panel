@@ -69,9 +69,9 @@ export component SectionNetwork inherits VerticalLayout {
                 }
             }
             Fld {
-                label: @tr("Sunucu günlük düzeyi · --verbosity");
+                label: @tr("Günlük düzeyi · --verbosity");
                 Sel {
-                    labels: [@tr("debug"), @tr("info"), @tr("warn"), @tr("error")];
+                    labels: [@tr("verbose"), @tr("debug"), @tr("info"), @tr("warn"), @tr("error")];
                     value <=> Cfg.verbosity;
                     changed => { Cfg.changed(); }
                 }

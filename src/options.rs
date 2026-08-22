@@ -22,6 +22,15 @@ pub const AUDIO_SOURCES: [&str; 11] = [
     "voice-performance",
 ];
 
+/// The log levels the v4.1 server's `Ln.Level` knows, loudest first.
+///
+/// Read off the server rather than remembered: `strings` on the `classes.dex`
+/// inside `/usr/share/scrcpy/scrcpy-server` has exactly `VERBOSE`, `DEBUG`,
+/// `INFO`, `WARN` and `ERROR`, and the refusal it throws over anything else
+/// names the enum — `No enum constant com.genymobile.scrcpy.util.Ln.Level.X`.
+/// scrcpy's own `--help` lists the same five for `-V`.
+pub const LOG_LEVELS: [&str; 5] = ["verbose", "debug", "info", "warn", "error"];
+
 /// scrcpyrust — Mirror Android devices on your computer (Rust implementation)
 #[derive(Parser, Debug, Clone)]
 #[command(name = "scrcpyrust", version, about)]
@@ -213,8 +222,11 @@ pub struct Options {
     #[arg(long)]
     pub tunnel_port: Option<u16>,
 
-    /// Server log level: debug, info, warn, error
-    #[arg(long, default_value = "info")]
+    /// Log level, for this client and for the server both. The five the
+    /// server's `Ln.Level` knows; anything else it throws
+    /// `IllegalArgumentException` over, which arrives as a connection timeout
+    /// rather than as a refusal.
+    #[arg(long, default_value = "info", value_parser = LOG_LEVELS)]
     pub verbosity: String,
 
     /// Keep the virtual display's content when the session ends

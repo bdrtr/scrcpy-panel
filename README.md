@@ -317,6 +317,30 @@ and none of them needed a phone to find. What each was held to:
   returns EINVAL for a rate of zero — so raw lost the recording's audio track as well.
   Proved against libavcodec rather than against the server's own stream; the device end
   of that is still to do.
+- **`--verbosity` turned up the phone and left the client where it was, and any word at all
+  got through it.** The flag was documented as "Server log level", forwarded to the server as
+  `log_level=` and read by nothing else; the client's own level came from `RUST_LOG` and only
+  from `RUST_LOG`. scrcpy has one flag for both halves, which is what `-V, --verbosity=value`
+  means in its own help. And it had no `value_parser`, so it was the same fault as
+  `--audio-source` one flag along: put `--verbosity=nonsense` to the Redmi and the server threw
+  `IllegalArgumentException: No enum constant com.genymobile.scrcpy.util.Ln.Level.NONSENSE`,
+  which reached the user as `Failed to connect to server: Timeout waiting for server
+  connection` — thirty seconds of nothing, then a network error for a typo. It is now checked
+  at the command line and refused in one line with the five it accepts, exiting 2. The five are
+  the server's, read off `Ln.Level` in the jar's own `classes.dex` rather than remembered:
+  `verbose`, `debug`, `info`, `warn`, `error`. The panel offered four of them — `verbose` was
+  missing, though the server has always taken it — so the picker now offers all five and the
+  field is no longer labelled as the server's alone. Measured with no device needed, counting
+  the client's own lines out of `--panel`: `info` gives 6 lines with no DEBUG and no TRACE,
+  `debug` gives 26 with 20 DEBUG, and `verbose` gives 108 with 20 DEBUG and 82 TRACE — the
+  server's `verbose` is Rust's `trace`, which is the only one of the five whose name differs
+  between the two sides. `RUST_LOG` still wins where it is set, because `from_env` reads it
+  first: `RUST_LOG=warn --verbosity=verbose` gives 1 line, not 108. One thing the flag cannot
+  do is retune a process already running — the panel's own level is set by the panel's command
+  line, and the form's value is what reaches the server and a windowed session's child.
+  `every_value_the_panel_offers_is_one_the_binary_takes` covers this picker now purely because
+  the flag gained a `value_parser`: putting `chatty` in the list fails it with clap's own
+  "[possible values: verbose, debug, info, warn, error]".
 - **The panel's log did not have the session in it, and the file its checkbox names had
   even less.** There was no `log::Log` implementation in the program at all: `env_logger` went
   straight onto the terminal, and the panel kept a second, unrelated log of its own. So a line
