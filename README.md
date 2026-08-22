@@ -317,6 +317,44 @@ and none of them needed a phone to find. What each was held to:
   returns EINVAL for a rate of zero — so raw lost the recording's audio track as well.
   Proved against libavcodec rather than against the server's own stream; the device end
   of that is still to do.
+- **What the phone said went to stdout, and what adb said went nowhere.** Three silences in
+  the same place — the layer where somebody else's words arrive — and each was found by asking
+  what a user would have to read to know why a session failed.
+  - **The server's own log was a `println!`.** `[server] {line}` on stdout: no level, no
+    timestamp, nothing `RUST_LOG` or `--verbosity` could turn down, and — never having gone
+    near the log crate — nothing the panel's Log tab or `panel.log` could ever show. It was
+    the one line of the measured session above that reached the terminal and not the file. The
+    device puts its level in the text (`Ln` writes `INFO: Device: [Xiaomi] Redmi 2209116AG`),
+    so the token is taken off and becomes the record's level: the panel's "Hata" filter finds
+    a server error now, and `--verbosity=warn` drops the chatter without dropping the
+    failures. Its stack traces keep their text and come through at info, because guessing an
+    error out of an indented Java frame would file half a trace under one level and half under
+    another. Nine real lines off the Redmi are the test.
+  - **The server process ending was logged nowhere at all.** The reader thread simply ran out
+    of lines. In reverse mode a server that dies on its parameters never opens a socket, so
+    the client polled an accept for the full thirty seconds and then blamed the socket. The end
+    of the shell now says so, with the last thing the server managed to say, and the accept
+    loop asks whether the server has gone rather than waiting out a clock for an answer that
+    will not change.
+  - **adb's reason for refusing a tunnel was dropped seventeen times over.** Both loops had
+    `Err(_) => continue`, so a device that fell off the bus between the push and the tunnel —
+    one reason, every port — came out as "Could not set up reverse tunnel on ports
+    27183..27199", which `failure::classify` matches on "tunnel on ports" and answers with
+    "Port kullanımda" and a button offering to restart adb. The ports were never it. The first
+    refusal is kept now, and **the classifier needed no new rule**: the offline card has
+    matched `device '...' not found` all along and simply never saw one.
+  - **And the test written for that found the reason was empty even so.** Run against the real
+    adb with nothing attached — `cargo test --release -- --ignored what_adb_says_when_it_refuses`
+    — the message came back `(adb said: ADB error: )`. Not a bug in the protocol reader but in
+    the question: measured against adb 37.0.0, `host-serial:<serial>:forward:...` answers
+    `FAIL` and then a length of `0000`, while `host:transport:<serial>` answers `FAIL` and then
+    `001f` followed by `device 'nosuchdevice' not found`. adb's own CLI has the sentence
+    because it transports first. So `forward` asks the transport when its own refusal comes
+    back empty-handed, and a `FAIL` with no reason at all no longer prints as `ADB error:` with
+    nothing after it. The end of it, with no device on the desk:
+    `Could not set up forward tunnel on ports 27183..27186 (adb said: ADB error: device
+    'nosuchdevice' not found)` — which is the string
+    `real_messages_land_on_the_card_that_names_them` now holds, landing on the offline card.
 - **`--verbosity` turned up the phone and left the client where it was, and any word at all
   got through it.** The flag was documented as "Server log level", forwarded to the server as
   `log_level=` and read by nothing else; the client's own level came from `RUST_LOG` and only

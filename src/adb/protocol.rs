@@ -80,6 +80,14 @@ impl AdbConnection {
             b"OKAY" => Ok(()),
             b"FAIL" => {
                 let error = self.read_length_prefixed_string()?;
+                // Some refusals carry no reason at all: measured against adb
+                // 37.0.0, `host-serial:<serial>:forward:...` answers FAIL then a
+                // length of `0000`, where `host:transport:<serial>` answers FAIL
+                // then `001f` and `device '<serial>' not found`. An empty one
+                // used to print as "ADB error: " and nothing after it.
+                if error.is_empty() {
+                    bail!("ADB error: the daemon refused without saying why");
+                }
                 bail!("ADB error: {}", error);
             }
             other => {
@@ -178,12 +186,33 @@ pub fn reverse_remove(serial: &str, remote: &str) -> Result<()> {
     Ok(())
 }
 
+/// Why the daemon would refuse anything at all for this serial.
+///
+/// `host-serial:` commands answer FAIL with a zero-length reason, so a forward
+/// that failed because the device had gone said only "ADB error:" and stopped.
+/// adb's own CLI does not have that problem because it transports first, and
+/// the transport is where the daemon keeps its sentence. So that is what is
+/// asked here, and only when the first refusal came back empty-handed.
+///
+/// `None` means the transport opened, which is to say the device is there and
+/// the refusal was about something else — a port already forwarded, most
+/// likely — and the original error is the better one to keep.
+fn why_the_daemon_refuses(serial: &str) -> Option<String> {
+    let mut conn = AdbConnection::connect().ok()?;
+    conn.switch_transport(serial).err().map(|e| format!("{e:#}"))
+}
+
 /// Set up a forward port
 pub fn forward(serial: &str, local: &str, remote: &str) -> Result<()> {
     let mut conn = AdbConnection::connect()?;
     let cmd = format!("host-serial:{}:forward:{};{}", serial, local, remote);
     conn.send_command(&cmd)?;
-    conn.read_status()?;
+    if let Err(refusal) = conn.read_status() {
+        return match why_the_daemon_refuses(serial) {
+            Some(why) => Err(anyhow::anyhow!("{}", why)),
+            None => Err(refusal),
+        };
+    }
     // Read optional second OKAY
     let _ = conn.read_status();
     Ok(())

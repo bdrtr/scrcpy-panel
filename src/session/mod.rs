@@ -232,6 +232,7 @@ impl Session {
                 opts.video_enabled(),
                 opts.audio_enabled(),
                 opts.control_enabled(),
+                &|| server_process.has_ended(),
             )
             .context("Failed to connect to server")?;
 

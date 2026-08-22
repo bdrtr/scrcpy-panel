@@ -159,6 +159,35 @@ impl Drop for ShellHandle {
     }
 }
 
+/// The server's own line, as a level and the rest of it.
+///
+/// `Ln` on the device writes `INFO: Device: [Xiaomi] Redmi 2209116AG`, so the
+/// level is already in the text — and printing it as text meant a line the
+/// server called an error arrived here looking exactly like one it called
+/// information. The token is taken off and turned into the record's level, so
+/// the "Hata" filter in the panel finds a server error and `--verbosity=warn`
+/// can drop the chatter without dropping the failures.
+///
+/// A line with no level of its own is the server's stack traces and anything
+/// else it writes raw; those keep their text and come through at info, since
+/// guessing an error from an indented Java frame would file half a trace under
+/// one level and half under another.
+fn server_line(line: &str) -> (log::Level, &str) {
+    let Some((token, rest)) = line.split_once(": ") else {
+        return (log::Level::Info, line);
+    };
+    let level = match token {
+        "ERROR" => log::Level::Error,
+        "WARN" => log::Level::Warn,
+        "INFO" => log::Level::Info,
+        "DEBUG" => log::Level::Debug,
+        "VERBOSE" => log::Level::Trace,
+        // A colon in an ordinary sentence, which the server writes plenty of.
+        _ => return (log::Level::Info, line),
+    };
+    (level, rest)
+}
+
 /// Start a shell command on the device.
 /// Returns a handle that logs output and can be killed.
 pub fn shell_exec(serial: &str, shell_args: &[&str]) -> Result<ShellHandle> {
@@ -176,11 +205,23 @@ pub fn shell_exec(serial: &str, shell_args: &[&str]) -> Result<ShellHandle> {
         .name("adb-shell-reader".into())
         .spawn(move || {
             let reader = BufReader::new(stream);
+            // Kept so that the end of the shell can say what the last thing the
+            // server managed to say was, which is usually why it ended.
+            let mut last = String::new();
             for line in reader.lines() {
                 match line {
                     Ok(line) if !line.is_empty() => {
-                        // Log server output with [server] prefix
-                        println!("[server] {}", line);
+                        last = line.clone();
+                        // The device's own log, at the level the device gave
+                        // it. It used to be a `println!`, which put the one
+                        // account of what the phone thinks on stdout: no level,
+                        // no timestamp, nothing RUST_LOG or --verbosity could
+                        // turn down, and — since it never went near the log
+                        // crate — nothing the panel's Log tab or panel.log
+                        // could ever show. It was the only line of a measured
+                        // session that reached the terminal and not the file.
+                        let (level, message) = server_line(&line);
+                        log::log!(level, "[server] {message}");
                     }
                     Ok(_) => {}
                     Err(e) => {
@@ -194,6 +235,16 @@ pub fn shell_exec(serial: &str, shell_args: &[&str]) -> Result<ShellHandle> {
                         break;
                     }
                 }
+            }
+            // Running out of lines is the server's process ending, and it was
+            // logged nowhere at all. In reverse mode a server that dies at once
+            // — a missing encoder, a bad parameter, the device killing it —
+            // left the client polling an accept for thirty seconds with not one
+            // line to say why, and the failure blamed the socket.
+            if last.is_empty() {
+                log::warn!("The scrcpy server's shell ended without saying anything");
+            } else {
+                log::warn!("The scrcpy server's shell ended; its last line was: {last}");
             }
         })
         .context("Failed to spawn shell reader thread")?;
@@ -255,5 +306,54 @@ mod tests {
             "the reader is still blocked, so the shell is still up"
         );
         let _ = far_end.join();
+    }
+
+    /// The lines the Redmi's own server actually wrote, and what each is.
+    ///
+    /// Taken from real sessions rather than invented: the first is what every
+    /// session prints, the second and third are what it said when it was given
+    /// an audio source and a log level it does not have, and the last two are
+    /// the stack trace that follows — which has a colon in it and must not be
+    /// mistaken for a level.
+    #[test]
+    fn the_servers_own_level_becomes_the_records_level() {
+        use log::Level::*;
+        for (line, level, message) in [
+            (
+                "INFO: Device: [Xiaomi] Redmi 2209116AG (Android 13)",
+                Info,
+                "Device: [Xiaomi] Redmi 2209116AG (Android 13)",
+            ),
+            (
+                "ERROR: Audio source voice-communication not supported",
+                Error,
+                "Audio source voice-communication not supported",
+            ),
+            (
+                "ERROR: No enum constant com.genymobile.scrcpy.util.Ln.Level.NONSENSE",
+                Error,
+                "No enum constant com.genymobile.scrcpy.util.Ln.Level.NONSENSE",
+            ),
+            // A Java exception line: the token before the colon is a class
+            // name, not a level, so the line comes through whole.
+            (
+                "java.lang.IllegalArgumentException: Audio source voice-communication not supported",
+                Info,
+                "java.lang.IllegalArgumentException: Audio source voice-communication not supported",
+            ),
+            // A frame of the trace, which has colons but no ": ".
+            (
+                "\tat com.genymobile.scrcpy.Options.parse(Options.java:385)",
+                Info,
+                "\tat com.genymobile.scrcpy.Options.parse(Options.java:385)",
+            ),
+            // The one whose text ends in a colon of its own.
+            ("INFO: List of video encoders:", Info, "List of video encoders:"),
+            ("WARN: Encoder 'x' not found", Warn, "Encoder 'x' not found"),
+            ("DEBUG: Controller started", Debug, "Controller started"),
+            ("VERBOSE: packet 3", Trace, "packet 3"),
+        ] {
+            assert_eq!(server_line(line), (level, message), "on {line:?}");
+        }
     }
 }

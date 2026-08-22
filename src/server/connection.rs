@@ -22,7 +22,11 @@ pub fn read_device_info(stream: &mut TcpStream) -> Result<DeviceInfo> {
 }
 
 /// Accept a connection from a listener with timeout
-fn accept_with_timeout(listener: &TcpListener, timeout: Duration) -> Result<TcpStream> {
+fn accept_with_timeout(
+    listener: &TcpListener,
+    timeout: Duration,
+    server_gone: &dyn Fn() -> bool,
+) -> Result<TcpStream> {
     let start = std::time::Instant::now();
     loop {
         match listener.accept() {
@@ -32,6 +36,17 @@ fn accept_with_timeout(listener: &TcpListener, timeout: Duration) -> Result<TcpS
                 return Ok(stream);
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // A server that died on its parameters — an encoder the device
+                // does not have, a display id that is not there — never opens a
+                // socket, and this used to poll a dead listener for the whole
+                // thirty seconds and then blame the socket. The shell knows: its
+                // reader thread ends when the process does.
+                if server_gone() {
+                    bail!(
+                        "The server exited before it opened a socket; \
+                         its own last line says why"
+                    );
+                }
                 if start.elapsed() > timeout {
                     bail!("Timeout waiting for server connection");
                 }
@@ -43,7 +58,12 @@ fn accept_with_timeout(listener: &TcpListener, timeout: Duration) -> Result<TcpS
 }
 /// The same, against a chosen host — `--tunnel-host` points this at another
 /// machine's adb, which is why forward mode is the only one that can work there.
-pub fn connect_to_server_at(host: &str, port: u16, attempts: u32) -> Result<TcpStream> {
+pub fn connect_to_server_at(
+    host: &str,
+    port: u16,
+    attempts: u32,
+    server_gone: &dyn Fn() -> bool,
+) -> Result<TcpStream> {
     let addr = format!("{}:{}", host, port);
     for i in 0..attempts {
         log::debug!("Connecting to server attempt {}/{}...", i + 1, attempts);
@@ -53,6 +73,12 @@ pub fn connect_to_server_at(host: &str, port: u16, attempts: u32) -> Result<TcpS
                 return Ok(stream);
             }
             Err(_) => {
+                if server_gone() {
+                    bail!(
+                        "The server exited before it opened a socket; \
+                         its own last line says why"
+                    );
+                }
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
@@ -114,6 +140,9 @@ pub fn connect_sockets(
     video: bool,
     audio: bool,
     control: bool,
+    // Whether the server's shell has ended. Asked while waiting rather than
+    // after: the wait is thirty seconds and the answer does not change.
+    server_gone: &dyn Fn() -> bool,
 ) -> Result<Sockets> {
     let timeout = Duration::from_secs(30);
 
@@ -132,7 +161,7 @@ pub fn connect_sockets(
         let listener = listener.context("Reverse mode requires a pre-bound listener")?;
         for i in 0..socket_count {
             log::debug!("Waiting for server connection {}/{}...", i + 1, socket_count);
-            let stream = accept_with_timeout(&listener, timeout)
+            let stream = accept_with_timeout(&listener, timeout, server_gone)
                 .with_context(|| format!("Failed to accept connection {}/{}", i + 1, socket_count))?;
             log::debug!("Accepted connection {}/{}", i + 1, socket_count);
             sockets.push(stream);
@@ -143,7 +172,7 @@ pub fn connect_sockets(
             let stream = if i == 0 {
                 connect_and_read_dummy_byte(host, port, 100)?
             } else {
-                connect_to_server_at(host, port, 100)?
+                connect_to_server_at(host, port, 100, server_gone)?
             };
             sockets.push(stream);
         }

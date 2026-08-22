@@ -258,6 +258,24 @@ mod tests {
                 "adb: error: failed to get feature set: more than one device/emulator",
                 "Birden fazla cihaz bağlı",
             ),
+            // Seventeen ports refused for one reason that is not a port. This
+            // used to read "Port kullanımda" and offer to restart adb, because
+            // the range was all the message had in it: adb's own words were
+            // dropped at each `Err(_) => continue`, so the card that was
+            // already written for them — the offline one, which has matched
+            // `device '...' not found` all along — never saw them. Keeping the
+            // first refusal was the whole fix; classify needed no new rule.
+            (
+                "Failed to open ADB tunnel: Could not set up reverse tunnel on ports \
+                 27183..27199 (adb said: ADB error: device 'R58M31XABCD' not found)",
+                "Cihaz çevrimdışı",
+            ),
+            // And the range genuinely being full still reads as the port card.
+            (
+                "Failed to open ADB tunnel: Could not set up reverse tunnel on ports \
+                 27183..27199",
+                "Port kullanımda",
+            ),
             (
                 "Device selection failed: 2 devices connected. Use --serial to select one: \
                  [\"R58M31XABCD\", \"192.168.1.42:5555\"]",

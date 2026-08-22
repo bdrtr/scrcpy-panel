@@ -96,6 +96,14 @@ impl AdbTunnel {
     /// So the socket is bound first and kept. Binding it and letting it go
     /// would leave a window for the other client to take it in between.
     fn open_reverse(serial: &str, socket_name: &str, port_range: (u16, u16)) -> Result<Self> {
+        // adb's own words, kept. Every port used to fail with `Err(_) =>
+        // continue` and the bail then blamed the range, so a device that had
+        // dropped off the bus between the push and the tunnel — one reason,
+        // seventeen times — came out as "Could not set up reverse tunnel on
+        // ports 27183..27199", which `failure::classify` matches as "Port
+        // kullanımda" and offers a restart-adb button for. The user closes
+        // programs and changes the port range; the ports were never it.
+        let mut first_refusal: Option<String> = None;
         for (port, listener) in bindable_ports(port_range) {
             let remote = format!("localabstract:{}", socket_name);
             let local = format!("tcp:{}", port);
@@ -109,13 +117,30 @@ impl AdbTunnel {
                         listener: Some(listener),
                     });
                 }
-                Err(_) => continue,
+                Err(e) => {
+                    log::debug!("reverse on port {port} refused: {e:#}");
+                    first_refusal.get_or_insert_with(|| format!("{e:#}"));
+                    continue;
+                }
             }
         }
-        bail!("Could not set up reverse tunnel on ports {}..{}", port_range.0, port_range.1);
+        match first_refusal {
+            Some(why) => bail!(
+                "Could not set up reverse tunnel on ports {}..{} (adb said: {})",
+                port_range.0,
+                port_range.1,
+                why
+            ),
+            None => bail!(
+                "Could not set up reverse tunnel on ports {}..{}",
+                port_range.0,
+                port_range.1
+            ),
+        }
     }
 
     fn open_forward(serial: &str, socket_name: &str, port_range: (u16, u16)) -> Result<Self> {
+        let mut first_refusal: Option<String> = None;
         for port in port_range.0..=port_range.1 {
             let local = format!("tcp:{}", port);
             let remote = format!("localabstract:{}", socket_name);
@@ -130,10 +155,26 @@ impl AdbTunnel {
                         listener: None,
                     });
                 }
-                Err(_) => continue,
+                Err(e) => {
+                    log::debug!("forward on port {port} refused: {e:#}");
+                    first_refusal.get_or_insert_with(|| format!("{e:#}"));
+                    continue;
+                }
             }
         }
-        bail!("Could not set up forward tunnel on ports {}..{}", port_range.0, port_range.1);
+        match first_refusal {
+            Some(why) => bail!(
+                "Could not set up forward tunnel on ports {}..{} (adb said: {})",
+                port_range.0,
+                port_range.1,
+                why
+            ),
+            None => bail!(
+                "Could not set up forward tunnel on ports {}..{}",
+                port_range.0,
+                port_range.1
+            ),
+        }
     }
 
     /// Get the local port this tunnel is bound to
@@ -171,6 +212,40 @@ impl Drop for AdbTunnel {
 
 #[cfg(test)]
 mod tests {
+
+    /// What adb says when it refuses, run against the real adb with nothing
+    /// attached.
+    ///
+    /// `#[ignore]`d because it shells out; run it with
+    /// `cargo test --release -- --ignored what_adb_says_when_it_refuses`.
+    ///
+    /// The point is the string. Every port used to fail with `Err(_) =>
+    /// continue`, so seventeen refusals for one non-port reason came out as
+    /// "Could not set up reverse tunnel on ports 27183..27199" — and the panel
+    /// matched that on "tunnel on ports" and showed "Port kullanımda" with a
+    /// button offering to restart adb. The card that was already right for it,
+    /// the offline one, has matched `device '...' not found` all along and
+    /// never saw it, because adb's words never got into the message.
+    #[test]
+    #[ignore]
+    fn what_adb_says_when_it_refuses() {
+        for forced_forward in [false, true] {
+            let refusal = AdbTunnel::open("nosuchdevice", 0x5c1d, (27183, 27186), forced_forward)
+                .err()
+                .map(|e| format!("{e:#}"))
+                .expect("a tunnel to a device that is not there cannot open");
+
+            println!("adb's refusal, whole: {refusal}");
+            assert!(
+                refusal.contains("not found") && refusal.contains("nosuchdevice"),
+                "adb's own reason is missing from: {refusal}"
+            );
+        }
+        // That the panel then shows the offline card rather than the port one
+        // is `real_messages_land_on_the_card_that_names_them`, which holds this
+        // very string and needs neither adb nor a device.
+    }
+
     use super::*;
 
     /// The range has to be walked on the thing that can actually refuse.
