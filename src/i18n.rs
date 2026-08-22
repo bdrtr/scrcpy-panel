@@ -202,7 +202,7 @@ mod tests {
         while let Some(offset) = source[at..].find(call) {
             let start = at + offset;
             at = start + call.len();
-            let before = source[..start].as_bytes().last().copied();
+            let before = source.as_bytes()[..start].last().copied();
             if before.is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_') {
                 continue;
             }
