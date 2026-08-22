@@ -113,18 +113,7 @@ struct State {
 }
 
 fn main() {
-    let mut args = std::env::args().skip(1);
-    let size = args.next().unwrap_or_else(|| "1080x2400".into());
-    let (width, height) = size
-        .split_once('x')
-        .and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?)))
-        .expect("a size like 1080x2400");
-    let count: u32 = args
-        .next()
-        .unwrap_or_else(|| "600".into())
-        .parse()
-        .expect("a frame count");
-
+    let (width, height, count) = what_to_measure();
     // Built with `--features wgpu`, `WGPU=1` puts the same measurement through
     // Slint's WGPU renderer instead of its OpenGL one — the renderer the shader
     // path needs, and the only one that will take a texture from outside.
@@ -154,34 +143,7 @@ fn main() {
         if checking { ", checking the shader" } else { "" },
     );
 
-    let ring: Vec<SharedPixelBuffer<Rgb8Pixel>> = (0..6u32)
-        .map(|n| {
-            let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(width, height);
-            let bytes = buffer.make_mut_bytes();
-            for (i, byte) in bytes.iter_mut().enumerate() {
-                *byte = (i.wrapping_mul(7).wrapping_add(n as usize * 37) % 251) as u8;
-            }
-            buffer
-        })
-        .collect();
-    println!(
-        "{width}x{height}, {:.1} MB of RGB a frame against {:.1} of YUV420P, {count} frames a run",
-        (width as usize * height as usize * 3) as f64 / 1e6,
-        (width as usize * height as usize * 3 / 2) as f64 / 1e6,
-    );
-
-    let ring_rgba: Vec<SharedPixelBuffer<Rgba8Pixel>> = ring
-        .iter()
-        .map(|source| {
-            let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width, height);
-            let bytes = buffer.make_mut_bytes();
-            for (out, pixel) in bytes.chunks_exact_mut(4).zip(source.as_bytes().chunks_exact(3)) {
-                out[..3].copy_from_slice(pixel);
-                out[3] = 255;
-            }
-            buffer
-        })
-        .collect();
+    let (ring, ring_rgba) = build_the_ring(width, height, count);
 
     let mut runs = vec![
         ("a new frame every time", count, Feed::NewRgb),
@@ -212,6 +174,73 @@ fn main() {
         height,
     }));
 
+    install_the_notifier(&window, &state, checking);
+    let _checker = install_the_checker(&window, &state, checking, wgpu);
+    let _ticker = install_the_ticker(&window);
+
+    window.run().expect("the event loop");
+}
+
+/// The size and the frame count, from the command line or from the defaults
+/// this was always run at.
+fn what_to_measure() -> (u32, u32, u32) {
+    let mut args = std::env::args().skip(1);
+    let size = args.next().unwrap_or_else(|| "1080x2400".into());
+    let (width, height) = size
+        .split_once('x')
+        .and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?)))
+        .expect("a size like 1080x2400");
+    let count: u32 = args
+        .next()
+        .unwrap_or_else(|| "600".into())
+        .parse()
+        .expect("a frame count");
+    (width, height, count)
+}
+
+/// Six frames of noise, and the same six again already padded to RGBA.
+///
+/// Six rather than one because a decoder hands over a different frame every
+/// time, and one frame sitting in cache is not that.
+fn build_the_ring(
+    width: u32,
+    height: u32,
+    count: u32,
+) -> (Vec<SharedPixelBuffer<Rgb8Pixel>>, Vec<SharedPixelBuffer<Rgba8Pixel>>) {
+    let ring: Vec<SharedPixelBuffer<Rgb8Pixel>> = (0..6u32)
+        .map(|n| {
+            let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(width, height);
+            let bytes = buffer.make_mut_bytes();
+            for (i, byte) in bytes.iter_mut().enumerate() {
+                *byte = (i.wrapping_mul(7).wrapping_add(n as usize * 37) % 251) as u8;
+            }
+            buffer
+        })
+        .collect();
+    println!(
+        "{width}x{height}, {:.1} MB of RGB a frame against {:.1} of YUV420P, {count} frames a run",
+        (width as usize * height as usize * 3) as f64 / 1e6,
+        (width as usize * height as usize * 3 / 2) as f64 / 1e6,
+    );
+
+    let ring_rgba: Vec<SharedPixelBuffer<Rgba8Pixel>> = ring
+        .iter()
+        .map(|source| {
+            let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width, height);
+            let bytes = buffer.make_mut_bytes();
+            for (out, pixel) in bytes.chunks_exact_mut(4).zip(source.as_bytes().chunks_exact(3)) {
+                out[..3].copy_from_slice(pixel);
+                out[3] = 255;
+            }
+            buffer
+        })
+        .collect();
+    (ring, ring_rgba)
+}
+
+/// The measurement itself: what happens between `BeforeRendering` and
+/// `AfterRendering` is the upload, and this is the only place that can see it.
+fn install_the_notifier(window: &Bench, state: &Rc<RefCell<State>>, checking: bool) {
     let weak = window.as_weak();
     let notified = state.clone();
     window
@@ -301,12 +330,20 @@ fn main() {
                 panic!("this renderer does not say when it draws: {e:?}");
             }
         });
+}
 
-    // Checking draws, and drawing from inside the notifier is drawing from
-    // inside a draw, so it runs on a timer of its own — after the converter the
-    // notifier makes, where there is one to wait for.
-    let checker = window.as_weak();
-    let check_state = state.clone();
+/// `CHECK=1` draws instead of timing. Drawing from inside the notifier would be
+/// drawing from inside a draw, so it gets a timer of its own — and the timer is
+/// returned because dropping one stops it.
+fn install_the_checker(
+    window: &Bench,
+    state: &Rc<RefCell<State>>,
+    checking: bool,
+    wgpu: bool,
+) -> slint::Timer {
+    #[cfg(not(feature = "wgpu"))]
+    let _ = wgpu;
+    let (checker, check_state) = (window.as_weak(), state.clone());
     let check_timer = slint::Timer::default();
     let checked = Rc::new(std::cell::Cell::new(false));
     let ticks = Rc::new(std::cell::Cell::new(0u32));
@@ -349,7 +386,12 @@ fn main() {
             },
         );
     }
+    check_timer
+}
 
+/// Returned for the same reason as the checker's: a `Timer` that is dropped
+/// stops ticking, and this is what turns the run that never dirties anything.
+fn install_the_ticker(window: &Bench) -> slint::Timer {
     // The run that hands back the same frame leaves nothing dirty, and Slint
     // does not redraw a window with nothing to redraw — so the loop is turned
     // by a timer rather than by the picture changing.
@@ -364,8 +406,7 @@ fn main() {
             }
         },
     );
-
-    window.run().expect("the event loop");
+    timer
 }
 
 /// What swscale charges for the fourth byte: the same conversion into packed
