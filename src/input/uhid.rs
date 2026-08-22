@@ -185,11 +185,11 @@ impl Uhid {
     fn shortcut_held(&self) -> bool {
         use crate::input::winit_keys::*;
         let held = |bits: u8| self.modifiers & bits != 0;
-        match self.shortcut_mod {
-            ShortcutMod::Alt => held(MOD_LEFT_ALT | MOD_RIGHT_ALT),
-            ShortcutMod::Control => held(MOD_LEFT_CTRL | MOD_RIGHT_CTRL),
-            ShortcutMod::Meta => held(MOD_LEFT_GUI | MOD_RIGHT_GUI),
-        }
+        self.shortcut_mod.active(
+            held(MOD_LEFT_ALT | MOD_RIGHT_ALT),
+            held(MOD_LEFT_CTRL | MOD_RIGHT_CTRL),
+            held(MOD_LEFT_GUI | MOD_RIGHT_GUI),
+        )
     }
 
     /// The button mask to send for a press or release, if the device is
@@ -338,7 +338,7 @@ impl UhidInput {
                 controller: None,
                 modifiers: 0,
                 buttons: 0,
-                shortcut_mod: ShortcutMod::Alt,
+                shortcut_mod: ShortcutMod::default(),
                 captured: false,
                 capture_applied: false,
                 capture_key: None,

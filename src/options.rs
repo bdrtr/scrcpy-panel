@@ -347,7 +347,8 @@ pub struct Options {
     #[arg(long)]
     pub window_height: Option<u16>,
 
-    /// Shortcut modifier key: lctrl, rctrl, lalt, ralt, lsuper, rsuper (default lalt)
+    /// Shortcut modifier: lctrl, rctrl, lalt, ralt, lsuper, rsuper. '+' joins keys that must
+    /// be held together, ',' separates alternatives, as in lctrl+lalt,lsuper (default lalt)
     #[arg(long, default_value = "lalt")]
     pub shortcut_mod: String,
 

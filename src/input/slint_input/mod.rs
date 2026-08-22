@@ -58,36 +58,85 @@ impl Mods {
     }
 }
 
-/// Which modifier opens the shortcut layer.
+const MOD_ALT: u8 = 1 << 0;
+const MOD_CONTROL: u8 = 1 << 1;
+const MOD_META: u8 = 1 << 2;
+
+/// Which modifier, or which combination of them, opens the shortcut layer.
+///
+/// scrcpy's `--shortcut-mod` is a list rather than a key: alternatives
+/// separated by `,`, each one or more keys joined by `+`. Its own default,
+/// `lalt,lsuper`, is that syntax — so is `lctrl+lalt`, meaning both together.
+/// Only a single key parsed here before, and everything else fell through to a
+/// warning and lalt, which is a scrcpy command line that quietly did something
+/// else.
 ///
 /// Slint reports modifiers as one flag per side-agnostic key, so `lalt` and
-/// `ralt` collapse to the same thing here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShortcutMod {
-    Alt,
-    Control,
-    Meta,
+/// `ralt` still collapse to the same thing. That much is the toolkit's and is
+/// unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShortcutMod {
+    /// Each entry is a set of modifiers that must *all* be held. Any one entry
+    /// matching opens the layer.
+    any_of: Vec<u8>,
+}
+
+impl Default for ShortcutMod {
+    fn default() -> Self {
+        Self { any_of: vec![MOD_ALT] }
+    }
 }
 
 impl ShortcutMod {
     pub fn parse(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "lctrl" | "rctrl" | "ctrl" => ShortcutMod::Control,
-            "lsuper" | "rsuper" | "super" | "meta" => ShortcutMod::Meta,
-            "lalt" | "ralt" | "alt" => ShortcutMod::Alt,
-            other => {
-                log::warn!("Unknown shortcut mod '{}', defaulting to lalt", other);
-                ShortcutMod::Alt
+        let mut any_of = Vec::new();
+        for alternative in s.split(',') {
+            let alternative = alternative.trim();
+            if alternative.is_empty() {
+                continue;
+            }
+            let mut wanted = 0u8;
+            let mut usable = true;
+            for keyword in alternative.split('+') {
+                match keyword.trim().to_lowercase().as_str() {
+                    "lctrl" | "rctrl" | "ctrl" => wanted |= MOD_CONTROL,
+                    "lsuper" | "rsuper" | "super" | "meta" => wanted |= MOD_META,
+                    "lalt" | "ralt" | "alt" => wanted |= MOD_ALT,
+                    other => {
+                        log::warn!("Unknown shortcut mod '{other}', dropping '{alternative}'");
+                        usable = false;
+                    }
+                }
+            }
+            if usable && wanted != 0 {
+                any_of.push(wanted);
             }
         }
+        if any_of.is_empty() {
+            log::warn!("Nothing usable in shortcut mod '{s}', defaulting to lalt");
+            return Self::default();
+        }
+        Self { any_of }
     }
 
-    fn active(self, alt: bool, control: bool, meta: bool) -> bool {
-        match self {
-            ShortcutMod::Alt => alt,
-            ShortcutMod::Control => control,
-            ShortcutMod::Meta => meta,
+    /// Whether what is held opens the layer. An alternative matches when every
+    /// modifier it names is down; anything else held as well does not stop it,
+    /// which is what lets MOD+Shift+key be a shortcut too.
+    pub fn active(&self, alt: bool, control: bool, meta: bool) -> bool {
+        let mut held = 0u8;
+        if alt {
+            held |= MOD_ALT;
         }
+        if control {
+            held |= MOD_CONTROL;
+        }
+        if meta {
+            held |= MOD_META;
+        }
+        // Nothing an alternative asks for is missing. Written this way round
+        // because `held & wanted == wanted` reads to clippy as a `contains`,
+        // and the rewrite it suggests uses the closure's binding outside it.
+        self.any_of.iter().any(|&wanted| wanted & !held == 0)
     }
 }
 
@@ -864,6 +913,54 @@ mod tests {
             input.key_down("f", Mods::MOD, true, &controller),
             WindowAction::None,
             "a held shortcut fires once, as it always did"
+        );
+    }
+
+    /// scrcpy's --shortcut-mod is a list rather than a key: alternatives
+    /// separated by commas, each one or more keys joined by '+'. Its own
+    /// default is `lalt,lsuper` — so the command line scrcpy prints in its own
+    /// help warned "Unknown shortcut mod" here and fell back to lalt, leaving
+    /// Super doing nothing where it should have opened the layer.
+    #[test]
+    fn the_shortcut_mod_syntax_scrcpy_documents_parses() {
+        let either = ShortcutMod::parse("lalt,lsuper");
+        assert!(either.active(true, false, false), "left Alt on its own");
+        assert!(either.active(false, false, true), "left Super on its own");
+        assert!(!either.active(false, true, false), "Ctrl is in neither alternative");
+        assert!(
+            either.active(true, true, false),
+            "another modifier held as well is still the layer — MOD+Ctrl+drag is a shortcut"
+        );
+
+        let both = ShortcutMod::parse("lctrl+lalt");
+        assert!(both.active(true, true, false), "Ctrl and Alt together");
+        assert!(!both.active(true, false, false), "Alt alone is not enough");
+        assert!(!both.active(false, true, false), "Ctrl alone is not enough");
+
+        let mixed = ShortcutMod::parse("lctrl+lalt,lsuper");
+        assert!(mixed.active(true, true, false), "the combination");
+        assert!(mixed.active(false, false, true), "or the single key beside it");
+        assert!(!mixed.active(true, false, false), "but not half of the combination");
+    }
+
+    /// One bad name costs its own alternative and nothing else, and a spec with
+    /// nothing usable in it still falls back rather than leaving the shortcut
+    /// layer unreachable.
+    #[test]
+    fn a_bad_alternative_is_dropped_and_the_rest_kept() {
+        let kept = ShortcutMod::parse("lhyper,lsuper");
+        assert!(kept.active(false, false, true), "the name it knows survives");
+        assert!(!kept.active(true, false, false), "and the one it does not is gone");
+        assert_eq!(
+            ShortcutMod::parse("nonsense"),
+            ShortcutMod::default(),
+            "nothing usable falls back to lalt"
+        );
+        assert_eq!(ShortcutMod::default(), ShortcutMod::parse("lalt"));
+        assert_eq!(
+            ShortcutMod::parse("lctrl"),
+            ShortcutMod::parse("rctrl"),
+            "left and right are one flag to Slint, which is the toolkit's limit and not the parse's"
         );
     }
 }

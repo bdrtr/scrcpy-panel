@@ -78,6 +78,7 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | Contradictory `--no-audio --require-audio` | rejected with a message |
 | `--no-video-playback` | works — 170 frames recorded with nothing drawn |
 | `--mouse-bind` | works — parsed, with 6 tests; malformed input warns and keeps the default |
+| `--shortcut-mod` | works — scrcpy's `+` and `,` syntax, checked against the phone for all four spellings |
 | Ayarlar: adb path, adb port, record dir, screenshot dir | consulted at runtime |
 | Ayarlar: autostart profile, version check, log to disk | work |
 | Recording started and stopped mid-session | works — 568 video + 552 Opus frames over 11 s |
@@ -302,6 +303,19 @@ and none of them needed a phone to find. What each was held to:
   `--no-audio` refusal came out as a warning saying audio needs Android 11, and port
   exhaustion — the one failure the port card exists for — fell through to the generic
   card, because the card's phrases were upstream C scrcpy's rather than this client's.
+- **`--shortcut-mod=lalt,lsuper` is the line scrcpy prints in its own help, and this client
+  warned at it and did something else.** Found by reading the first line of an ordinary run:
+  `Unknown shortcut mod 'lalt,lsuper', defaulting to lalt`. scrcpy's `--shortcut-mod` is a
+  list rather than a key — alternatives separated by `,`, each one or more keys joined by
+  `+`, so `lctrl+lalt,lsuper` means both together or Super on its own — and only a single
+  token parsed here. Everything else fell through one arm to lalt, which is a command line
+  that runs and quietly means something else. It parses the documented syntax now, and the
+  four spellings were put to the real binary against the Redmi rather than to the tests
+  alone: `lalt,lsuper` and `lctrl+lalt` warn about nothing, `lhyper,lsuper` drops the
+  alternative it cannot read and keeps `lsuper`, and `nonsense` says so twice and falls back.
+  Left and right stay one flag, which is Slint's limit rather than the parse's, and the
+  default here stays `lalt` where scrcpy's is `lalt,lsuper` — a difference worth knowing
+  about rather than one to change quietly.
   The test had been asserting on upstream's wording under a comment saying these are
   messages "this program or adb really produces".
 - **The control queue would throw away the finger coming up.** `QUEUE_LIMIT` is
@@ -932,6 +946,10 @@ profiles, logs and shortcuts.
 ## Keyboard shortcuts
 
 Alt is the modifier unless `--shortcut-mod` says otherwise; scrcpy writes it MOD.
+`--shortcut-mod` takes scrcpy's syntax: `+` joins keys that must be held together, `,`
+separates alternatives, as in `lctrl+lalt,lsuper`. Left and right are one flag here —
+Slint reports the modifier, not the side — so `lctrl` and `rctrl` mean the same thing.
+The default is `lalt`, where scrcpy's own is `lalt,lsuper`.
 
 | Shortcut | Action |
 |----------|--------|
