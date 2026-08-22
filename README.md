@@ -434,7 +434,7 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   exists to avoid. The position was there all along, one layer down: Slint runs on winit,
   and `BackendSelector::with_winit_custom_application_handler` hands the raw winit events
   to a handler of one's own — `physical_key` on the keyboard side, `DeviceEvent::MouseMotion`
-  on the other. `src/input/uhid.rs` turns those into the HID reports `hid_keyboard.rs` and
+  on the other. `src/input/uhid/` turns those into the HID reports `hid_keyboard.rs` and
   `hid_mouse.rs` were already able to build, and the device applies its own layout and its
   own pointer acceleration to them. The events are passed on rather than swallowed, so
   Slint keeps the modifier state its shortcut layer reads; what stops an input arriving
@@ -832,7 +832,7 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   holding whatever was there before: black on a fresh buffer, the previous frame on a
   recycled one. Proved rather than argued: at 66x64 the direct write leaves columns 64 and 65
   untouched by two conversions with two different fillings, which is
-  `the_conversion_fills_every_column` in `src/media/decoder.rs`. It had never shown up because
+  `the_conversion_fills_every_column` in `src/media/decoder/convert.rs`. It had never shown up because
   every width in the suite — 1080, 1081, 64 — is one of the ones that loses nothing, and
   because the test that would have caught it compares against the same swscale call, so the
   hole was on both sides of its comparison. The same two fillings answer the new question at
@@ -887,7 +887,7 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   where scrcpy has always enforced it. VP8 and VP9 codec ids added.
 - **Replaced the SDL2 window and renderer with Slint.** `display/screen.rs` and
   `input/manager.rs` are gone; `ui/mirror.slint` draws the mirror and
-  `input/slint_input.rs` turns pointer and key events into control messages.
+  `input/slint_input/` turns pointer and key events into control messages.
 - The decoder now emits packed RGBA8 instead of YUV420P planes, because Slint takes pixel
   buffers where SDL took YUV textures — RGBA rather than RGB because three bytes a pixel is
   not a texture format and Slint was padding every frame out to four on the CPU. Its scaler is also rebuilt when the stream changes
@@ -1011,7 +1011,7 @@ ui/
 └── tabs/            # the six non-configuration tabs
 src/
 ├── main.rs          # entry point and the standalone mirror window
-├── session.rs       # a session without a window: server, tunnel, decode threads
+├── session/         # a session without a window: server, tunnel, pipeline threads
 ├── mirror_host.rs   # drives a MirrorView wherever it is mounted
 ├── panel/           # the control panel: command building, devices, profiles
 ├── options.rs       # CLI parsing (clap)
