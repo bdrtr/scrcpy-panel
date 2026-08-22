@@ -32,19 +32,42 @@ fn generate_rust_translations() {
     let po = std::path::Path::new("lang/en/LC_MESSAGES/scrcpy-slint.po");
     let text = std::fs::read_to_string(po).unwrap_or_default();
 
+    // A .po string can be written over several lines — `msgid ""` and then the
+    // text in pieces — which is what msgfmt, msgmerge and xgettext produce for
+    // anything past the seventy-ninth column, and what a translator's editor
+    // writes back. Reading only the first line of such an entry drops the whole
+    // of it without a word: this file has 28 strings long enough to be wrapped,
+    // and putting it through `msgcat` once takes the table from 397 entries to
+    // 367. So the continuation lines are gathered as well.
     let mut entries: Vec<(String, String)> = Vec::new();
-    let mut msgid: Option<String> = None;
-    for line in text.lines() {
+    let mut id = String::new();
+    let mut translation = String::new();
+    let mut reading = Reading::Neither;
+    for line in text.lines().chain(std::iter::once("")) {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("msgid ") {
-            msgid = quoted(rest);
+            // A new entry begins, so whatever the last one gathered is finished.
+            keep(&mut entries, &id, &translation);
+            id = quoted(rest).unwrap_or_default();
+            translation.clear();
+            reading = Reading::Id;
         } else if let Some(rest) = line.strip_prefix("msgstr ") {
-            if let (Some(id), Some(text)) = (msgid.take(), quoted(rest)) {
-                // The header entry has an empty msgid and is not a string.
-                if !id.is_empty() && !text.is_empty() {
-                    entries.push((id, text));
-                }
+            translation = quoted(rest).unwrap_or_default();
+            reading = Reading::Str;
+        } else if line.starts_with('"') {
+            let more = quoted(line).unwrap_or_default();
+            match reading {
+                Reading::Id => id.push_str(&more),
+                Reading::Str => translation.push_str(&more),
+                Reading::Neither => {}
             }
+        } else {
+            // A comment, a blank line, or an obsolete `#~` entry: either way
+            // this one is over.
+            keep(&mut entries, &id, &translation);
+            id.clear();
+            translation.clear();
+            reading = Reading::Neither;
         }
     }
 
@@ -67,6 +90,22 @@ fn generate_rust_translations() {
     let path = std::path::Path::new(&std::env::var("OUT_DIR").expect("OUT_DIR"))
         .join("translations.rs");
     std::fs::write(path, out).expect("failed to write translations.rs");
+}
+
+/// Which of the two strings a continuation line belongs to.
+enum Reading {
+    Neither,
+    Id,
+    Str,
+}
+
+/// Take a finished pair, unless there is nothing to take: the header entry has
+/// an empty msgid, and an entry nobody has translated yet has an empty msgstr
+/// and has to fall back to the source language rather than to an empty string.
+fn keep(entries: &mut Vec<(String, String)>, id: &str, translation: &str) {
+    if !id.is_empty() && !translation.is_empty() {
+        entries.push((id.to_string(), translation.to_string()));
+    }
 }
 
 /// A .po string as the compiler will see it, for ordering only.

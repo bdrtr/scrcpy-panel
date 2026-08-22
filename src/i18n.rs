@@ -79,6 +79,11 @@ macro_rules! tr {
 mod tests {
     use super::*;
 
+    /// The language is one flag for the whole process, so the tests that set it
+    /// take turns. Without this they raced: two of them assert on what `tr`
+    /// returns while the other is switching the language underneath.
+    static LANGUAGE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// The table is generated, and a binary search over an unsorted table finds
     /// nothing; this is what keeps the generator honest.
     #[test]
@@ -103,6 +108,7 @@ mod tests {
     /// Turkish is the source, so nothing is looked up until a language is set.
     #[test]
     fn the_source_language_passes_strings_through() {
+        let _turn = LANGUAGE.lock().unwrap_or_else(|e| e.into_inner());
         set_language("tr");
         assert_eq!(tr("Cihazlar"), "Cihazlar");
         set_language("en");
@@ -113,8 +119,128 @@ mod tests {
     /// A string the .po has never heard of comes back as it went in.
     #[test]
     fn an_untranslated_string_survives() {
+        let _turn = LANGUAGE.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
         assert_eq!(tr("/dev/video0"), "/dev/video0");
         set_language("tr");
+    }
+
+    /// Every `tr!("…")` in the Rust source reaches the table.
+    ///
+    /// This is the guard the module's own header asks for — "one translation
+    /// file for the whole program rather than two that drift apart" — and it
+    /// was not there. Three messages had drifted: `Ekran görüntüsü alınamadı`
+    /// (the .po had only the `: {}` form), `adb sunucusu yeniden başlatılamadı:
+    /// {}` (it had only the one ending in a full stop) and the UHID fallback
+    /// warning, which it had not at all. All three stayed Turkish in an English
+    /// panel, and nothing said so.
+    ///
+    /// It is checked against the generated table rather than against the .po,
+    /// so it also fails if build.rs reads the file and drops an entry — which
+    /// is how a wrapped .po used to lose thirty of them.
+    #[test]
+    fn every_message_the_code_builds_has_a_translation() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        collect_rust(&root, &mut files);
+        assert!(files.len() > 20, "only {} source files found", files.len());
+
+        let mut found = 0;
+        let mut missing = Vec::new();
+        for file in &files {
+            let source = std::fs::read_to_string(file).expect("a source file");
+            for message in translatable(&source) {
+                found += 1;
+                if TRANSLATIONS
+                    .binary_search_by_key(&message.as_str(), |(msgid, _)| *msgid)
+                    .is_err()
+                {
+                    let name = file.file_name().unwrap_or_default().to_string_lossy();
+                    missing.push(format!("  {name}: {message}"));
+                }
+            }
+        }
+        assert!(found > 50, "the scan found only {found} messages");
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "{} message(s) with no entry in lang/en/LC_MESSAGES/scrcpy-slint.po:\n{}",
+            missing.len(),
+            missing.join("\n")
+        );
+    }
+
+    fn collect_rust(directory: &std::path::Path, into: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rust(&path, into);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                into.push(path);
+            }
+        }
+    }
+
+    /// The string literal of every `tr!("…")` in one file, as the macro will
+    /// see it.
+    ///
+    /// `include_str!("…")` ends in the same three characters, so a `tr!` that
+    /// carries on an identifier is not one; and the macro's own documentation
+    /// is full of examples, so a line already inside a comment is not one
+    /// either. A call whose first argument is not a literal — none exist today
+    /// — cannot be checked and is skipped.
+    fn translatable(source: &str) -> Vec<String> {
+        // Spelled in two halves so that this scanner does not find itself.
+        let call = concat!("tr", "!(");
+        let bytes = source.as_bytes();
+        let mut out = Vec::new();
+        let mut at = 0;
+        while let Some(offset) = source[at..].find(call) {
+            let start = at + offset;
+            at = start + call.len();
+            let before = source[..start].as_bytes().last().copied();
+            if before.is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_') {
+                continue;
+            }
+            let line_start = source[..start].rfind('\n').map(|n| n + 1).unwrap_or(0);
+            if source[line_start..start].contains("//") {
+                continue;
+            }
+            let mut cursor = at;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            if cursor >= bytes.len() || bytes[cursor] != b'"' {
+                continue;
+            }
+            cursor += 1;
+            let mut message = String::new();
+            while cursor < bytes.len() {
+                match bytes[cursor] {
+                    b'\\' => {
+                        let escaped = bytes.get(cursor + 1).copied().unwrap_or(b'\\');
+                        message.push(match escaped {
+                            b'n' => '\n',
+                            b't' => '\t',
+                            other => other as char,
+                        });
+                        cursor += 2;
+                    }
+                    b'"' => break,
+                    _ => {
+                        let rest = &source[cursor..];
+                        let character = rest.chars().next().expect("a character");
+                        message.push(character);
+                        cursor += character.len_utf8();
+                    }
+                }
+            }
+            out.push(message);
+        }
+        out
     }
 }

@@ -869,6 +869,9 @@ msgstr "Bringing the mirror window to the front is not available yet — pick th
 msgid "Ekran görüntüsü alınamadı: {}"
 msgstr "The screenshot failed: {}"
 
+msgid "Ekran görüntüsü alınamadı"
+msgstr "The screenshot failed"
+
 msgid "Cihaza gönderilecek dosyalar"
 msgstr "Files to send to the device"
 
@@ -910,6 +913,9 @@ msgstr "The session could not be started: {}"
 
 msgid "Video kapalı; gömülecek görüntü yok."
 msgstr "Video is off, so there is no picture to embed."
+
+msgid "UHID girdi için winit arka ucu gerekiyor; SDK enjeksiyonuna dönüldü."
+msgstr "UHID input needs the winit backend; fell back to SDK injection."
 
 msgid "Görüntü akışı sona erdi."
 msgstr "The video stream ended."
@@ -976,6 +982,9 @@ msgstr "The adb server was restarted."
 
 msgid "adb sunucusu yeniden başlatılamadı."
 msgstr "The adb server could not be restarted."
+
+msgid "adb sunucusu yeniden başlatılamadı: {}"
+msgstr "The adb server could not be restarted: {}"
 
 msgid "adb çalıştırılabilir dosyasını seçin"
 msgstr "Choose the adb executable"
