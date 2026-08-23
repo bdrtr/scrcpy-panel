@@ -125,6 +125,15 @@ mod linux {
         /// Where a frame's fourth byte is dropped on the way here — see
         /// `write_rgba_frame`. Kept rather than allocated a frame at a time.
         packed: std::cell::RefCell<Vec<u8>>,
+        /// How many writes have failed in a row, and whether the failure has
+        /// been reported.
+        ///
+        /// A sink whose consumer has closed the node fails every frame, and
+        /// this used to warn on every one of them: at 60 fps that is sixty
+        /// identical lines a second, for as long as the session runs, drowning
+        /// whatever else the log had to say. Now the first is a warning and the
+        /// rest are counted, with one more line when it starts working again.
+        failed_writes: std::cell::Cell<u64>,
     }
 
     impl V4l2Sink {
@@ -176,6 +185,7 @@ mod linux {
                 delay: std::time::Duration::from_millis(buffer_ms as u64),
                 queue: std::cell::RefCell::new(std::collections::VecDeque::new()),
                 packed: std::cell::RefCell::new(Vec::new()),
+                failed_writes: std::cell::Cell::new(0),
             })
         }
 
@@ -256,12 +266,25 @@ mod linux {
                 )
             };
             if written < 0 {
-                log::warn!(
-                    "V4L2 write to {} failed: {}",
-                    self.device,
-                    std::io::Error::last_os_error()
-                );
+                let failures = self.failed_writes.get() + 1;
+                self.failed_writes.set(failures);
+                if failures == 1 {
+                    log::warn!(
+                        "V4L2 write to {} failed: {} — further failures will be counted \
+                         rather than repeated",
+                        self.device,
+                        std::io::Error::last_os_error()
+                    );
+                }
                 return false;
+            }
+            let failures = self.failed_writes.replace(0);
+            if failures > 0 {
+                log::info!(
+                    "V4L2 writes to {} are working again, after {} that did not",
+                    self.device,
+                    failures
+                );
             }
             true
         }

@@ -59,10 +59,24 @@ fn main() -> Result<()> {
         run(opts)
     };
 
+    // The last thing a failed run said used to be the one line in the program
+    // with no level and no timestamp: `main` returning `Err` is printed by
+    // Rust's own `Termination` as "Error: ...", which never goes near the log —
+    // so it reached no file, no panel, and nothing reading levels. It goes out
+    // the same door as everything else now, and the process still leaves with
+    // the code it would have.
+    if let Err(ref e) = result {
+        log::error!("{e:#}");
+    }
+
     if options::pauses_on_exit(&pause, result.is_err()) {
         wait_for_a_key();
     }
-    result
+
+    if result.is_err() {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 /// --pause-on-exit: hold the terminal open for whoever has to read the last

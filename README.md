@@ -317,6 +317,30 @@ and none of them needed a phone to find. What each was held to:
   returns EINVAL for a rate of zero — so raw lost the recording's audio track as well.
   Proved against libavcodec rather than against the server's own stream; the device end
   of that is still to do.
+- **Three more silences, one flood, and a line that was never a log line at all.**
+  - **A video decoder that takes packets and gives nothing back said nothing, at any level.**
+    `receive_frame(..).is_ok()` collapses EAGAIN — "send me more", which is ordinary between
+    frames — and every real error into the same `false`; `decode_into` returns `Ok(false)` and
+    the pipeline files that under "no frame this time" and loops. So hardware decode failing
+    per frame, or a stream whose first keyframe was missed, looked exactly like an idle phone:
+    the window holds its last picture, the panel reads 0.0 fps, and the last video line in the
+    log is the launch banner. The audio decoder has had this measurement for a while —
+    `accepted_without_a_frame`, warning once past fifty — and the video side now has the same
+    one, with the same fifty and for the same reason: priming costs a frame or two and fifty is
+    not priming. An error that is not EAGAIN is also logged rather than folded into the same
+    `false`.
+  - **A failing V4L2 sink warned once per frame, for ever.** A consumer that closes the node
+    makes every write fail, and at 60 fps that is sixty identical lines a second for as long as
+    the session runs — which drowns whatever else the log had to say, and, now that records
+    reach the panel, would be sixty rows a second in the Log tab. The first failure is the
+    warning; the rest are counted, and one line says so when writes start working again.
+  - **And the last thing a failed run said was the one line in the program with no level and no
+    timestamp.** `main` returning `Err` is printed by Rust's own `Termination` as `Error: ...`,
+    which never goes near the log — so the single most important line of a failed run reached
+    no file, no panel, and nothing reading levels. It goes out the same door as everything else
+    now, and the process still leaves with the code it would have: the `--otg` refusal measured
+    above still exits 1, and reads
+    `[2026-08-23T06:47:10.479Z ERROR scrcpy_slint] --otg opened neither a keyboard nor a mouse…`
 - **The recorder threw away every write result, then announced the file as complete.**
   `av_interleaved_write_frame` had its verdict dropped at all three call sites and so did
   `av_write_trailer`, so `open_and_record` returned `Ok` whatever the filesystem had done. The

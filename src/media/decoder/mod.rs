@@ -100,7 +100,27 @@ pub struct VideoDecoder {
     /// The whole picture with room to spare: what `Write::Scratch` converts
     /// into, and what the probe that chooses between the three measures in.
     scratch: Vec<u8>,
+    /// Packets the decoder has taken without handing a picture back.
+    ///
+    /// The audio side has had this measurement for a while and the video side
+    /// had none at all: `receive_frame(..).is_ok()` collapses EAGAIN — "send me
+    /// more", which is ordinary — and every real error into the same `false`,
+    /// `decode_into` returns `Ok(false)`, and the pipeline files that under
+    /// "no frame this time" and loops. A session that mirrored twenty minutes
+    /// and one that mirrored nothing logged identically, and an idle phone —
+    /// which sends nothing while its screen is still — looks the same again
+    /// from the fps figure.
+    accepted_without_a_frame: u32,
+    said_nothing_came_out: bool,
 }
+
+/// How many packets in a row may be taken without a picture before it is worth
+/// a line.
+///
+/// The same number the audio decoder uses, for the same reason: priming is
+/// ordinary and costs a frame or two, and fifty is not priming. A stream whose
+/// first keyframe was missed can sit here for ever.
+const ACCEPTED_WITHOUT_A_FRAME: u32 = 50;
 
 
 
@@ -157,6 +177,8 @@ impl VideoDecoder {
             tail_scaler: None,
             tail_buf: Vec::new(),
             scratch: Vec::new(),
+            accepted_without_a_frame: 0,
+            said_nothing_came_out: false,
         })
     }
 
@@ -390,13 +412,33 @@ impl VideoDecoder {
             .context("Failed to send packet to decoder")?;
 
         // Receive decoded frame
-        if self.decoder.receive_frame(&mut self.av_frame).is_ok() {
-            self.process_frame(output)?;
-            // Drain extra frames
-            while self.decoder.receive_frame(&mut self.av_frame).is_ok() {
+        match self.decoder.receive_frame(&mut self.av_frame) {
+            Ok(()) => {
+                self.accepted_without_a_frame = 0;
+                self.said_nothing_came_out = false;
                 self.process_frame(output)?;
+                // Drain extra frames
+                while self.decoder.receive_frame(&mut self.av_frame).is_ok() {
+                    self.process_frame(output)?;
+                }
+                return Ok(true);
             }
-            return Ok(true);
+            // "Send me more" is the ordinary answer between frames and says
+            // nothing; anything else is the decoder failing on a packet it
+            // accepted, which used to be indistinguishable from it.
+            Err(ffmpeg_next::Error::Other { errno }) if errno == libc::EAGAIN => {}
+            Err(e) => log::debug!("The decoder took a packet and refused it: {e}"),
+        }
+
+        self.accepted_without_a_frame += 1;
+        if self.accepted_without_a_frame >= ACCEPTED_WITHOUT_A_FRAME && !self.said_nothing_came_out
+        {
+            self.said_nothing_came_out = true;
+            log::warn!(
+                "The video decoder has taken {} packets without giving a picture back; \
+                 the window is holding the last frame it had",
+                self.accepted_without_a_frame
+            );
         }
 
         Ok(false)
