@@ -33,7 +33,7 @@ use crate::server;
 use crate::SCRCPY_SERVER_VERSION;
 
 mod pipeline;
-mod recording;
+pub mod recording;
 mod startup;
 
 use pipeline::{run_decoder, run_demuxer, start_audio, start_controller};
@@ -90,7 +90,7 @@ pub struct Session {
     /// for it to finish rather than guess at how long that takes. The trailer —
     /// the index that makes an mp4 open at all — is written after the last
     /// packet, and this handle used to be thrown away.
-    recorder_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
+    recorder_thread: Arc<Mutex<Option<JoinHandle<Result<()>>>>>,
     /// What a recorder started later needs to know about the streams.
     video_codec: Option<VideoCodecInfo>,
     audio_codec_id: Option<u32>,

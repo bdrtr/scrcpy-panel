@@ -860,6 +860,9 @@ msgstr "Recording could not be started: {}"
 msgid "Kayıt durduruldu, dosya kapatıldı."
 msgstr "Recording stopped, the file is closed."
 
+msgid "Kayıt yazılamadı: {}"
+msgstr "The recording could not be written: {}"
+
 msgid "Kayıt kapatıldı."
 msgstr "Recording turned off."
 

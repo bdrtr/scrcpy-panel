@@ -317,6 +317,25 @@ and none of them needed a phone to find. What each was held to:
   returns EINVAL for a rate of zero — so raw lost the recording's audio track as well.
   Proved against libavcodec rather than against the server's own stream; the device end
   of that is still to do.
+- **The recorder threw away every write result, then announced the file as complete.**
+  `av_interleaved_write_frame` had its verdict dropped at all three call sites and so did
+  `av_write_trailer`, so `open_and_record` returned `Ok` whatever the filesystem had done. The
+  session then logged "Recording complete: {path}", and the panel — whose `stop_recording`
+  returned a `bool` meaning only "there was one" — said "Kayıt durduruldu, dosya kapatıldı."
+  Both over a file with nothing in it. libav reports these rather than logging them, and the
+  recorder's `av_log_set_level(AV_LOG_WARNING)` would not have surfaced them anyway: an ENOSPC
+  was a number nobody looked at. The verdict is kept now and the first refusal ends the
+  recording, which is what scrcpy does too — a muxer that has started saying no is not going to
+  be talked round. The trailer is still attempted, because a partial file a player can open
+  beats one it cannot. `av_strerror` is asked for the words. The result travels back out of the
+  recorder's thread instead of being swallowed there, `stop_recording` answers with three cases
+  rather than a bool, and the panel says what happened; the five-second wait is *not* counted as
+  a failure, since nothing knows yet at that point and a wrong claim in that direction is as
+  wrong as the old unconditional success. Tested against `/dev/full`, which is a full disk that
+  needs no root, no partition and no device — every write to it returns ENOSPC — and the
+  assertion is narrow on purpose: it demands the message come from a packet write or the
+  trailer, *and* carry libav's own "No space left on device", so that the header check which has
+  always existed cannot pass it by accident.
 - **What the phone said went to stdout, and what adb said went nowhere.** Three silences in
   the same place — the layer where somebody else's words arrive — and each was found by asking
   what a user would have to read to know why a session failed.

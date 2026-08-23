@@ -6,6 +6,21 @@
 
 use super::*;
 
+/// What came of stopping a recording.
+///
+/// It used to be a `bool` meaning "there was one", and the panel read that as
+/// "the file is written" — so a session that filled a disk or lost a USB stick
+/// ended with "Kayıt durduruldu, dosya kapatıldı." over a file with nothing in
+/// it. The three cases are now three cases.
+pub enum RecordingOutcome {
+    /// Nothing was recording.
+    NotRecording,
+    /// The file was finished, as far as the muxer is concerned.
+    Written,
+    /// The muxer or the filesystem refused, with libav's own words for it.
+    Failed(String),
+}
+
 impl Session {
     /// Start the thread that writes the recording, once the streams have said
     /// what they are.
@@ -129,7 +144,7 @@ impl Session {
     /// an mp4 without one does not open. This used to return the moment the
     /// recorder was told to stop, so a caller said "recording stopped" over a
     /// file that was not yet one.
-    pub fn stop_recording(&self) -> bool {
+    pub fn stop_recording(&self) -> RecordingOutcome {
         // Taken out from under the lock on its own line, so the write guard is
         // gone before the wait begins. Held across it — which is what a `match`
         // on the guard does, since the temporary lives to the end of the
@@ -140,11 +155,15 @@ impl Session {
         match recorder {
             Some(recorder) => {
                 recorder.stop();
-                self.wait_for_the_file();
-                log::info!("Recording stopped");
-                true
+                match self.wait_for_the_file() {
+                    Some(why) => RecordingOutcome::Failed(why),
+                    None => {
+                        log::info!("Recording stopped");
+                        RecordingOutcome::Written
+                    }
+                }
             }
-            None => false,
+            None => RecordingOutcome::NotRecording,
         }
     }
 
@@ -155,25 +174,36 @@ impl Session {
     /// half-written file is better than a client that never closes. It replaces
     /// a flat 500 ms sleep, which was both too long for a small file and too
     /// short for a large one.
-    pub(super) fn wait_for_the_file(&self) {
+    pub(super) fn wait_for_the_file(&self) -> Option<String> {
         let Some(thread) = self
             .recorder_thread
             .lock()
             .expect("recorder thread lock")
             .take()
         else {
-            return;
+            return None;
         };
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !thread.is_finished() {
             if std::time::Instant::now() >= deadline {
                 log::warn!("The recording is still being written; leaving it to finish");
-                return;
+                // Not a failure: nothing here knows yet, and claiming one would
+                // be as wrong in the other direction as the old unconditional
+                // success was.
+                return None;
             }
             thread::sleep(Duration::from_millis(10));
         }
-        if thread.join().is_err() {
-            log::warn!("Recorder thread panicked");
+        match thread.join() {
+            Ok(Ok(())) => None,
+            // Already logged by the recorder's own thread; handed back here so
+            // that whoever tells the user can say something other than "the
+            // file is closed".
+            Ok(Err(e)) => Some(format!("{e:#}")),
+            Err(_) => {
+                log::warn!("Recorder thread panicked");
+                Some("the recorder thread panicked".to_string())
+            }
         }
     }
 }

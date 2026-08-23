@@ -136,22 +136,26 @@ impl Recorder {
         has_video: bool,
         audio: Option<u32>,
         rotation: u16,
-    ) -> thread::JoinHandle<()> {
+    ) -> thread::JoinHandle<Result<()>> {
         let state = Arc::clone(&self.state);
         thread::Builder::new()
             .name("scrcpy-recorder".into())
             .spawn(move || {
-                if let Err(e) = run_recorder(
+                // Handed back as well as logged. Whoever stops the recording is
+                // the one telling the user their file is written, and it used
+                // to say so whatever had happened in here.
+                let outcome = run_recorder(
                     state,
                     &filename,
                     format.as_deref(),
                     has_video,
                     audio.is_some(),
                     rotation,
-                )
-                {
+                );
+                if let Err(ref e) = outcome {
                     log::error!("Recorder failed: {}", e);
                 }
+                outcome
             })
             .expect("Failed to spawn recorder thread")
     }
@@ -301,10 +305,20 @@ unsafe fn open_and_record(
     if ret < 0 { anyhow::bail!("avformat_write_header failed ({})", ret); }
     log::info!("Recording started → {} ({})", filename, fmt_name);
 
-    write_the_packets(lock, cvar, ctx, vid_idx, aud_idx);
+    let refused = write_the_packets(lock, cvar, ctx, vid_idx, aud_idx);
 
-    ffi::av_write_trailer(ctx);
+    // The trailer is attempted whatever happened above: a partial file a player
+    // can open beats a partial file it cannot, and the muxer is closed either
+    // way by `drop`.
+    let trailer = ffi::av_write_trailer(ctx);
     drop(muxer);
+
+    if let Some(code) = refused {
+        anyhow::bail!("the muxer refused a packet for {}: {}", filename, av_error(code));
+    }
+    if trailer < 0 {
+        anyhow::bail!("could not finish {}: {}", filename, av_error(trailer));
+    }
 
     Ok(())
 }
@@ -461,13 +475,20 @@ unsafe fn take_the_config_packets(
 }
 
 /// The packet loop, which is where a recording is actually made.
+///
+/// Returns the first write the muxer refused, if any. Nothing used to be
+/// returned at all: `av_interleaved_write_frame`'s verdict was dropped at every
+/// call site, so a stick pulled out mid-session or a partition that filled up
+/// produced a file with nothing in it and a log line saying "Recording
+/// complete". Stopping on the first refusal is what scrcpy does too — a muxer
+/// that has started saying no is not going to be talked round.
 unsafe fn write_the_packets(
     lock: &Mutex<RecorderState>,
     cvar: &Condvar,
     ctx: *mut ffi::AVFormatContext,
     vid_idx: c_int,
     aud_idx: c_int,
-) {
+) -> Option<c_int> {
     // 5. Main packet loop — mirrors C's sc_recorder_process_packets
     // The two streams share one clock, so nothing can be written until the
     // first packet of each has been seen. These hold them meanwhile: the loop
@@ -573,7 +594,10 @@ unsafe fn write_the_packets(
             let cur = v.pts - pts_origin;
             if let Some(prev) = prev_vpkt.take() {
                 let pprev = prev.pts - pts_origin;
-                write_pkt(ctx, &prev, vid_idx, pprev, cur - pprev, &mut vlast);
+                let written = write_pkt(ctx, &prev, vid_idx, pprev, cur - pprev, &mut vlast);
+                if written < 0 {
+                    return Some(written);
+                }
             }
         }
         if let Some(v) = vpkt { prev_vpkt = Some(v); }
@@ -581,15 +605,22 @@ unsafe fn write_the_packets(
         // Audio: write immediately
         if let Some(a) = apkt {
             let apts = a.pts - pts_origin;
-            write_pkt(ctx, &a, aud_idx, apts, 0, &mut alast);
+            let written = write_pkt(ctx, &a, aud_idx, apts, 0, &mut alast);
+            if written < 0 {
+                return Some(written);
+            }
         }
     }
 
     // Write last video packet with 100ms duration (same as C)
     if let Some(last) = prev_vpkt {
         let pts = last.pts.saturating_sub(pts_origin.max(0));
-        write_pkt(ctx, &last, vid_idx, pts, 100_000, &mut vlast);
+        let written = write_pkt(ctx, &last, vid_idx, pts, 100_000, &mut vlast);
+        if written < 0 {
+            return Some(written);
+        }
     }
+    None
 }
 
 /// Write `--record-orientation` into the stream as a display matrix.
@@ -649,6 +680,11 @@ unsafe fn get_stream(ctx: *mut ffi::AVFormatContext, idx: usize) -> *mut ffi::AV
 }
 
 /// Write one interleaved packet, fixing non-monotonic PTS (mirrors C's sc_recorder_write_stream)
+///
+/// Returns what the muxer said. It used to return nothing and the call sites
+/// dropped it, so a write that failed — the stick pulled out, the partition
+/// full — was indistinguishable from one that worked, and the session went on
+/// to log "Recording complete" over a file with nothing in it.
 unsafe fn write_pkt(
     ctx: *mut ffi::AVFormatContext,
     pkt: &RecPacket,
@@ -656,7 +692,7 @@ unsafe fn write_pkt(
     pts: i64,
     duration: i64,
     last_pts: &mut i64,
-) {
+) -> c_int {
     // Fix non-monotonic PTS (same logic as C)
     let pts = if *last_pts != AV_NOPTS && pts <= *last_pts {
         *last_pts + 1
@@ -666,7 +702,7 @@ unsafe fn write_pkt(
     *last_pts = pts;
 
     let av = ffi::av_packet_alloc();
-    if av.is_null() { return; }
+    if av.is_null() { return ffi::AVERROR(libc::ENOMEM); }
 
     let stream = get_stream(ctx, stream_idx as usize);
     let stb = (*stream).time_base;
@@ -684,14 +720,32 @@ unsafe fn write_pkt(
     (*av).size = pkt.data.len() as c_int;
 
     let ref_av = ffi::av_packet_alloc();
+    let mut written = ffi::AVERROR(libc::ENOMEM);
     if !ref_av.is_null() && ffi::av_packet_ref(ref_av, av) == 0 {
-        ffi::av_interleaved_write_frame(ctx, ref_av);
+        written = ffi::av_interleaved_write_frame(ctx, ref_av);
         ffi::av_packet_free(&mut (ref_av as *mut _));
     }
     // Do not free av's data (it's borrowed from RecPacket)
     (*av).data = std::ptr::null_mut();
     (*av).size = 0;
     ffi::av_packet_free(&mut (av as *mut _));
+    written
+}
+
+/// What libav means by a negative return.
+///
+/// libav reports these rather than logging them, and the recorder sets
+/// `av_log_set_level(AV_LOG_WARNING)`, so without asking there is nothing to
+/// read anywhere: an ENOSPC is a number nobody looked at.
+fn av_error(code: c_int) -> String {
+    let mut buffer = [0i8; 128];
+    unsafe {
+        if ffi::av_strerror(code, buffer.as_mut_ptr(), buffer.len()) == 0 {
+            let text = std::ffi::CStr::from_ptr(buffer.as_ptr());
+            return text.to_string_lossy().into_owned();
+        }
+    }
+    format!("error {code}")
 }
 
 #[cfg(test)]
@@ -857,6 +911,69 @@ mod tests {
         assert_eq!(
             counted.1, 3,
             "the stop threw away the held packet and the queue behind it: {counted:?}"
+        );
+    }
+
+    /// A recording that cannot be written must not be announced as complete.
+    ///
+    /// Every `av_interleaved_write_frame` had its verdict dropped, and so did
+    /// `av_write_trailer`, so `open_and_record` returned `Ok` whatever the
+    /// filesystem did and the session logged "Recording complete: {path}" over
+    /// a file with nothing in it. libav reports these rather than logging them,
+    /// and `av_log_set_level(AV_LOG_WARNING)` would not have surfaced them
+    /// anyway: an ENOSPC was a number nobody looked at.
+    ///
+    /// `/dev/full` is a full disk that needs no setting up — every write to it
+    /// returns ENOSPC — so this is the stick pulled out mid-session, with no
+    /// device, no root and no partition to fill.
+    #[test]
+    fn a_recording_that_cannot_be_written_says_so() {
+        const PCM_S16LE: u32 = 65536;
+        let recorder = Recorder::new();
+        recorder.set_video_codec(VideoCodecInfo { codec_id: 27, width: 64, height: 48 });
+        recorder.set_audio_codec(PCM_S16LE, false);
+
+        let audio = |pts: i64| RecPacket { data: vec![0u8; 4096], pts, is_key: true };
+        let video = |pts: i64| RecPacket { data: vec![0u8; 4096], pts, is_key: true };
+        recorder.push_video(RecPacket { data: vec![0u8; 8], pts: AV_NOPTS, is_key: false });
+        // Enough to push past libav's own write buffer, so the refusal lands on
+        // a packet rather than on the header.
+        for i in 0..64 {
+            recorder.push_video(video(i * 33_000));
+            recorder.push_audio(audio(i * 20_000));
+        }
+
+        // Everything is queued and the stop is set before the run, so the loop
+        // meets full queues and drains them without a second thread to race.
+        // `run_recorder` rather than `spawn`, because `spawn`'s thread swallows
+        // the result into a log line and this test is about the result.
+        recorder.stop();
+        let outcome = run_recorder(
+            Arc::clone(&recorder.state),
+            "/dev/full",
+            Some("mkv"),
+            true,
+            true,
+            0,
+        );
+
+        let e = outcome.expect_err("writing to /dev/full cannot succeed");
+        let said = format!("{e:#}");
+        assert!(
+            said.contains("/dev/full"),
+            "the failure does not name the file: {said}"
+        );
+        // And through the path this commit added, rather than through the
+        // header write that has always been checked: one of the two sentences
+        // that only exist because the muxer's verdict is kept now.
+        assert!(
+            said.contains("the muxer refused a packet") || said.contains("could not finish"),
+            "the failure did not come from a write or the trailer: {said}"
+        );
+        // libav's own word for it, asked for rather than left as a number.
+        assert!(
+            said.contains("No space left on device"),
+            "libav's reason is missing: {said}"
         );
     }
 

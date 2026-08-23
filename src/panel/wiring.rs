@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::control::control_msg::ControlMsg;
 use crate::tr;
 use crate::options::Options;
+use crate::session::recording::RecordingOutcome;
 use crate::ui::{
     App, Cfg, PanelWindow, Settings,
 };
@@ -341,13 +342,19 @@ pub(super) fn wire_the_session(window: &PanelWindow, panel: &Rc<Panel>) {
                             Err(e) => panel.warn(&tr!("Kayıt başlatılamadı: {}", format!("{e:#}"))),
                         }
                     }
-                    Some(session) => {
-                        if session.stop_recording() {
+                    Some(session) => match session.stop_recording() {
+                        RecordingOutcome::Written => {
                             panel.info(&tr!("Kayıt durduruldu, dosya kapatıldı."));
-                        } else {
+                        }
+                        // This used to read as the success above, because the
+                        // recorder's thread swallowed its own result.
+                        RecordingOutcome::Failed(why) => {
+                            panel.warn(&tr!("Kayıt yazılamadı: {}", why));
+                        }
+                        RecordingOutcome::NotRecording => {
                             panel.info(&tr!("Kayıt kapatıldı."));
                         }
-                    }
+                    },
                     None if on => {
                         panel.info(&tr!("Kayıt açıldı; oturum başlayınca dosyaya yazılacak."))
                     }
