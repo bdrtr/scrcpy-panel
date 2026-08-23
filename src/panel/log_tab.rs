@@ -94,7 +94,7 @@ impl Panel {
         self.append_to_disk(for_disk, level, message);
     }
 
-    /// "Günlüğü diske yaz": mirror the line into ~/.config/scrcpy-slint/panel.log.
+    /// "Günlüğü diske yaz": mirror the line into ~/.config/scrcpy-panel/panel.log.
     ///
     /// The handle is opened on the first line and held, so a chatty session is
     /// not five hundred open/close pairs.
@@ -132,7 +132,7 @@ impl Panel {
                     // date at all.
                     let _ = writeln!(
                         file,
-                        "--- scrcpy-slint {} — {stamp} ---",
+                        "--- scrcpy-panel {} — {stamp} ---",
                         crate::VERSION
                     );
                     *slot = Some(file);

@@ -556,7 +556,7 @@ mod tests {
     fn no_packet_is_lost_while_the_origin_is_being_found() {
         const PCM_S16LE: u32 = 65536; // AV_CODEC_ID_PCM_S16LE
         let path = std::env::temp_dir().join(format!(
-            "scrcpy-slint-origin-{}.mkv",
+            "scrcpy-panel-origin-{}.mkv",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);
@@ -628,7 +628,7 @@ mod tests {
     fn a_stop_before_the_origin_is_found_still_writes_what_is_held() {
         const PCM_S16LE: u32 = 65536; // AV_CODEC_ID_PCM_S16LE
         let path = std::env::temp_dir().join(format!(
-            "scrcpy-slint-stop-{}.mkv",
+            "scrcpy-panel-stop-{}.mkv",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);

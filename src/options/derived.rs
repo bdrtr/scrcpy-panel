@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn a_bare_port_is_a_range_of_one() {
         let at = |value: &str| {
-            let mut opts = Options::parse_from(["scrcpy-slint"]);
+            let mut opts = Options::parse_from(["scrcpy-panel"]);
             opts.port_range = value.to_string();
             opts.port_range_parsed()
         };

@@ -28,7 +28,7 @@ pub(super) fn session_options(window: &PanelWindow, panel: &Rc<Panel>) -> Option
         panel.warn(&tr!("Bu bayraklar istemcide henüz yok, atlandı: {}", dropped.join(" ")));
     }
 
-    let mut argv = vec!["scrcpy-slint".to_string()];
+    let mut argv = vec!["scrcpy-panel".to_string()];
     argv.extend(args);
     match Options::try_parse_from(&argv) {
         Ok(opts) => Some(opts),

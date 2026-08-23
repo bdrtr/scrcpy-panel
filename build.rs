@@ -29,7 +29,7 @@ fn main() {
 /// own messages are built in Rust and would otherwise need a second translation
 /// file to keep in step with this one.
 fn generate_rust_translations() {
-    let po = std::path::Path::new("lang/en/LC_MESSAGES/scrcpy-slint.po");
+    let po = std::path::Path::new("lang/en/LC_MESSAGES/scrcpy-panel.po");
     let text = std::fs::read_to_string(po).unwrap_or_default();
 
     // A .po string can be written over several lines — `msgid ""` and then the
@@ -79,7 +79,7 @@ fn generate_rust_translations() {
     entries.dedup_by(|a, b| a.0 == b.0);
 
     let mut out = String::from(
-        "/// Generated from lang/en/LC_MESSAGES/scrcpy-slint.po by build.rs.\n\
+        "/// Generated from lang/en/LC_MESSAGES/scrcpy-panel.po by build.rs.\n\
          static TRANSLATIONS: &[(&str, &str)] = &[\n",
     );
     for (id, text) in &entries {

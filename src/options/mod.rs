@@ -15,16 +15,16 @@ pub use values::{pauses_on_exit, rgb_from_hex, AUDIO_SOURCES, LOG_LEVELS};
 /// so the helper lives here rather than twice.
 #[cfg(test)]
 pub(super) fn parse(args: &[&str]) -> Options {
-    let mut argv = vec!["scrcpy-slint"];
+    let mut argv = vec!["scrcpy-panel"];
     argv.extend_from_slice(args);
     Options::try_parse_from(argv).expect("valid arguments")
 }
 
-/// scrcpy-slint — mirror and control an Android device from a Slint panel
+/// scrcpy-panel — mirror and control an Android device from a Slint panel
 #[derive(Parser, Debug, Clone)]
-// The binary is `scrcpy-slint` and always has been; `--version` and `--help`
+// The binary is `scrcpy-panel` and always has been; `--version` and `--help`
 // said `scrcpyrust`, which is the name of the project this was forked from.
-#[command(name = "scrcpy-slint", version, about)]
+#[command(name = "scrcpy-panel", version, about)]
 pub struct Options {
     /// Open the control panel instead of mirroring straight away
     #[arg(long, default_value = "false")]

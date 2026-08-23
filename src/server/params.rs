@@ -207,7 +207,7 @@ mod tests {
     use clap::Parser;
 
     fn args_for(flags: &[&str]) -> Vec<String> {
-        let mut argv = vec!["scrcpy-slint"];
+        let mut argv = vec!["scrcpy-panel"];
         argv.extend_from_slice(flags);
         let opts = Options::try_parse_from(argv).expect("valid arguments");
         build_server_args(&opts, 0, true)
@@ -280,13 +280,13 @@ mod tests {
     fn an_alignment_that_is_not_a_power_of_two_is_refused() {
         for value in ["3", "0", "32", "eight"] {
             assert!(
-                Options::try_parse_from(["scrcpy-slint", "--min-size-alignment", value]).is_err(),
+                Options::try_parse_from(["scrcpy-panel", "--min-size-alignment", value]).is_err(),
                 "--min-size-alignment={value} should not have parsed"
             );
         }
         for value in ["1", "2", "4", "8", "16"] {
             assert!(
-                Options::try_parse_from(["scrcpy-slint", "--min-size-alignment", value]).is_ok(),
+                Options::try_parse_from(["scrcpy-panel", "--min-size-alignment", value]).is_ok(),
                 "--min-size-alignment={value} should have parsed"
             );
         }

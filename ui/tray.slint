@@ -24,10 +24,10 @@ export component TrayIcon inherits SystemTrayIcon {
     in property <string> device;
 
     icon: @image-url("../assets/tray.png");
-    title: @tr("scrcpy-slint");
+    title: @tr("scrcpy-panel");
     tooltip: root.session-running && root.device != ""
-        ? @tr("scrcpy-slint — ") + root.device
-        : @tr("scrcpy-slint");
+        ? @tr("scrcpy-panel — ") + root.device
+        : @tr("scrcpy-panel");
 
     callback show-panel();
     callback toggle-session();

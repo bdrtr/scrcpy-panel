@@ -210,7 +210,7 @@ mod tests {
     }
 
     fn a_file_of(bytes: usize, name: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("scrcpy-slint-{name}-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("scrcpy-panel-{name}-{}", std::process::id()));
         let content: Vec<u8> = (0..bytes).map(|i| (i % 251) as u8).collect();
         std::fs::write(&path, &content).expect("a file to push");
         path

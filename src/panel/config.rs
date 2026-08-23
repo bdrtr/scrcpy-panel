@@ -10,11 +10,30 @@ use crate::ui::{
 use super::*;
 
 /// Where profiles and preferences live.
+///
+/// The project was called `scrcpy-slint` until 1.0, and everything anybody had
+/// saved — their settings, their profiles, the log they had been keeping — was
+/// written under that name. So the old directory is still used if it is there
+/// and the new one is not. Nothing is moved: somebody's files are not this
+/// program's to relocate while they are not looking, and a rename that silently
+/// hides a profile list is worse than a directory with a stale name in it.
+///
+/// A fresh install has no old directory and gets the new name. One that has
+/// both — because the new one was made first — gets the new one, which is the
+/// only ordering under which the old is genuinely abandoned.
 pub(super) fn config_dir() -> Option<std::path::PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
-    Some(base.join("scrcpy-slint"))
+
+    let now = base.join("scrcpy-panel");
+    if !now.exists() {
+        let before = base.join("scrcpy-slint");
+        if before.is_dir() {
+            return Some(before);
+        }
+    }
+    Some(now)
 }
 // 87 fields
 /// Copy the form state out of the UI.

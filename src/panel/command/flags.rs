@@ -1,7 +1,7 @@
 //! The form becomes a command line.
 //!
 //! Every field is compared against the default and only the differences become
-//! flags, which is why an untouched form produces a bare `scrcpy-slint`.
+//! flags, which is why an untouched form produces a bare `scrcpy-panel`.
 //! `SUPPORTED` is the other half of that: a flag this client parses but reads
 //! nowhere is worse than one it rejects, because the panel would then have
 //! nothing to warn about.
@@ -462,7 +462,7 @@ mod tests {
                         serde_json::from_value(form).expect("it deserialises");
 
                     let (accepted, _dropped) = config.to_client_args();
-                    let mut argv = vec!["scrcpy-slint".to_string()];
+                    let mut argv = vec!["scrcpy-panel".to_string()];
                     argv.extend(accepted.clone());
                     if let Err(e) = crate::options::Options::try_parse_from(&argv) {
                         panic!(
@@ -820,7 +820,7 @@ mod tests {
                 .map(|possible| possible.get_name().to_string())
                 .unwrap_or_else(|| "1".to_string());
 
-            let mut argv = vec!["scrcpy-slint".to_string()];
+            let mut argv = vec!["scrcpy-panel".to_string()];
             argv.push(if takes_value {
                 format!("{name}={value}")
             } else {

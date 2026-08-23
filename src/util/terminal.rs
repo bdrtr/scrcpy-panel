@@ -56,7 +56,7 @@ mod tests {
 
     #[test]
     fn the_escape_is_the_one_scrcpy_writes() {
-        assert_eq!(title_escape("scrcpy-slint"), "\x1b]0;scrcpy-slint\x07");
+        assert_eq!(title_escape("scrcpy-panel"), "\x1b]0;scrcpy-panel\x07");
         assert_eq!(title_escape(""), "\x1b]0;\x07");
     }
 

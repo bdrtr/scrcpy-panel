@@ -32,7 +32,7 @@ impl ScreensaverInhibitor {
                 PATH,
                 Some(SERVICE),
                 "Inhibit",
-                &("scrcpy-slint", reason),
+                &("scrcpy-panel", reason),
             )
             .context("The desktop refused to inhibit the screensaver")?
             .body()

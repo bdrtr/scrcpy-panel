@@ -1,5 +1,5 @@
 [package]
-name = "scrcpy-slint"
+name = "scrcpy-panel"
 version = "1.0.0"
 edition = "2021"
 description = "A Rust scrcpy client with a Slint user interface — mirror and control Android devices"

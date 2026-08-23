@@ -151,7 +151,7 @@ mod tests {
     use clap::Parser;
 
     fn opts(flags: &[&str]) -> Options {
-        let mut argv = vec!["scrcpy-slint"];
+        let mut argv = vec!["scrcpy-panel"];
         argv.extend_from_slice(flags);
         Options::try_parse_from(argv).expect("valid arguments")
     }

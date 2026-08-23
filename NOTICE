@@ -1,4 +1,4 @@
-scrcpy-slint
+scrcpy-panel
 Copyright 2026 bdrtr
 
 This product includes software developed as part of the following projects.
@@ -8,11 +8,11 @@ This product includes software developed as part of the following projects.
    https://github.com/naaceer-del/ScrcpyRUST
    Licensed under the Apache License, Version 2.0.
 
-   scrcpy-slint is a fork of ScrcpyRUST. The Rust client skeleton — the ADB
+   scrcpy-panel is a fork of ScrcpyRUST. The Rust client skeleton — the ADB
    layer, the scrcpy wire-protocol demuxer, the FFmpeg decoder wrapper, the
    control-message and input layers — originates from that project.
 
-   Modifications made in scrcpy-slint (see git history for the full record):
+   Modifications made in scrcpy-panel (see git history for the full record):
      - Replaced the SDL2 window/renderer with a Slint user interface
      - Bumped the FFmpeg bindings from ffmpeg-next 8 to ffmpeg-next 9
      - Added the missing `libc` dependency required by the V4L2 sink
@@ -28,7 +28,7 @@ This product includes software developed as part of the following projects.
    Copyright (C) 2018-2026 Romain Vimont
    Licensed under the Apache License, Version 2.0.
 
-   scrcpy-slint speaks the scrcpy wire protocol and runs the unmodified
+   scrcpy-panel speaks the scrcpy wire protocol and runs the unmodified
    scrcpy server (`scrcpy-server`) on the Android device. The client
    architecture — the module layout, the protocol framing, the control
    message format and the Android keycode mappings — derives from scrcpy.

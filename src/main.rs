@@ -51,7 +51,7 @@ fn main() -> Result<()> {
 
     install_signal_handlers();
 
-    log::info!("scrcpy-slint {} — Rust scrcpy client with a Slint UI", VERSION);
+    log::info!("scrcpy-panel {} — Rust scrcpy client with a Slint UI", VERSION);
 
     // Taken before the options are moved into the run, because the whole point
     // of the pause is to survive whatever the run does.
@@ -226,7 +226,7 @@ fn run_otg(opts: Options) -> Result<()> {
 
     let window = MirrorWindow::new().context("Failed to create the Slint window")?;
     window.set_borderless(opts.borderless);
-    window.set_window_title(format!("scrcpy-slint OTG — {serial}").as_str().into());
+    window.set_window_title(format!("scrcpy-panel OTG — {serial}").as_str().into());
     window.global::<Mirror>().set_placeholder(
         tr!("OTG: klavye ve fare cihaza gidiyor, görüntü yok").as_str().into(),
     );
@@ -645,7 +645,7 @@ fn run(opts: Options) -> Result<()> {
     let title = opts
         .window_title
         .clone()
-        .unwrap_or_else(|| format!("scrcpy-slint — {}", session.device_name));
+        .unwrap_or_else(|| format!("scrcpy-panel — {}", session.device_name));
     if !opts.no_terminal_title {
         util::terminal::set_title(&title);
     }

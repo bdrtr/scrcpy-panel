@@ -153,7 +153,7 @@ mod tests {
         for value in ["#ab", "#abcd", "#gggggg", "", "#", "red"] {
             assert_eq!(rgb_from_hex(value), None, "{value} should not be a colour");
             assert!(
-                Options::try_parse_from(["scrcpy-slint", "--background-color", value]).is_err(),
+                Options::try_parse_from(["scrcpy-panel", "--background-color", value]).is_err(),
                 "--background-color={value} should not have parsed"
             );
         }
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn a_bit_rate_takes_the_suffix_scrcpy_writes() {
         let rate = |flag: &str| {
-            Options::try_parse_from(["scrcpy-slint", flag]).map(|o| o.video_bit_rate)
+            Options::try_parse_from(["scrcpy-panel", flag]).map(|o| o.video_bit_rate)
         };
         assert_eq!(rate("--video-bit-rate=8M").unwrap(), 8_000_000);
         assert_eq!(rate("--video-bit-rate=128K").unwrap(), 128_000);
@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(rate("--video-bit-rate=4000000").unwrap(), 4_000_000, "and no suffix at all");
 
         assert_eq!(
-            Options::try_parse_from(["scrcpy-slint", "--audio-bit-rate=96K"])
+            Options::try_parse_from(["scrcpy-panel", "--audio-bit-rate=96K"])
                 .unwrap()
                 .audio_bit_rate,
             96_000

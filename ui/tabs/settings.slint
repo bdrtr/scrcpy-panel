@@ -144,7 +144,7 @@ export component TabSettings inherits VerticalLayout {
                         toggled => { Settings.changed(); }
                     }
                     Chk {
-                        text: @tr("Günlüğü diske yaz (~/.config/scrcpy-slint/panel.log)");
+                        text: @tr("Günlüğü diske yaz (~/.config/scrcpy-panel/panel.log)");
                         checked <=> Settings.log-to-disk;
                         toggled => { Settings.changed(); }
                     }

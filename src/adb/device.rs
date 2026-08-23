@@ -455,7 +455,7 @@ mod tests {
         // of these can reach a device; every one of them has to come back as an
         // error rather than as an empty success, which is the failure this
         // module keeps finding.
-        let file = std::env::temp_dir().join("scrcpy-slint-adb-probe");
+        let file = std::env::temp_dir().join("scrcpy-panel-adb-probe");
         std::fs::write(&file, b"probe").expect("a file to offer adb");
         for (what, result) in [
             ("pair", pair("127.0.0.1:1", "123456").map(|s| s.to_string())),
@@ -523,17 +523,17 @@ mod tests {
             &shot[..8.min(shot.len())]
         );
 
-        let file = std::env::temp_dir().join("scrcpy-slint-device-probe");
+        let file = std::env::temp_dir().join("scrcpy-panel-device-probe");
         std::fs::write(&file, b"probe").expect("a file to push");
 
         let said = push(&serial, &file, "/sdcard/Download/").expect("a push");
         println!("push: {said}");
         assert!(
-            shell(&serial, &["ls", "/sdcard/Download/scrcpy-slint-device-probe"])
-                .contains("scrcpy-slint-device-probe"),
+            shell(&serial, &["ls", "/sdcard/Download/scrcpy-panel-device-probe"])
+                .contains("scrcpy-panel-device-probe"),
             "the push reported success and the file is not there"
         );
-        shell(&serial, &["rm", "-f", "/sdcard/Download/scrcpy-slint-device-probe"]);
+        shell(&serial, &["rm", "-f", "/sdcard/Download/scrcpy-panel-device-probe"]);
 
         // And the same push somewhere it cannot go, which is the one worth
         // having a device for: adb prints "1 file pushed, 0 skipped" *and then*
@@ -555,7 +555,7 @@ mod tests {
         // An install the device is meant to refuse. Not a real apk, so nothing
         // is installed and nothing has to be removed; what is being checked is
         // that `Failure` on the device's own lips comes back as an error.
-        let not_an_apk = std::env::temp_dir().join("scrcpy-slint-not-an-apk.apk");
+        let not_an_apk = std::env::temp_dir().join("scrcpy-panel-not-an-apk.apk");
         std::fs::write(&not_an_apk, b"not an apk").expect("a file to offer");
         match install(&serial, &not_an_apk) {
             Ok(said) => panic!("an install that did not happen came back as {said:?}"),

@@ -165,7 +165,7 @@ mod tests {
         missing.dedup();
         assert!(
             missing.is_empty(),
-            "{} message(s) with no entry in lang/en/LC_MESSAGES/scrcpy-slint.po:\n{}",
+            "{} message(s) with no entry in lang/en/LC_MESSAGES/scrcpy-panel.po:\n{}",
             missing.len(),
             missing.join("\n")
         );

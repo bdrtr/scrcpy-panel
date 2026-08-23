@@ -347,7 +347,7 @@ mod tests {
     /// panel and nothing says so.
     #[test]
     fn every_card_can_be_translated() {
-        let po = include_str!("../../lang/en/LC_MESSAGES/scrcpy-slint.po");
+        let po = include_str!("../../lang/en/LC_MESSAGES/scrcpy-panel.po");
         let mut missing = Vec::new();
         let mut check = |text: &str| {
             let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");

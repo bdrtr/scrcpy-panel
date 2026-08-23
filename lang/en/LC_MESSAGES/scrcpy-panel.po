@@ -1,4 +1,4 @@
-# English translation of the scrcpy-slint panel.
+# English translation of the scrcpy-panel panel.
 #
 # The source language is Turkish, so msgid is the Turkish string. Anything not
 # listed here falls back to it, which is what technical values (h264, 8M,
@@ -9,7 +9,7 @@
 # built in Rust.
 msgid ""
 msgstr ""
-"Project-Id-Version: scrcpy-slint\n"
+"Project-Id-Version: scrcpy-panel\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -774,11 +774,11 @@ msgstr "Minimise to the system tray on close"
 msgid "Başlangıçta scrcpy-server sürümünü denetle"
 msgstr "Check the scrcpy-server version at startup"
 
-msgid "Günlüğü diske yaz (~/.config/scrcpy-slint/panel.log)"
-msgstr "Write the log to disk (~/.config/scrcpy-slint/panel.log)"
+msgid "Günlüğü diske yaz (~/.config/scrcpy-panel/panel.log)"
+msgstr "Write the log to disk (~/.config/scrcpy-panel/panel.log)"
 
-msgid "scrcpy-slint — "
-msgstr "scrcpy-slint — "
+msgid "scrcpy-panel — "
+msgstr "scrcpy-panel — "
 
 msgid "Paneli göster"
 msgstr "Show the panel"

@@ -1,11 +1,11 @@
-# scrcpy-slint
+# scrcpy-panel
 
 A Rust scrcpy client with a [Slint](https://slint.dev) user interface — mirror and control
 Android devices from a single control panel.
 
 > **Status: 1.0.** `--panel` opens the control panel from [`design/`](./design/) — seven
 > tabs, the eight-section configuration form, a live command preview — and the mirror runs
-> inside it. `scrcpy-slint` with no flags still mirrors straight into a window of its own.
+> inside it. `scrcpy-panel` with no flags still mirrors straight into a window of its own.
 
 ![The configuration form](./docs/screenshots/config.png)
 
@@ -31,6 +31,21 @@ Android devices from a single control panel.
 <sub>Taken on Linux with Slint's own <code>take_snapshot</code> on the software renderer, at the
 size the panel opens at here — 948×1028. It asks for 1200×800 and does not get it, which is
 [a known issue](#known-issues).</sub>
+
+## A note on the name
+
+The binary, the crate and this repository are all **`scrcpy-panel`**. It was `scrcpy-slint`
+until 1.0 — the name of the fork it grew out of, which is still
+[on GitHub](https://github.com/bdrtr/scrcpy-slint) and still holds the lineage back to
+upstream. Two things follow from the rename:
+
+- **Nothing you had saved has moved.** Settings, profiles and `panel.log` were written to
+  `~/.config/scrcpy-slint/`, and that directory goes on being used while it exists. A fresh
+  install writes to `~/.config/scrcpy-panel/` instead. Your files are not this program's to
+  relocate while you are not looking.
+- **Log lines quoted below still say `scrcpy_slint`** where they were measured before the
+  rename. They are left as they were observed rather than rewritten, which is the rule the
+  rest of this file is written under; the module prefix today is `scrcpy_panel`.
 
 ## What this is
 
@@ -481,7 +496,7 @@ and none of them needed a phone to find. What each was held to:
   went to one place or the other and never to both. Everything in `session/`, `media/`,
   `control/` and `adb/` reached stderr and nothing else — which for a panel started from a
   desktop launcher or from the tray is a stream nobody is reading — while the tab headed
-  "Süreç çıktısı" and `~/.config/scrcpy-slint/panel.log` held only the lines the panel writes
+  "Süreç çıktısı" and `panel.log` held only the lines the panel writes
   by hand. Worse, the two writers into that tab were not the same writer: `append_log`, which
   carries a windowed session's output, wrote into the model directly and never touched the
   file, so the checkbox could be ticked and the file still not contain what the tab was
@@ -879,7 +894,7 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   rather than the 5037 it used to hardcode.
 - The interface has two languages. The strings in `ui/` go through Slint's `@tr`, and the
   panel's own messages go through `tr!` in `src/i18n.rs`; both read the same
-  `lang/en/LC_MESSAGES/scrcpy-slint.po`, which slint-build bundles for the first and
+  `lang/en/LC_MESSAGES/scrcpy-panel.po`, which slint-build bundles for the first and
   build.rs turns into a sorted table for the second. Switching is a call rather than a
   restart. Turkish is the source language, so anything absent from the .po falls back to
   it — which is what codec names, example paths and the program's own name want.
@@ -1211,7 +1226,8 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
 - added `LICENSE` and `NOTICE`
 - removed development artifacts committed upstream (build logs, benchmark output, a
   recorded `.mkv`, agent workflow files)
-- renamed the crate to `scrcpy-slint`
+- renamed the crate — to `scrcpy-slint` when the Slint interface went in, and to
+  `scrcpy-panel` at 1.0, which is what the repository has been called throughout
 
 ## Requirements
 
@@ -1225,9 +1241,9 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
 ```bash
 cargo build --release
 
-./target/release/scrcpy-slint            # mirror in a window of its own
-./target/release/scrcpy-slint --panel    # the control panel
-./target/release/scrcpy-slint --panel --start   # panel, already mirroring
+./target/release/scrcpy-panel            # mirror in a window of its own
+./target/release/scrcpy-panel --panel    # the control panel
+./target/release/scrcpy-panel --panel --start   # panel, already mirroring
 ```
 
 If scrcpy 4.1 is installed, its server is found automatically at
