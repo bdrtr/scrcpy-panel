@@ -743,6 +743,17 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   nothing at all. Pads with an entry in SDL's database were never affected — their
   triggers arrive as buttons, which really are 0..1 — so this is the road every pad the
   database has not heard of takes.
+- **A third thing about it is probably wrong too, and is written down rather than changed.**
+  An optimisation survey of the input path found that the 8 ms drain adds a mean 4 ms and a
+  worst 8 ms to every gamepad input, which is not noise beside the 5.40 ms a frame the decoder
+  costs — and that gilrs offers a blocking read, so the poll is a choice rather than a
+  necessity. **This is not measured and has not been changed.** The same survey noted that a
+  full HID state report goes out per gilrs event where one per tick would carry the same
+  state, which would also cut what reaches the device. Both are the kind of change this
+  repository does not make without a number, and the number needs a pad: everything above was
+  found by reading and by running with nothing connected, and two of the three faults it
+  already lists were there precisely because nobody could try it. Left here as the next thing
+  to look at when there is one on the desk, rather than as a change nobody could check.
 - A UHID mouse is a relative mouse, so the pointer is captured while it runs, as it is in
   scrcpy: the window locks it where the compositor allows that and confines it to the
   window where it does not. LAlt, LSuper or RSuper give it back, and take it again. The
