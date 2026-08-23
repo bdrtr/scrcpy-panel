@@ -20,9 +20,11 @@ pub(super) fn parse(args: &[&str]) -> Options {
     Options::try_parse_from(argv).expect("valid arguments")
 }
 
-/// scrcpyrust — Mirror Android devices on your computer (Rust implementation)
+/// scrcpy-slint — mirror and control an Android device from a Slint panel
 #[derive(Parser, Debug, Clone)]
-#[command(name = "scrcpyrust", version, about)]
+// The binary is `scrcpy-slint` and always has been; `--version` and `--help`
+// said `scrcpyrust`, which is the name of the project this was forked from.
+#[command(name = "scrcpy-slint", version, about)]
 pub struct Options {
     /// Open the control panel instead of mirroring straight away
     #[arg(long, default_value = "false")]

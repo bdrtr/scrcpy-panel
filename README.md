@@ -3,9 +3,34 @@
 A Rust scrcpy client with a [Slint](https://slint.dev) user interface — mirror and control
 Android devices from a single control panel.
 
-> **Status: usable.** `--panel` opens the control panel from [`design/`](./design/) — seven
+> **Status: 1.0.** `--panel` opens the control panel from [`design/`](./design/) — seven
 > tabs, the eight-section configuration form, a live command preview — and the mirror runs
 > inside it. `scrcpy-slint` with no flags still mirrors straight into a window of its own.
+
+![The configuration form](./docs/screenshots/config.png)
+
+<table>
+<tr>
+<td width="50%"><a href="./docs/screenshots/devices.png"><img src="./docs/screenshots/devices.png" alt="Devices"></a></td>
+<td width="50%"><a href="./docs/screenshots/session.png"><img src="./docs/screenshots/session.png" alt="Session"></a></td>
+</tr>
+<tr>
+<td><b>Devices</b> — what <code>adb devices -l</code> found, TCP/IP and Android 11+ pairing. Tick more than one and the same configuration starts on all of them.</td>
+<td><b>Session</b> — the mirror, the device keys, file push, screenshot and recording. The keys work through adb with no session running.</td>
+</tr>
+<tr>
+<td><a href="./docs/screenshots/profiles.png"><img src="./docs/screenshots/profiles.png" alt="Profiles"></a></td>
+<td><a href="./docs/screenshots/log.png"><img src="./docs/screenshots/log.png" alt="Log"></a></td>
+</tr>
+<tr>
+<td><b>Profiles</b> — a saved set of flags, optionally pinned to a device so it is the default when that phone appears.</td>
+<td><b>Log</b> — every record the client writes, filtered by level, and the same lines in <code>panel.log</code> when the setting is on.</td>
+</tr>
+</table>
+
+<sub>Taken on Linux with Slint's own <code>take_snapshot</code> on the software renderer, at the
+size the panel opens at here — 948×1028. It asks for 1200×800 and does not get it, which is
+[a known issue](#known-issues).</sub>
 
 ## What this is
 
@@ -670,6 +695,16 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
 
 ## Known issues
 
+- **The panel opens narrower than it asks for, and its widest row overlaps there.**
+  `ui/panel.slint` declares `preferred-width: 1200px` on the `PanelWindow`, and the window
+  opens at 948 — measured on this desktop, both on Wayland and on Xwayland, and unchanged by
+  calling `set_size` before the window is shown or after (it reports the new size and then
+  goes back). A `Window` takes the preference of the layout inside it, and this layout's own
+  preference wins. At 948 the Configuration tab's "Pick from the device · --list-encoders"
+  button is wider than its cell and draws over the encoder field beside it. Moving the
+  preference onto the layout was tried and made it worse — 948×492 — so it is written down
+  rather than guessed at. `min-width` is 900, so this is inside the size the panel says it
+  supports; widening the window by hand fixes the overlap.
 - **The server version is pinned exactly.** The server refuses to start unless the client
   announces its own version, so `SCRCPY_SERVER_VERSION` in `src/main.rs` must match the
   `scrcpy-server` you run. It is currently `4.1`, and 3.x servers are not merely rejected —
@@ -1300,6 +1335,67 @@ src/
 ├── audio/           # playback and regulation
 └── util/            # the terminal's title
 ```
+
+## Contributing
+
+Patches are welcome. This repository has a few habits that are not obvious from the code, and
+knowing them ahead of time saves a round trip.
+
+**Every claim carries a number or an observation.** The bulk of this README is a record of
+things that were measured, and the one place it was ever wrong is called out in the text. A
+change that says "faster" should say how much faster, on what, measured how. A bug fix should
+say what the wrong behaviour was — the actual output, the actual exit code — not only what the
+right one is. Work that could not be verified is still worth doing; label it as unverified in
+the same sentence as the claim, the way the gamepad section does.
+
+**Measure in `--release`.** Debug figures here are about ten times too large. Two harnesses
+exist and neither needs a phone for its main half:
+
+```bash
+# The decoder, against a recording. --test-threads=1 is not optional: run in
+# parallel these fight for the CPU and the same measurement moves by a third.
+REC=/path/to/a-recording.mp4 \
+  cargo test --release -- --ignored --nocapture --test-threads=1 cost layout
+
+# The window: what a frame costs between the decoder and the screen.
+WGPU=1 ./target/release/examples/frame_cost 1080x2400 400
+```
+
+**Tests that read the source are a pattern here, not a curiosity.** Several of the guards in
+this tree work by scanning the repository itself, because that is where the fault lives:
+`every_value_the_panel_offers_is_one_the_binary_takes` pushes every value in the `.slint`
+pickers through the real argument parser, `nothing_in_the_panel_speaks_turkish_through_format`
+uses the `.po` as a dictionary to find sentences that never asked to be translated, and
+`nothing_rewrites_the_form_and_leaves_the_serial_behind` checks an invariant at its call sites
+because there is no window in a unit test. If a class of bug has bitten twice, a guard that
+reads the source is often the honest way to stop the third.
+
+**`#[ignore]`d tests run the real external tool.** Half of a device-bound layer can be checked
+with nothing plugged in — what `adb` prints on the empty case, what it says about a serial
+that is not there, which exit code it uses. That is how `what_adb_says_when_it_refuses` found
+that the daemon answers `host-serial:` commands with an empty reason. Run them with:
+
+```bash
+cargo test --release -- --ignored what_adb_says
+```
+
+**Do not run `cargo fmt`.** This tree has never been rustfmt-clean, so a blanket run rewrites
+45 files and buries the change; the release profile has `lto = true`, so it also costs a full
+rebuild to make and another to undo. Format new code by hand to match the file around it.
+
+**A commit message is prose, and it explains what was found.** Look at `git log` before
+writing one. They are written in English; the interface and its `.po` are in Turkish.
+
+**Before opening a pull request:**
+
+```bash
+cargo test --release        # 212 tests, 10 ignored
+cargo clippy --all-targets  # the tree is warning-free
+```
+
+If a change touches the panel's form, add the flag to `SUPPORTED` in
+`src/panel/command/flags.rs` as well, or the panel will build a command line the binary
+refuses — which has happened twice and now has a test.
 
 ## License
 

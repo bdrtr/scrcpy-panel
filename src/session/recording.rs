@@ -175,14 +175,12 @@ impl Session {
     /// a flat 500 ms sleep, which was both too long for a small file and too
     /// short for a large one.
     pub(super) fn wait_for_the_file(&self) -> Option<String> {
-        let Some(thread) = self
+        // No thread is nothing to wait for, which is not a failure.
+        let thread = self
             .recorder_thread
             .lock()
             .expect("recorder thread lock")
-            .take()
-        else {
-            return None;
-        };
+            .take()?;
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !thread.is_finished() {
             if std::time::Instant::now() >= deadline {

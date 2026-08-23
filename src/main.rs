@@ -31,7 +31,10 @@ use mirror_host::{
 use options::Options;
 use ui::{Mirror, MirrorWindow, Orientation};
 
-const VERSION: &str = "0.1.0";
+/// Taken from `Cargo.toml` rather than written here, because a version kept in
+/// two places is a version that drifts: this said 0.1.0 while the manifest said
+/// the same only by luck, and nothing would have said so.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The scrcpy server release this client speaks to. The server refuses to start
 /// if this does not match its own version exactly.
 pub const SCRCPY_SERVER_VERSION: &str = "4.1";
