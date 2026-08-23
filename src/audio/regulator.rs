@@ -73,26 +73,58 @@ impl AudioBuffer {
     }
 
     /// Write samples into the ring buffer. Returns number actually written.
+    ///
+    /// Two copies rather than a loop. Both of these used to walk one `f32` at a
+    /// time doing `(pos + 1) % self.capacity`, and `capacity` is a field rather
+    /// than a constant, so LLVM has to emit a real `div` — one per sample, at
+    /// 96,000 samples a second in each direction.
+    ///
+    /// The number that matters is not the CPU, which was 0.45 ms per second of
+    /// audio and is now 0.007. It is how long the lock is held: this runs inside
+    /// the `Mutex` that the cpal callback also takes, and that callback is the
+    /// real-time thread `player.rs` warns must not be made to wait. A push held
+    /// it for 4.7 µs and now holds it for 0.08, so a callback landing on a held
+    /// lock goes from about once every twenty seconds to about once every twenty
+    /// minutes. It is a glitch-risk change rather than a speed one.
+    ///
+    /// A single conditional subtract is enough to wrap, because `to_write` is
+    /// capped at the free space and so `write_pos + to_write` cannot reach twice
+    /// the capacity.
     pub fn write(&mut self, samples: &[f32]) -> usize {
         let available = self.capacity - self.count;
         let to_write = samples.len().min(available);
 
-        for &sample in &samples[..to_write] {
-            self.data[self.write_pos] = sample;
-            self.write_pos = (self.write_pos + 1) % self.capacity;
+        let first = to_write.min(self.capacity - self.write_pos);
+        self.data[self.write_pos..self.write_pos + first].copy_from_slice(&samples[..first]);
+        if to_write > first {
+            self.data[..to_write - first].copy_from_slice(&samples[first..to_write]);
         }
+        self.write_pos += to_write;
+        if self.write_pos >= self.capacity {
+            self.write_pos -= self.capacity;
+        }
+
         self.count += to_write;
         to_write
     }
 
     /// Read samples from the ring buffer. Returns number actually read.
+    ///
+    /// The same two copies, from the other side — and this one runs *in* the
+    /// cpal callback, so its 1.1 µs was time the sound card was waiting.
     pub fn read(&mut self, out: &mut [f32]) -> usize {
         let to_read = out.len().min(self.count);
 
-        for slot in &mut out[..to_read] {
-            *slot = self.data[self.read_pos];
-            self.read_pos = (self.read_pos + 1) % self.capacity;
+        let first = to_read.min(self.capacity - self.read_pos);
+        out[..first].copy_from_slice(&self.data[self.read_pos..self.read_pos + first]);
+        if to_read > first {
+            out[first..to_read].copy_from_slice(&self.data[..to_read - first]);
         }
+        self.read_pos += to_read;
+        if self.read_pos >= self.capacity {
+            self.read_pos -= self.capacity;
+        }
+
         self.count -= to_read;
         to_read
     }
@@ -327,6 +359,77 @@ impl AudioRegulatorConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The ring wraps, and both sides have to agree about where.
+    ///
+    /// `write` and `read` used to walk one sample at a time with a `%` on each,
+    /// which cannot get the wrap wrong because it never computes it. Two
+    /// `copy_from_slice` calls can, and nothing here tested it: the two tests
+    /// below use buffers so large they never come round. So this drives the
+    /// ring several times past its own end, at a capacity chosen to make every
+    /// write straddle it, and checks the samples come back in the order they
+    /// went in — a wrap off by one shows up as an interleaved channel swap,
+    /// which is the same fault `nothing_is_dropped_by_half_a_frame` exists for.
+    #[test]
+    fn the_ring_comes_round_with_the_samples_in_order() {
+        // A queue is what the ring is pretending to be, so it is what the ring
+        // is checked against — every write and every read, on both, compared
+        // after each one. A wrap off by one shows up on the first round it
+        // straddles the end.
+        //
+        // 97 is coprime with the 17 and 13 below, so the wrap lands somewhere
+        // different every time round rather than on a tidy boundary, and the
+        // sizes differ so that the read and write positions are never in step.
+        let mut ring = AudioBuffer::new(97);
+        let mut model: std::collections::VecDeque<f32> = std::collections::VecDeque::new();
+        let mut next = 0.0f32;
+        let mut out = vec![0.0f32; 13];
+
+        for round in 0..200 {
+            let batch: Vec<f32> = (0..17).map(|_| { next += 1.0; next }).collect();
+            let room = 97 - model.len();
+            let written = ring.write(&batch);
+            assert_eq!(written, batch.len().min(room), "round {round}: wrote the wrong count");
+            model.extend(batch.iter().take(written).copied());
+
+            let wanted = out.len().min(model.len());
+            let read = ring.read(&mut out);
+            assert_eq!(read, wanted, "round {round}: read the wrong count");
+            for (i, &sample) in out[..read].iter().enumerate() {
+                assert_eq!(
+                    sample,
+                    model.pop_front().expect("the queue has it"),
+                    "round {round}: sample {i} came back out of order"
+                );
+            }
+            assert_eq!(ring.can_read(), model.len(), "round {round}: the counts diverged");
+        }
+
+        // And it really did go round, several times, rather than never reaching
+        // the end — which is what the two tests below never do.
+        assert!(next > 97.0 * 3.0, "the ring was never driven past its own end");
+    }
+
+    /// The same, with a write that lands exactly on the end of the buffer.
+    ///
+    /// The boundary the split is most likely to get wrong: `first == to_write`
+    /// and the tail copy must not run, while `write_pos` must still come back
+    /// to zero rather than sitting at `capacity`.
+    #[test]
+    fn a_write_that_ends_exactly_at_the_end_wraps_to_zero() {
+        let mut ring = AudioBuffer::new(8);
+        assert_eq!(ring.write(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]), 8);
+        assert_eq!(ring.write_pos, 0, "a full write must come back to the start");
+
+        let mut out = vec![0.0f32; 8];
+        assert_eq!(ring.read(&mut out), 8);
+        assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+        assert_eq!(ring.read_pos, 0, "and so must a full read");
+
+        // And a write of nothing changes nothing.
+        assert_eq!(ring.write(&[]), 0);
+        assert_eq!(ring.write_pos, 0);
+    }
 
     /// Dropping an odd number of interleaved samples moves every later one into
     /// the other channel's place — left and right swapped for the rest of the

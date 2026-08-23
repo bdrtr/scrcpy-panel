@@ -44,7 +44,7 @@ fn main() -> Result<()> {
     // logger is built from. Nothing logs in between: clap writes its own
     // refusals, and --help and --version leave from inside `parse`.
     let opts = Options::parse();
-    logging::init(&opts.verbosity);
+    logging::init(&opts.verbosity, opts.panel);
 
     install_signal_handlers();
 

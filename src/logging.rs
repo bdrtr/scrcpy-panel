@@ -46,9 +46,18 @@ static SINK: Mutex<Option<Sender<Line>>> = Mutex::new(None);
 /// where the process did.
 static BACKLOG: Mutex<Vec<Line>> = Mutex::new(Vec::new());
 
-/// How many. A run with no window at all — the ordinary mirror — logs into this
-/// and nothing ever collects it, so it is a bound and not a buffer.
+/// How many, for a run that will have a window.
 const BACKLOG_MAX: usize = 500;
+
+/// Whether anything is ever going to ask for these.
+///
+/// Only a window installs a sink, and only the panel has one, so a plain mirror
+/// run has no listener and never will. Without this the backlog filled up with
+/// five hundred lines nobody would collect, and every record after that built a
+/// `Line` — two `String`s — purely to drop it. Set once, at `init`, from the
+/// same command line that decides whether there is a panel at all.
+static ANYONE_MIGHT_LISTEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Take the records as well as the terminal.
 ///
@@ -85,32 +94,40 @@ impl log::Log for Fanout {
         }
         self.terminal.log(record);
 
-        let line = Line {
-            level: record.level(),
-            message: record.args().to_string(),
-            stamp: stamp(SystemTime::now()),
-        };
-
+        // The record is turned into an owned `Line` only once there is
+        // somewhere for it to go. Building it first cost two `String`s on every
+        // line of a mirror run, which has no window and never gets a listener.
         let mut sink = SINK.lock().unwrap_or_else(|e| e.into_inner());
         match sink.as_ref() {
             // A closed panel is the ordinary end of a receiver, not an error to
             // report — reporting it would log, from inside logging.
             Some(tx) => {
-                if tx.send(line).is_err() {
+                if tx.send(line_from(record)).is_err() {
                     *sink = None;
                 }
             }
-            None => {
+            None if ANYONE_MIGHT_LISTEN.load(std::sync::atomic::Ordering::Relaxed) => {
                 let mut backlog = BACKLOG.lock().unwrap_or_else(|e| e.into_inner());
                 if backlog.len() < BACKLOG_MAX {
-                    backlog.push(line);
+                    backlog.push(line_from(record));
                 }
             }
+            // Nothing is listening and nothing is going to, so the record costs
+            // the terminal and no more.
+            None => {}
         }
     }
 
     fn flush(&self) {
         self.terminal.flush();
+    }
+}
+
+fn line_from(record: &log::Record) -> Line {
+    Line {
+        level: record.level(),
+        message: record.args().to_string(),
+        stamp: stamp(SystemTime::now()),
     }
 }
 
@@ -121,7 +138,12 @@ impl log::Log for Fanout {
 /// this only when it is absent — so the environment variable that has always
 /// worked here goes on working, and the flag is what a user without one reaches
 /// for.
-pub fn init(verbosity: &str) {
+///
+/// `a_window_may_want_these` is whether anything will ever call [`listen`] —
+/// which today means whether this is a panel run. A mirror has no window that
+/// shows a log, so its records go to the terminal and stop there.
+pub fn init(verbosity: &str, a_window_may_want_these: bool) {
+    ANYONE_MIGHT_LISTEN.store(a_window_may_want_these, std::sync::atomic::Ordering::Relaxed);
     // Slint drags in zbus for accessibility and portals, and it logs its D-Bus
     // handshake at info level. Quiet it unless the user asks for it.
     let filter = format!("{},zbus=warn,tracing=warn", client_level(verbosity));
@@ -245,7 +267,9 @@ mod tests {
     /// not see a line the session had written.
     #[test]
     fn a_record_comes_out_of_the_second_sink() {
-        init("error");
+        // `true`, because this test is the listener: with `false` the backlog
+        // is skipped and the held line — the half this checks — never exists.
+        init("error", true);
 
         // Before anything is listening: this one has to be held and handed over,
         // which is what the panel's first six lines needed — they were written

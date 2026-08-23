@@ -317,6 +317,34 @@ and none of them needed a phone to find. What each was held to:
   returns EINVAL for a rate of zero — so raw lost the recording's audio track as well.
   Proved against libavcodec rather than against the server's own stream; the device end
   of that is still to do.
+- **The audio ring copied one sample at a time, with a hardware divide on each one.**
+  `AudioBuffer::write` and `AudioBuffer::read` both walked an `f32` at a time doing
+  `(pos + 1) % self.capacity`, and `capacity` is a field rather than a constant, so LLVM has to
+  emit a real `div` — 192,000 of them a second, 96,000 in each direction. They are two
+  `copy_from_slice` calls now, split at the wrap, with a conditional subtract to come round.
+  **The CPU is not the point and should not be sold as one:** 0.448 ms per second of audio
+  became 0.007, which is 0.045% of a core going to 0.0007%, and that is lost in the noise of
+  everything else here. What earns the change is the lock. Both run inside the `Mutex` the cpal
+  callback also takes, and that callback is the real-time thread `player.rs` opens by saying
+  must not be made to wait: a push held it 4.7 µs and now holds it 0.08, a pull 1.1 µs and now
+  0.04. At 50 pushes and 200 callbacks a second, a callback landing on a held lock goes from
+  about once every twenty seconds to about once every twenty minutes. It is a glitch-risk
+  change. Measured with a standalone `rustc -O` bench at the real geometry — capacity
+  `(2400 + 48000) × 2`, 50 pushes of 1920 and 200 pulls of 480 a simulated second — alternating
+  the two implementations to rule out ordering: 8.95 and 8.97 µs a push-cycle against 0.15 and
+  0.15, repeating to two decimal places. `objdump` confirms the `div` in the old loop body.
+  Two tests came with it, because a loop with a `%` on every sample cannot get the wrap wrong
+  and two copies can: one drives the ring two hundred rounds against a `VecDeque` at a capacity
+  coprime with both the read and write sizes, and one puts a write exactly on the end of the
+  buffer. Each catches a sabotage the other misses — `>` for `>=` fails only the boundary one,
+  and a tail copy shifted by one fails only the model one, on round 7.
+- **And the logger built a line for a listener that could never exist.** The fan-out turned
+  every record into an owned `Line` — two `String`s — before asking whether anything was
+  listening, so a plain mirror run, which has no window and never installs a sink, paid for
+  five hundred of them into a backlog nobody would collect and then went on allocating and
+  dropping one per record after that. `init` is now told from the same command line whether a
+  window may ever want them. Small at `info`, where a run is a dozen lines; the case it is for
+  is `--verbosity=verbose`, where slint's and winit's own `trace` output arrives too.
 - **Three more silences, one flood, and a line that was never a log line at all.**
   - **A video decoder that takes packets and gives nothing back said nothing, at any level.**
     `receive_frame(..).is_ok()` collapses EAGAIN — "send me more", which is ordinary between
