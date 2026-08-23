@@ -489,6 +489,12 @@ msgstr "RESULTING COMMAND"
 msgid " bayrak"
 msgstr " flags"
 
+msgid "{} · {} bayrak · {}"
+msgstr "{} · {} flags · {}"
+
+msgid "{} bayrak · {}"
+msgstr "{} flags · {}"
+
 msgid "Kopyala"
 msgstr "Copy"
 
@@ -515,6 +521,9 @@ msgstr "adb —"
 
 msgid "cihaz seçilmedi"
 msgstr "no device selected"
+
+msgid "Kodek"
+msgstr "Codec"
 
 msgid "Bağlı donanım"
 msgstr "Connected hardware"
@@ -808,6 +817,21 @@ msgstr "deselected"
 
 msgid "Profil güncellendi: {}"
 msgstr "Profile updated: {}"
+
+msgid "Profil kaydedildi: {}"
+msgstr "Profile saved: {}"
+
+msgid "Profil silindi: {}"
+msgstr "Profile deleted: {}"
+
+msgid "Profil {}"
+msgstr "Profile {}"
+
+msgid "{} cihaz"
+msgstr "{} devices"
+
+msgid "adb yolu: {}"
+msgstr "adb path: {}"
 
 msgid "Profil uygulandı."
 msgstr "Profile applied."

@@ -412,7 +412,7 @@ fn refresh_command_for(window: &PanelWindow, serials: &[String]) {
 
     let serial = match serials.len() {
         0 | 1 => config.serial.clone(),
-        n => format!("{n} cihaz"),
+        n => tr!("{} cihaz", n),
     };
     let codecs = if config.no_audio {
         config.video_codec.clone()
@@ -420,7 +420,13 @@ fn refresh_command_for(window: &PanelWindow, serials: &[String]) {
         format!("{} + {}", config.video_codec, config.audio_codec)
     };
     let device = if serial.is_empty() { tr!("cihaz seçilmedi") } else { serial };
-    app.set_status_line(format!("{} · {} bayrak · {}", device, config.flag_count(), codecs).into());
+    // `tr!` rather than `format!`: this line is Turkish text with holes in it,
+    // and a `format!` goes nowhere near the .po. An English panel read
+    // "no device selected · 0 bayrak · h264 + opus" — three words of English
+    // and one that had never been offered for translation.
+    app.set_status_line(
+        tr!("{} · {} bayrak · {}", device, config.flag_count(), codecs).as_str().into(),
+    );
 }
 
 // =====================================================================
@@ -600,7 +606,7 @@ fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
                     settings.set_adb_path(path.as_str().into());
                     settings.invoke_changed();
                     with_panel(|panel| {
-                        panel.info(&format!("adb yolu: {path}"));
+                        panel.info(&tr!("adb yolu: {}", path));
                         spawn_device_scan(panel);
                     });
                 });

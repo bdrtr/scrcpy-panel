@@ -407,7 +407,11 @@ pub(super) fn wire_the_profiles(window: &PanelWindow, panel: &Rc<Panel>) {
         app.on_save_profile(move || {
             if let Some(window) = weak.upgrade() {
                 let config = read_config(&window);
-                let description = format!("{} bayrak · {}", config.flag_count(), config.video_codec);
+                // The same as the status line: a `format!` here never reaches
+                // the .po, so a profile card said "4 bayrak · h264" whatever
+                // language the panel was in.
+                let description =
+                    tr!("{} bayrak · {}", config.flag_count(), config.video_codec);
 
                 let message = match panel.editing_profile.take() {
                     // Saving while editing writes back to the profile the form
@@ -420,13 +424,13 @@ pub(super) fn wire_the_profiles(window: &PanelWindow, panel: &Rc<Panel>) {
                         tr!("Profil güncellendi: {}", profile.name)
                     }
                     _ => {
-                        let name = format!("Profil {}", panel.profiles.borrow().len() + 1);
+                        let name = tr!("Profil {}", panel.profiles.borrow().len() + 1);
                         panel.profiles.borrow_mut().push(Profile {
                             name: name.clone(),
                             description,
                             config,
                         });
-                        format!("Profil kaydedildi: {name}")
+                        tr!("Profil kaydedildi: {}", name)
                     }
                 };
 
@@ -469,7 +473,7 @@ pub(super) fn wire_the_profiles(window: &PanelWindow, panel: &Rc<Panel>) {
                 let removed = panel.profiles.borrow_mut().remove(index);
                 save_profiles(&panel);
                 refresh_profile_cards(&panel);
-                panel.info(&format!("Profil silindi: {}", removed.name));
+                panel.info(&tr!("Profil silindi: {}", removed.name));
             }
         });
     }

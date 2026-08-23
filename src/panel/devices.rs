@@ -36,7 +36,9 @@ pub(super) fn apply_selection(window: &PanelWindow, panel: &Rc<Panel>) {
 
     app.set_selection_label(
         match selected.len() {
-            0 => "cihaz seçilmedi".to_string(),
+            // The .po has had a translation for this since it was written;
+            // the literal beside `tr!` two lines down never asked for it.
+            0 => tr!("cihaz seçilmedi"),
             1 => selected[0].clone(),
             n => tr!("{} cihaz seçildi", n),
         }

@@ -171,6 +171,122 @@ mod tests {
         );
     }
 
+    /// And nothing in the panel says something to the user with `format!`.
+    ///
+    /// The test above only sees `tr!`, which is the whole of its blind spot: a
+    /// Turkish sentence built with `format!` never reaches the .po, so it never
+    /// goes missing from it either. Six of them were found by looking at a
+    /// screenshot — an English panel reading "no device selected · 0 bayrak ·
+    /// h264 + opus", and beside it "Profil kaydedildi: …" one line below a
+    /// `tr!("Profil güncellendi: {}")` that had been translated all along.
+    ///
+    /// The discriminator is the .po itself. A word that appears on the msgid
+    /// side and never on the msgstr side is Turkish; a literal in `src/panel/`
+    /// containing one is a sentence somebody wrote for a user. Placeholder
+    /// names are stripped first, since `{stem}` is a variable and not a word,
+    /// and anything with `=` or `/` in it is a flag or a path rather than a
+    /// sentence.
+    #[test]
+    fn nothing_in_the_panel_speaks_turkish_through_format() {
+        let mut turkish: std::collections::HashSet<String> = TRANSLATIONS
+            .iter()
+            .flat_map(|(msgid, _)| words(msgid))
+            .collect();
+        for (_, msgstr) in TRANSLATIONS.iter() {
+            for english in words(msgstr) {
+                turkish.remove(&english);
+            }
+        }
+        assert!(turkish.len() > 100, "only {} Turkish words found", turkish.len());
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        collect_rust(&root, &mut files);
+        let panel: Vec<_> = files.iter().filter(|f| f.to_string_lossy().contains("panel")).collect();
+        assert!(panel.len() >= 5, "only {} panel files found", panel.len());
+
+        let mut caught = Vec::new();
+        for file in panel {
+            let source = std::fs::read_to_string(file).expect("a source file");
+            for literal in formatted(&source) {
+                if literal.starts_with("--") || literal.contains('=') || literal.contains('/') {
+                    continue;
+                }
+                // `{stem}` is a variable's name, not a word anybody reads.
+                let without_holes: String = literal
+                    .split('{')
+                    .map(|piece| piece.split_once('}').map(|(_, rest)| rest).unwrap_or(piece))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let hits: Vec<_> = words(&without_holes)
+                    .into_iter()
+                    .filter(|w| turkish.contains(w))
+                    .collect();
+                if !hits.is_empty() {
+                    let name = file.file_name().unwrap_or_default().to_string_lossy();
+                    caught.push(format!("  {name}: {literal:?} — {hits:?}"));
+                }
+            }
+        }
+        caught.sort();
+        assert!(
+            caught.is_empty(),
+            "{} line(s) the user reads that the .po will never see:\n{}",
+            caught.len(),
+            caught.join("\n")
+        );
+    }
+
+    /// The words in a string, lowercased, four letters or more.
+    fn words(text: &str) -> Vec<String> {
+        text.split(|c: char| !c.is_alphabetic())
+            .filter(|w| w.chars().count() >= 4)
+            .map(|w| w.to_lowercase())
+            .collect()
+    }
+
+    /// The two ways a literal becomes a string without passing the translator:
+    /// `format!("…")` and `"…".to_string()` / `"…".into()`.
+    ///
+    /// Both were blind spots and both had real lines in them. The second is why
+    /// an English panel had "cihaz seçilmedi" in the corner while the bar along
+    /// the bottom said "no device selected" — the .po had carried a translation
+    /// for that exact string all along, and the literal never asked for it.
+    fn formatted(source: &str) -> Vec<String> {
+        // Spelled in halves so that this scanner does not find itself.
+        let mut out = Vec::new();
+
+        let call = concat!("format", "!(");
+        let mut at = 0;
+        while let Some(offset) = source[at..].find(call) {
+            let after = at + offset + call.len();
+            let rest = source[after..].trim_start();
+            if let Some(text) = rest.strip_prefix('"') {
+                if let Some(end) = text.find('"') {
+                    out.push(text[..end].to_string());
+                }
+            }
+            at = after;
+        }
+
+        // A literal turned straight into an owned string. `tr!` returns a
+        // `String` already, so anything doing this to a literal is skipping it.
+        for conversion in [concat!(".to_", "string()"), concat!(".in", "to()")] {
+            let mut at = 0;
+            while let Some(offset) = source[at..].find(conversion) {
+                let end = at + offset;
+                if source[..end].ends_with('"') {
+                    let head = &source[..end - 1];
+                    if let Some(start) = head.rfind('"') {
+                        out.push(head[start + 1..].to_string());
+                    }
+                }
+                at = end + conversion.len();
+            }
+        }
+        out
+    }
+
     fn collect_rust(directory: &std::path::Path, into: &mut Vec<std::path::PathBuf>) {
         let Ok(entries) = std::fs::read_dir(directory) else {
             return;

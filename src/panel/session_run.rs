@@ -486,7 +486,7 @@ pub(super) fn start_metrics(panel: &Rc<Panel>, attachment: &Attachment) {
                 value: format!("{:.1} fps", fps.borrow().rate()).as_str().into(),
             },
             MetricRow {
-                key: "Kodek".into(),
+                key: tr!("Kodek").as_str().into(),
                 value: if cfg.get_no_audio() {
                     cfg.get_video_codec()
                 } else {
