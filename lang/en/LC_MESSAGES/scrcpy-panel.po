@@ -777,8 +777,8 @@ msgstr "Minimise to the system tray on close"
 msgid "Başlangıçta scrcpy-server sürümünü denetle"
 msgstr "Check the scrcpy-server version at startup"
 
-msgid "Günlüğü diske yaz (~/.config/scrcpy-panel/panel.log)"
-msgstr "Write the log to disk (~/.config/scrcpy-panel/panel.log)"
+msgid "Günlüğü diske yaz ({})"
+msgstr "Write the log to disk ({})"
 
 msgid "scrcpy-panel — "
 msgstr "scrcpy-panel — "

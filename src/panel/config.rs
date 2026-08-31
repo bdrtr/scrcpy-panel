@@ -256,6 +256,23 @@ pub(super) fn profiles_path() -> Option<std::path::PathBuf> {
 pub(super) fn settings_path() -> Option<std::path::PathBuf> {
     config_dir().map(|d| d.join("settings.json"))
 }
+pub(super) fn log_path() -> Option<std::path::PathBuf> {
+    config_dir().map(|d| d.join("panel.log"))
+}
+
+/// A path to show somebody, with their home directory written the way they
+/// would write it. The Ayarlar checkbox names this file, and naming it in full
+/// would be sixty characters of a row that has forty to spare.
+pub(super) fn under_home(path: &std::path::Path) -> String {
+    let shown = path.display().to_string();
+    let Ok(home) = std::env::var("HOME") else {
+        return shown;
+    };
+    match shown.strip_prefix(home.trim_end_matches('/')) {
+        Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+        _ => shown,
+    }
+}
 pub(super) fn load_profiles() -> Vec<Profile> {
     profiles_path()
         .and_then(|path| std::fs::read_to_string(path).ok())

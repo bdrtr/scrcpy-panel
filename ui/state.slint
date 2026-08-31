@@ -166,6 +166,10 @@ export global Settings {
     in-out property <bool> minimize-to-tray;
     in-out property <bool> check-version: true;
     in-out property <bool> log-to-disk;
+    // Where that log actually goes, which is not always where a fresh install
+    // would put it: the panel keeps writing to ~/.config/scrcpy-slint/ while
+    // that directory exists. Rust fills it in; this is the fresh-install path.
+    in-out property <string> log-path: "~/.config/scrcpy-panel/panel.log";
     in-out property <string> server-version: "4.1";
 }
 

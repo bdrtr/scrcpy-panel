@@ -44,7 +44,10 @@ upstream. Two things follow from the rename:
 - **Nothing you had saved has moved.** Settings, profiles and `panel.log` were written to
   `~/.config/scrcpy-slint/`, and that directory goes on being used while it exists. A fresh
   install writes to `~/.config/scrcpy-panel/` instead. Your files are not this program's to
-  relocate while you are not looking.
+  relocate while you are not looking. The Ayarlar checkbox that turns the log file on used to
+  name the fresh-install path whatever directory was in use, so on the machine this was
+  written on it pointed at a directory that does not exist; it reads the path back from the
+  same function the writer uses now, so the two cannot disagree.
 - **Log lines quoted below still say `scrcpy_slint`** where they were measured before the
   rename. They are left as they were observed rather than rewritten, which is the rule the
   rest of this file is written under; the module prefix today is `scrcpy_panel`.

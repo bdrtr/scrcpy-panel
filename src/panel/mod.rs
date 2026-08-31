@@ -198,6 +198,9 @@ pub fn run(opts: &Options) -> Result<()> {
     // The stored adb path and port have to be in hand before anything runs adb,
     // and `adb_status` is the first thing that does.
     load_settings(&window);
+    if let Some(path) = log_path() {
+        window.global::<Settings>().set_log_path(under_home(&path).into());
+    }
     apply_language(&window);
     refresh_adb_settings(&window);
     window.global::<App>().set_adb_status(adb_status().into());
@@ -996,14 +999,26 @@ mod picture_tests {
             // messages — the adb line in the corner is one — in Turkish.
             window.global::<Settings>().set_language("en".into());
             apply_language(&window);
-            // The one thing `run()` puts in the chrome that is not a constant,
+            // The two things `run()` puts on screen that are not constants,
             // so that a picture taken here is a picture of the program.
             window.global::<App>().set_adb_status(adb_status().into());
+            if let Some(path) = log_path() {
+                window.global::<Settings>().set_log_path(under_home(&path).into());
+            }
             window.global::<App>().set_tab(tab.into());
             window.global::<App>().set_section(section.into());
             window.show().expect("showing the window");
 
             Self { adapter, window }
+        }
+
+        /// Both halves of the translation, the way `run()` does it. Turkish is
+        /// the source language, so it is the one the panel is written in and
+        /// the one a layout has to hold in first.
+        fn language(&self, language: &str) {
+            self.window.global::<Settings>().set_language(language.into());
+            apply_language(&self.window);
+            self.window.global::<App>().set_adb_status(adb_status().into());
         }
 
         fn tab(&self, tab: &str) {
@@ -1122,6 +1137,9 @@ mod picture_tests {
     fn photograph_every_tab() {
         let prefix = std::env::var("PANEL_SHOT").expect("PANEL_SHOT names the pictures");
         let panel = Panel::open("devices", "video");
+        if let Ok(language) = std::env::var("PANEL_LANG") {
+            panel.language(&language);
+        }
         let tabs = ["devices", "session", "profiles", "log", "keys", "settings"];
 
         // Empty first: no device, no profile, no session. That is a fresh
@@ -1252,10 +1270,17 @@ mod picture_tests {
             },
         ]);
 
-        for (width, height) in [(1200, 800), (948, 1028), (900, 600)] {
+        for (language, width, height) in [
+            ("en", 1200, 800),
+            ("en", 948, 1028),
+            ("en", 900, 600),
+            ("tr", 948, 1028),
+            ("tr", 900, 600),
+        ] {
+            panel.language(language);
             let picture = panel.shot(width, height);
             if let Ok(prefix) = std::env::var("PANEL_SHOT") {
-                picture.write_ppm(&format!("{prefix}-devices-{width}x{height}.ppm"));
+                picture.write_ppm(&format!("{prefix}-devices-{language}-{width}x{height}.ppm"));
             }
 
             // `Table.total` in ui/tabs/devices.slint: 804px of columns, seven
@@ -1266,12 +1291,12 @@ mod picture_tests {
             assert_eq!(
                 picture.has_a_horizontal_scrollbar(),
                 !fits,
-                "at {width}x{height} the table {} the tab and the scrollbar {}",
+                "in {language} at {width}x{height} the table {} the tab and the scrollbar {}",
                 if fits { "fits" } else { "does not fit" },
                 if fits { "is drawn anyway" } else { "is missing" }
             );
             println!(
-                "{width}x{height}: {}px for a table that needs 932, {}",
+                "{language} {width}x{height}: {}px for a table that needs 932, {}",
                 width - 48,
                 if fits { "no scrollbar" } else { "scrollbar drawn" }
             );
@@ -1306,27 +1331,36 @@ mod picture_tests {
         // The size the compositor handed the window when the README's pictures
         // were taken, the size the panel actually asks for, and the smallest it
         // says it supports.
-        for (width, height) in [(948, 1028), (1200, 800), (900, 600)] {
+        for (language, width, height) in [
+            ("en", 948, 1028),
+            ("en", 1200, 800),
+            ("en", 900, 600),
+            ("tr", 948, 1028),
+            ("tr", 900, 600),
+        ] {
+            panel.language(language);
             let picture = panel.shot(width, height);
             if let Ok(prefix) = std::env::var("PANEL_SHOT") {
-                picture.write_ppm(&format!("{prefix}-{width}x{height}.ppm"));
+                picture.write_ppm(&format!("{prefix}-{language}-{width}x{height}.ppm"));
             }
             let field = field(&picture).expect("an input box in the video section");
             let box_width = field.right - field.left + 1;
             assert!(
                 field.gutter > 0,
-                "at {width}x{height} the encoder field's placeholder is drawn outside it: \
+                "in {language} at {width}x{height} the encoder field's placeholder is drawn \
+                 outside it: \
                  its border is at x={} and x={} is inked as well",
                 field.right + 1,
                 field.right + 2
             );
             assert!(
                 box_width >= 200,
-                "at {width}x{height} the encoder field is {box_width}px wide, which is not \
+                "in {language} at {width}x{height} the encoder field is {box_width}px wide, \
+                 which is not \
                  enough of an encoder name to read"
             );
             println!(
-                "{width}x{height}: the encoder field is {box_width}px, x={}..{}, \
+                "{language} {width}x{height}: the encoder field is {box_width}px, x={}..{}, \
                  with {}px of page past its border",
                 field.left,
                 field.right,
@@ -1339,20 +1373,24 @@ mod picture_tests {
         // them is drawn over its neighbour. Tall rather than 600, so that every
         // section's first box is on screen to be looked at — the width is what
         // this is about.
-        for section in [
-            "audio", "record", "control", "vdisplay", "camera", "window", "network",
-        ] {
+        for (language, section) in ["en", "tr"].into_iter().flat_map(|language| {
+            ["audio", "record", "control", "vdisplay", "camera", "window", "network"]
+                .into_iter()
+                .map(move |section| (language, section))
+        }) {
+            panel.language(language);
             panel.section(section);
             let picture = panel.shot(900, 1028);
             if let Ok(prefix) = std::env::var("PANEL_SHOT") {
-                picture.write_ppm(&format!("{prefix}-{section}-900x1028.ppm"));
+                picture.write_ppm(&format!("{prefix}-{language}-{section}-900x1028.ppm"));
             }
             let field = field(&picture).unwrap_or_else(|| {
-                panic!("section {section} has no input box six pixels wide at 900x1028")
+                panic!("section {section} in {language} has no input box six pixels wide")
             });
             assert!(
                 field.gutter > 0,
-                "in section {section} at 900x1028 a field is drawn past its own border at x={}",
+                "in section {section} in {language} at 900x1028 a field is drawn past its own \
+                 border at x={}",
                 field.right + 1
             );
         }

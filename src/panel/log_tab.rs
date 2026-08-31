@@ -116,7 +116,7 @@ impl Panel {
 
         let mut slot = self.log_file.borrow_mut();
         if slot.is_none() {
-            let Some(path) = config_dir().map(|dir| dir.join("panel.log")) else {
+            let Some(path) = log_path() else {
                 self.log_disk_failed.set(true);
                 return;
             };
