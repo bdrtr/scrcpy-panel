@@ -803,6 +803,22 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **Three places the panel said one thing and did another.** The "Kopyala" button beside the
+  command bar did not copy the command bar: it called `to_command_line()`, which is
+  `to_command_line_for(&[])`, while everything that *fills* the bar passes the ticked devices.
+  With two devices ticked the bar showed the `for s in A B; do scrcpy --serial=$s … & done`
+  loop that Başlat actually runs, and the button next to it put a single-device command with
+  no device in it on the clipboard. It copies `App.command` now — the string the bar is
+  showing — which cannot drift again. The recording message had the same shape:
+  `effective_record_path()` is not a getter, it reads the clock when a timestamp is asked
+  for, and it was called twice — once for the file the recorder opened and once for the name
+  the user was told. A second boundary crossed in between, and the panel named a file that
+  does not exist. It is called once. And the recording path was the one tilde path never
+  expanded: `expand_home` is applied to the recording folder from Ayarlar and to the
+  screenshot folder, and never to the path typed in the Kayıt section — whose own placeholder
+  is `~/Videos/scrcpy/oturum-01.mp4`. Typing what the form suggests handed `avio_open` a
+  tilde, which it reads as a directory of that name beside wherever the panel was started.
+  The decision is one function with a test on it now.
 - **An eleventh Turkish line, and both guards had the same blind spot.** A Rust literal can
   be broken across lines with a trailing backslash, and the one warning in `wiring.rs` that
   had never been wrapped in `tr!` was written exactly that way. Neither scanner could see it.
@@ -1672,7 +1688,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 220 tests, 15 ignored
+cargo test --release        # 221 tests, 15 ignored
 cargo clippy --all-targets  # the tree is warning-free
 ```
 

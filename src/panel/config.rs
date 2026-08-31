@@ -228,17 +228,33 @@ pub(super) fn launch_config(window: &PanelWindow) -> PanelConfig {
     let mut config = read_config(window);
 
     let directory = expand_home(window.global::<Settings>().get_record_dir().trim());
-    if config.record_enabled
-        && !directory.is_empty()
-        && !config.record_path.is_empty()
-        && !config.record_path.contains('/')
-    {
-        // The recorder cannot create the folder for itself, and a session that
-        // dies on a missing directory is a poor way to find that out.
-        let _ = std::fs::create_dir_all(&directory);
-        config.record_path = format!("{}/{}", directory.trim_end_matches('/'), config.record_path);
+    if config.record_enabled {
+        let joined = record_path_for(&config.record_path, &directory);
+        if joined != config.record_path && !directory.is_empty() && joined.starts_with(&directory) {
+            // The recorder cannot create the folder for itself, and a session
+            // that dies on a missing directory is a poor way to find that out.
+            let _ = std::fs::create_dir_all(&directory);
+        }
+        config.record_path = joined;
     }
     config
+}
+
+/// Where a recording actually goes.
+///
+/// A bare filename means "in the recording folder"; a path with a separator in
+/// it is the user being specific and keeps its own shape. Either way the tilde
+/// is expanded, which is the half that was missing: `expand_home` was applied
+/// to the folder from Ayarlar and never to the path typed in the Kayıt
+/// section, so `~/Videos/scrcpy/oturum-01.mp4` — which is what that field's own
+/// placeholder suggests — reached `avio_open` with the tilde still on it and
+/// made a directory called `~` beside wherever the panel was started from.
+fn record_path_for(typed: &str, directory: &str) -> String {
+    let typed = expand_home(typed.trim());
+    if typed.is_empty() || typed.contains('/') || directory.is_empty() {
+        return typed;
+    }
+    format!("{}/{}", directory.trim_end_matches('/'), typed)
 }
 /// `~/Videos/scrcpy` is a shell convenience, not a path any file API knows.
 pub(super) fn expand_home(path: &str) -> String {
@@ -436,6 +452,38 @@ pub(super) fn refresh_profile_cards(panel: &Rc<Panel>) {
 
 #[cfg(test)]
 mod tests {
+    /// The Kayıt field's own placeholder is `~/Videos/scrcpy/oturum-01.mp4`,
+    /// and the tilde on it used to reach `avio_open` unexpanded — a shell
+    /// convenience handed to a file API, which reads it as a directory called
+    /// `~` beside wherever the panel was started. `expand_home` was applied to
+    /// the folder from Ayarlar and to the screenshot folder, and to this one
+    /// never.
+    #[test]
+    fn a_recording_path_has_its_tilde_expanded_wherever_it_came_from() {
+        let home = std::env::var("HOME").expect("a home directory");
+        let folder = format!("{home}/Videos/scrcpy");
+
+        // A bare filename goes in the recording folder.
+        assert_eq!(
+            super::record_path_for("oturum-01.mp4", &folder),
+            format!("{folder}/oturum-01.mp4")
+        );
+
+        // A path of the user's own keeps its shape, and loses its tilde.
+        assert_eq!(
+            super::record_path_for("~/Videos/scrcpy/oturum-01.mp4", &folder),
+            format!("{home}/Videos/scrcpy/oturum-01.mp4")
+        );
+        assert!(!super::record_path_for("~/x.mp4", &folder).contains('~'));
+
+        // An absolute path is nobody else's business.
+        assert_eq!(super::record_path_for("/tmp/x.mp4", &folder), "/tmp/x.mp4");
+
+        // No folder set, and a bare name is all there is to go on.
+        assert_eq!(super::record_path_for("x.mp4", ""), "x.mp4");
+        assert_eq!(super::record_path_for("   ", &folder), "");
+    }
+
     /// A profiles.json that will not parse is not the same as no profiles, and
     /// used to be treated as one: the tab came up empty, nothing was said, and
     /// the next save wrote that emptiness over the file. It is moved aside now,

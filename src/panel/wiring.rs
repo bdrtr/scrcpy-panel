@@ -108,7 +108,13 @@ pub(super) fn wire_the_form(window: &PanelWindow, panel: &Rc<Panel>) {
         let panel = panel.clone();
         app.on_copy_command(move || {
             if let Some(window) = weak.upgrade() {
-                let command = read_config(&window).to_command_line();
+                // The string the bar is showing, not another one built the
+                // same way: `to_command_line()` is `to_command_line_for(&[])`,
+                // and everything that fills the bar passes the ticked devices
+                // instead. With two ticked, the bar showed the `for s in A B;
+                // do … done` loop that Başlat actually runs and the button
+                // beside it copied a single-device command for no device.
+                let command = window.global::<App>().get_command().to_string();
                 set_clipboard(&command);
                 panel.info(&tr!("Komut panoya kopyalandı ({} karakter).", command.len()));
             }
@@ -333,12 +339,20 @@ pub(super) fn wire_the_session(window: &PanelWindow, panel: &Rc<Panel>) {
                             Some(config.record_format.clone())
                         };
                         let controller = panel.controller.borrow().clone();
+                        // Once. `effective_record_path()` is not a getter —
+                        // with a timestamp asked for it reads the clock and
+                        // folds the seconds into the name — so calling it for
+                        // the message as well let the panel name a file it had
+                        // not opened, whenever start_recording crossed a
+                        // second boundary on its way through three locks and
+                        // two config packets.
+                        let path = config.effective_record_path();
                         match session.start_recording(
-                            &config.effective_record_path(),
+                            &path,
                             format.as_deref(),
                             controller.as_deref(),
                         ) {
-                            Ok(()) => panel.info(&tr!("Kayıt başladı: {}", config.effective_record_path())),
+                            Ok(()) => panel.info(&tr!("Kayıt başladı: {}", path)),
                             Err(e) => panel.warn(&tr!("Kayıt başlatılamadı: {}", format!("{e:#}"))),
                         }
                     }

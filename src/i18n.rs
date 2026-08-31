@@ -267,9 +267,21 @@ mod tests {
         assert!(files.len() >= 5, "only {} panel files found", files.len());
 
         let mut caught = Vec::new();
+        let mut scanned = 0;
         for file in &files {
             let source = std::fs::read_to_string(file).expect("a source file");
-            for literal in literals(&source) {
+            // Down to the tests and no further. A test's own data is not
+            // something anybody reads — `oturum-01.mp4` is a filename in a
+            // fixture, not a sentence — and every `#[cfg(test)]` in
+            // `src/panel/` opens the module at the end of its file. The count
+            // below is what says so: if one ever moves up, the scan shrinks
+            // and this fails rather than going quiet.
+            let source = match source.find("#[cfg(test)]") {
+                Some(at) => &source[..at],
+                None => &source[..],
+            };
+            for literal in literals(source) {
+                scanned += 1;
                 // With an entry it is translated, whatever language it is in.
                 if TRANSLATIONS
                     .binary_search_by_key(&literal.as_str(), |(msgid, _)| *msgid)
@@ -302,6 +314,7 @@ mod tests {
                 }
             }
         }
+        assert!(scanned > 400, "the scan found only {scanned} literals in src/panel/");
         caught.sort();
         assert!(
             caught.is_empty(),
