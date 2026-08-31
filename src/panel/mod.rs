@@ -1056,6 +1056,18 @@ mod picture_tests {
             app.set_metrics(ModelRc::from(Rc::new(VecModel::from(metrics))));
         }
 
+        /// The command bar, filled the way the bar itself is filled: the form
+        /// through `PanelConfig` and `flags.rs`, not a string written here.
+        fn command_bar(&self) {
+            let cfg = self.window.global::<Cfg>();
+            cfg.set_max_size("1920".into());
+            cfg.set_video_bit_rate("8M".into());
+            cfg.set_no_audio(true);
+            cfg.set_turn_screen_off(true);
+            refresh_command(&self.window);
+            self.window.global::<App>().set_command_open(true);
+        }
+
         fn no_session(&self) {
             self.window.global::<App>().set_session_running(false);
         }
@@ -1146,6 +1158,115 @@ mod picture_tests {
             clear += 1;
         }
         Some(Field { left, right, gutter: clear - (border + 1) })
+    }
+
+    /// The mirror window, which has never been in a picture at all.
+    ///
+    /// It needs a device to *have* a picture and not to draw one, so this
+    /// paints its own: a frame with a corner marked, so a quarter turn or a
+    /// flip is visible rather than plausible. `--render-fit` is three ways of
+    /// filling the window and the client rotation is four more, and all seven
+    /// are geometry nobody has looked at.
+    ///
+    /// A separate test rather than another shot in the sweep, because
+    /// `set_platform` takes effect once in a thread and libtest gives each test
+    /// its own.
+    #[test]
+    #[ignore = "a sweep to look at, not an assertion"]
+    fn photograph_the_mirror() {
+        use crate::ui::{Mirror, MirrorWindow};
+
+        let prefix = std::env::var("PANEL_SHOT").expect("PANEL_SHOT names the pictures");
+
+        struct Offscreen(Rc<MinimalSoftwareWindow>);
+        impl slint::platform::Platform for Offscreen {
+            fn create_window_adapter(
+                &self,
+            ) -> std::result::Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError>
+            {
+                Ok(self.0.clone())
+            }
+        }
+        let adapter = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Offscreen(adapter.clone())))
+            .expect("the platform is set once in this thread");
+
+        let window = MirrorWindow::new().expect("the mirror window");
+        window.show().expect("showing the window");
+
+        // A phone-shaped frame with one corner filled in, so that a rotation
+        // or a flip cannot be mistaken for a picture that happens to look the
+        // same either way up.
+        let (fw, fh) = (270u32, 600u32);
+        let mut frame = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(fw, fh);
+        let stride = frame.width() as usize;
+        for (i, pixel) in frame.make_mut_slice().iter_mut().enumerate() {
+            let (x, y) = ((i % stride) as u32, (i / stride) as u32);
+            let corner = x < fw / 3 && y < fh / 6;
+            *pixel = if corner {
+                slint::Rgb8Pixel { r: 0xec, g: 0x30, b: 0x13 }
+            } else {
+                slint::Rgb8Pixel {
+                    r: (x * 255 / fw) as u8,
+                    g: (y * 255 / fh) as u8,
+                    b: 0x40,
+                }
+            };
+        }
+        let picture = slint::Image::from_rgb8(frame);
+        let mirror = window.global::<Mirror>();
+        mirror.set_frame(picture.clone());
+        mirror.set_frame_width(fw as i32);
+        mirror.set_frame_height(fh as i32);
+        mirror.set_display_aspect(fw as f32 / fh as f32);
+        mirror.set_live(true);
+
+        let shot = |name: &str| {
+            let (width, height) = (420u32, 720u32);
+            adapter.set_size(slint::PhysicalSize::new(width, height));
+            let mut pixels =
+                vec![PremultipliedRgbaColor::default(); (width as usize) * (height as usize)];
+            for _ in 0..4 {
+                slint::platform::update_timers_and_animations();
+                adapter.request_redraw();
+                adapter.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, width as usize);
+                });
+            }
+            Picture { width, height, pixels }
+                .write_ppm(&format!("{prefix}-mirror-{name}.ppm"));
+        };
+
+        // Before a frame arrives there is no frame, and the view says so.
+        mirror.set_frame(slint::Image::default());
+        mirror.set_live(false);
+        shot("waiting");
+        mirror.set_frame(picture);
+        mirror.set_live(true);
+
+        // The three ways of filling the window, which are pure geometry and
+        // are all this can settle.
+        for (name, fit) in [
+            ("letterbox", crate::ui::RenderFit::Letterbox),
+            ("stretched", crate::ui::RenderFit::Stretched),
+            ("unscaled", crate::ui::RenderFit::Unscaled),
+        ] {
+            mirror.set_render_fit(fit);
+            shot(name);
+        }
+
+        // And a quarter turn, where only half of it can be seen here. The
+        // rectangle the picture is given does turn — `display-aspect` arrives
+        // with the client rotation already in it, the way session_run.rs sends
+        // it — and that half is worth a picture. The picture inside it does
+        // not: `transform-rotation` reaches the renderer as a `rotate()` call
+        // on the item, and the software renderer's is an empty function with a
+        // TODO on it pointing at slint#6068. femtovg's turns the canvas, so
+        // what ships is fine and what is offscreen cannot show it.
+        mirror.set_render_fit(crate::ui::RenderFit::Letterbox);
+        mirror.set_rotation(90.0);
+        mirror.set_display_aspect(fh as f32 / fw as f32);
+        shot("quarter-turn");
     }
 
     /// Every tab, at the width the compositor gives this panel, empty and
@@ -1255,6 +1376,15 @@ mod picture_tests {
         panel
             .shot(948, 1028)
             .write_ppm(&format!("{prefix}-tab-devices-error-948x1028.ppm"));
+
+        // And the bar this panel is named for, open, over the form that
+        // produced what is in it.
+        panel.failure("");
+        panel.command_bar();
+        panel.tab("config");
+        panel
+            .shot(948, 1028)
+            .write_ppm(&format!("{prefix}-command-bar-948x1028.ppm"));
     }
 
     /// Below the width the panel says it supports, the form is cut off — and

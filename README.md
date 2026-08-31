@@ -794,12 +794,36 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   minimum width is zero whatever is in it, and there is nothing for the viewport to widen to.
   Giving it a number of its own is possible and is not done: the number is the widest row in
   whichever language is showing, and a stale constant would put a scrollbar under a form that
-  fits. `the_form_is_cut_off_below_its_minimum_and_still_overdraws_nothing` photographs it at
+  fits. The reading is measured rather than inferred, which is worth a sentence — binding the
+  viewport to the layout's own minimum, `viewport-width: max(self.visible-width,
+  body.min-width)`, changes nothing at 468 or at 700: no scrollbar appears, because that
+  minimum is zero however much is in the form. `the_form_is_cut_off_below_its_minimum_and_still_overdraws_nothing` photographs it at
   700 and 468 and checks the part that has to hold anyway — cut off or not, nothing is drawn
   on top of anything else. Section 05's two longest checkbox labels still
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **The mirror window had never been in a picture at all, and half of it still cannot be.**
+  It needs a device to *have* a picture, not to draw one, so the sweep paints its own — a
+  phone-shaped frame with one corner filled in, so a turn or a flip would be visible rather
+  than plausible — and photographs the placeholder before the first frame and the three
+  `--render-fit` modes. All four are right: `letterbox` gives the picture the height and
+  bars either side, `stretched` gives it the window, `unscaled` puts 270×600 device pixels
+  in the middle of a 420×720 window with bars all round, and with no frame at all the view
+  says "Waiting for a picture…" over the backdrop. The client rotation is the half that
+  cannot be checked this way, and the reason is worth writing down before somebody
+  rediscovers it as a bug: `transform-rotation` on the image reaches the renderer as a
+  `rotate()` call on the item, and the software renderer's `rotate()` is an empty function
+  with a TODO in it naming slint#6068. femtovg's turns the canvas, so what ships is fine —
+  the offscreen picture simply shows the rectangle turning with the picture inside it left
+  upright. The rectangle turning is real and is photographed; the picture turning has to be
+  taken on the shipped renderer's word.
+- **The command bar had not been photographed either.** It is the panel's headline — a live
+  preview of the command the form adds up to — and the picture is taken with the command
+  coming from the real path, `Cfg` through `PanelConfig` and `flags.rs`, rather than a string
+  written for the occasion. Ticking max-size 1920, no-audio and turn-screen-off gives
+  `scrcpy --max-size=1920 --no-audio --turn-screen-off`, three flags, and a bit rate of 8M
+  that is correctly absent because it is what scrcpy uses anyway.
 - **The failure card and a running session had never been seen, and both hold up.** Two
   states the panel spends real time in cannot be reached without a phone, so nobody had
   looked at either: the card `src/panel/failure.rs` builds when adb refuses, and the Session
@@ -1556,7 +1580,9 @@ WGPU=1 ./target/release/examples/frame_cost 1080x2400 400
 # software renderer instead, in either language, and measures the picture.
 # PANEL_SHOT writes each size out beside the others — /tmp/panel-en-948x1028.ppm
 # and its fellows — which `ffmpeg -i panel-en-948x1028.ppm x.png` turns into a
-# picture. `photograph_every_tab` asserts nothing and photographs the lot:
+# picture. `photograph_the_mirror` does the same for the standalone mirror
+# window, painting its own frame. `photograph_every_tab` asserts nothing and
+# photographs the lot:
 # every tab empty, then with devices, profiles, log lines and a session in
 # them, and the Devices tab's failure card put through the real classifier.
 # PANEL_LANG=tr for the source language.
@@ -1595,7 +1621,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 214 tests, 14 ignored
+cargo test --release        # 214 tests, 15 ignored
 cargo clippy --all-targets  # the tree is warning-free
 ```
 
