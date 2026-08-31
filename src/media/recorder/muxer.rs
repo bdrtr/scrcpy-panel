@@ -57,21 +57,68 @@ impl Drop for Muxer {
 /// for — which is the sort of thing that is easy to get wrong again and cheap
 /// to pin, now that it is a function taking two strings and returning a third.
 pub(super) fn muxer_format_for(filename: &str, format: Option<&str>) -> &'static str {
-    let selector = match format {
+    match selector_for(filename, format) {
+        "mkv" | "mka" => "matroska",
+        "m4a"         => "mp4",
+        "opus"        => "opus",
+        // scrcpy's own mapping: `aac` is the ADTS muxer, not an MP4 with an
+        // .aac name on it.
+        "aac"         => "adts",
+        "flac"        => "flac",
+        "wav"         => "wav",
+        _             => "mp4",
+    }
+}
+
+/// The word that chose the container: the flag if it said anything, else the
+/// extension.
+fn selector_for<'a>(filename: &'a str, format: Option<&'a str>) -> &'a str {
+    match format {
         Some(explicit) if !explicit.is_empty() && explicit != "auto" => explicit,
         _ => std::path::Path::new(filename)
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("mp4"),
-    };
-    match selector {
-        "mkv" | "mka" => "matroska",
-        "m4a"         => "mp4",
-        "opus"        => "opus",
-        "flac"        => "flac",
-        "wav"         => "wav",
-        _             => "mp4",
     }
+}
+
+/// The seven names scrcpy takes, and which of them hold no picture.
+///
+/// `_ => "mp4"` was doing two jobs it should not have been: `--record-format=webm`
+/// silently wrote an MP4 and even logged "Recording started → out.webm (mp4)",
+/// and an audio-only container was handed a video stream it cannot hold.
+const FORMATS: [(&str, bool); 8] = [
+    ("mp4", false),
+    ("mkv", false),
+    ("m4a", true),
+    ("mka", true),
+    ("opus", true),
+    ("aac", true),
+    ("flac", true),
+    ("wav", true),
+];
+
+/// Refuse a recording the container cannot hold, before the file is made.
+///
+/// Both refusals are scrcpy's own, word for word, and both were reachable
+/// here. Asking for `--record=out.opus` with video on — which is the default —
+/// got as far as `avio_open`, which creates and truncates the file, and then
+/// died in `avformat_write_header` with "[opus] Unsupported codec id in stream
+/// 0": a zero-byte file, no recording, and a recorder thread gone. `.wav` and
+/// `.flac` do the same; `.m4a` and `.mka` quietly accept the video track that
+/// scrcpy refuses.
+pub(super) fn check_the_format(filename: &str, format: Option<&str>, has_video: bool) -> Result<()> {
+    let selector = selector_for(filename, format);
+    let Some((_, audio_only)) = FORMATS.iter().find(|(name, _)| *name == selector) else {
+        anyhow::bail!(
+            "Unsupported record format: {selector} \
+             (expected mp4, mkv, m4a, mka, opus, aac, flac or wav)"
+        );
+    };
+    if *audio_only && has_video {
+        anyhow::bail!("Audio container does not support video stream");
+    }
+    Ok(())
 }
 
 /// The video stream, or -1 where there is no video.
@@ -82,22 +129,49 @@ pub(super) unsafe fn add_the_video_stream(
 ) -> Result<c_int> {
     let vid_idx: c_int = if has_video {
         let vi = vi.as_ref().context("No video codec info received")?;
-        let vpar = ffi::avcodec_parameters_alloc();
-        (*vpar).codec_type = ffi::AVMediaType::AVMEDIA_TYPE_VIDEO;
-        (*vpar).codec_id   = std::mem::transmute::<u32, ffi::AVCodecID>(vi.codec_id);
-        (*vpar).width  = vi.width;
-        (*vpar).height = vi.height;
+        let vpar = Parameters::alloc()?;
+        (*vpar.0).codec_type = ffi::AVMediaType::AVMEDIA_TYPE_VIDEO;
+        (*vpar.0).codec_id   = std::mem::transmute::<u32, ffi::AVCodecID>(vi.codec_id);
+        (*vpar.0).width  = vi.width;
+        (*vpar.0).height = vi.height;
 
         let vstream = ffi::avformat_new_stream(ctx, std::ptr::null());
         if vstream.is_null() { anyhow::bail!("avformat_new_stream (video) failed"); }
-        ffi::avcodec_parameters_copy((*vstream).codecpar, vpar);
-        ffi::avcodec_parameters_free(&mut (vpar as *mut _));
+        let copied = ffi::avcodec_parameters_copy((*vstream).codecpar, vpar.0);
+        if copied < 0 {
+            anyhow::bail!("avcodec_parameters_copy (video) failed: {}", av_error(copied));
+        }
         (*vstream).time_base = SCRCPY_TIME_BASE;
         (*vstream).index
     } else {
         -1
     };
     Ok(vid_idx)
+}
+
+/// An `AVCodecParameters` that is freed however the function holding it leaves.
+///
+/// The two stream builders allocated one, then bailed on a null stream or a
+/// refused copy with the `?` carrying them past the free — the same shape the
+/// `Muxer` guard above was written to close, one allocation further in. And
+/// `avcodec_parameters_alloc` is documented to return NULL on failure, which
+/// neither of them looked at before writing through it.
+pub(super) struct Parameters(pub(super) *mut ffi::AVCodecParameters);
+
+impl Parameters {
+    unsafe fn alloc() -> Result<Self> {
+        let par = ffi::avcodec_parameters_alloc();
+        if par.is_null() {
+            anyhow::bail!("avcodec_parameters_alloc failed");
+        }
+        Ok(Self(par))
+    }
+}
+
+impl Drop for Parameters {
+    fn drop(&mut self) {
+        unsafe { ffi::avcodec_parameters_free(&mut self.0) }
+    }
 }
 
 /// The audio stream, or -1 where there is none — which is also what a server
@@ -109,15 +183,17 @@ pub(super) unsafe fn add_the_audio_stream(
 ) -> Result<c_int> {
     let aud_idx: c_int = if has_audio {
         if let Some(acid) = audio_codec_id {
-            let apar = ffi::avcodec_parameters_alloc();
-            (*apar).codec_type  = ffi::AVMediaType::AVMEDIA_TYPE_AUDIO;
-            (*apar).codec_id    = std::mem::transmute::<u32, ffi::AVCodecID>(acid);
-            (*apar).sample_rate = 48000;
-            (*apar).ch_layout.nb_channels = 2;
+            let apar = Parameters::alloc()?;
+            (*apar.0).codec_type  = ffi::AVMediaType::AVMEDIA_TYPE_AUDIO;
+            (*apar.0).codec_id    = std::mem::transmute::<u32, ffi::AVCodecID>(acid);
+            (*apar.0).sample_rate = 48000;
+            (*apar.0).ch_layout.nb_channels = 2;
             let astream = ffi::avformat_new_stream(ctx, std::ptr::null());
             if astream.is_null() { anyhow::bail!("avformat_new_stream (audio) failed"); }
-            ffi::avcodec_parameters_copy((*astream).codecpar, apar);
-            ffi::avcodec_parameters_free(&mut (apar as *mut _));
+            let copied = ffi::avcodec_parameters_copy((*astream).codecpar, apar.0);
+            if copied < 0 {
+                anyhow::bail!("avcodec_parameters_copy (audio) failed: {}", av_error(copied));
+            }
             (*astream).time_base = SCRCPY_TIME_BASE;
             (*astream).index
         } else { -1 }
@@ -144,9 +220,20 @@ pub(super) unsafe fn set_rotation(codecpar: *mut ffi::AVCodecParameters, degrees
         log::warn!("Could not allocate a display matrix; the recording will not be rotated");
         return;
     }
-    // Negated: av_display_rotation_set takes the rotation a player must apply
-    // counter-clockwise, and everything else here counts clockwise.
-    ffi::av_display_rotation_set(matrix, -(degrees as f64));
+    // Not negated. The comment that used to stand here said
+    // `av_display_rotation_set` takes a counter-clockwise angle; libavutil's
+    // own header says the opposite — "Initialize a transformation matrix
+    // describing a pure clockwise rotation by the specified angle" — and
+    // scrcpy's help for the flag this ports says "the number represents the
+    // clockwise rotation in degrees". So the negation turned every recording
+    // the wrong way: 90 and 270 produced each other's result, which is why
+    // 0 and 180 looked right and it survived a casual look.
+    //
+    // Measured rather than argued, since the two conventions are easy to talk
+    // oneself round: `av_display_rotation_set(m, 90)` then
+    // `av_display_rotation_get(m)` gives -90, and set(-90) gives +90 — the
+    // same matrix as set(270).
+    ffi::av_display_rotation_set(matrix, degrees as f64);
 
     let added = ffi::av_packet_side_data_add(
         &mut (*codecpar).coded_side_data,
@@ -195,23 +282,37 @@ pub(super) unsafe fn write_pkt(
     duration: i64,
     last_pts: &mut i64,
 ) -> c_int {
-    // Fix non-monotonic PTS (same logic as C)
-    let pts = if *last_pts != AV_NOPTS && pts <= *last_pts {
-        *last_pts + 1
-    } else {
-        pts
-    };
-    *last_pts = pts;
-
     let av = ffi::av_packet_alloc();
     if av.is_null() { return ffi::AVERROR(libc::ENOMEM); }
 
     let stream = get_stream(ctx, stream_idx as usize);
     let stb = (*stream).time_base;
 
+    // Rescale first, then fix the non-monotonic timestamp — in the stream's
+    // own time base, which is the only base the guard means anything in.
+    // libavformat's contract is that "the timing information on the packets
+    // sent to the muxer must be in the corresponding AVStream's timebase.
+    // That timebase is set by the muxer in the avformat_write_header() step",
+    // and mp4 does change it: the audio stream comes back at 1/48000, where a
+    // tick is 20.8 microseconds. The bump was a microsecond, so it rounded
+    // straight back onto the timestamp it was meant to clear, and the muxer
+    // refused the packet — `Application provided invalid, non monotonically
+    // increasing dts`, AVERROR(EINVAL). The packet loop stops on the first
+    // refusal, so the first duplicate timestamp the device sent ended the
+    // recording. In matroska, whose base is 1/1000 and which is
+    // AVFMT_TS_NONSTRICT, the same collision was accepted silently and two
+    // frames shared a timestamp.
+    let out_pts = ffi::av_rescale_q(pts, SCRCPY_TIME_BASE, stb);
+    let out_pts = if *last_pts != AV_NOPTS && out_pts <= *last_pts {
+        *last_pts + 1
+    } else {
+        out_pts
+    };
+    *last_pts = out_pts;
+
     (*av).stream_index = stream_idx;
-    (*av).pts = ffi::av_rescale_q(pts, SCRCPY_TIME_BASE, stb);
-    (*av).dts = (*av).pts;
+    (*av).pts = out_pts;
+    (*av).dts = out_pts;
     (*av).duration = if duration > 0 {
         ffi::av_rescale_q(duration, SCRCPY_TIME_BASE, stb)
     } else { 0 };
@@ -221,11 +322,15 @@ pub(super) unsafe fn write_pkt(
     (*av).data = pkt.data.as_ptr() as *mut u8;
     (*av).size = pkt.data.len() as c_int;
 
-    let ref_av = ffi::av_packet_alloc();
+    let mut ref_av = ffi::av_packet_alloc();
     let mut written = ffi::AVERROR(libc::ENOMEM);
-    if !ref_av.is_null() && ffi::av_packet_ref(ref_av, av) == 0 {
-        written = ffi::av_interleaved_write_frame(ctx, ref_av);
-        ffi::av_packet_free(&mut (ref_av as *mut _));
+    if !ref_av.is_null() {
+        if ffi::av_packet_ref(ref_av, av) == 0 {
+            written = ffi::av_interleaved_write_frame(ctx, ref_av);
+        }
+        // Outside the `if`, because a `av_packet_ref` that fails still leaves
+        // the packet it was given allocated, and this used to walk past it.
+        ffi::av_packet_free(&mut ref_av);
     }
     // Do not free av's data (it's borrowed from RecPacket)
     (*av).data = std::ptr::null_mut();
@@ -270,8 +375,40 @@ mod tests {
             assert_eq!(muxer_format_for("out.m4a", asked), "mp4");
             assert_eq!(muxer_format_for("out.mka", asked), "matroska");
         }
-        // Anything else, including no extension at all, is an mp4.
+        // aac is the ADTS muxer, which is what scrcpy maps it to; it used to
+        // fall through to mp4 and write an MP4 under an .aac name.
+        assert_eq!(muxer_format_for("out.aac", None), "adts");
+        // Anything else, including no extension at all, is an mp4 — and
+        // `check_the_format` is what stops that being a silent answer.
         assert_eq!(muxer_format_for("out.webm", None), "mp4");
         assert_eq!(muxer_format_for("recording", None), "mp4");
+    }
+
+    /// The two refusals scrcpy makes, made here too and before the file is
+    /// created rather than after. `--record=out.opus` with video on used to get
+    /// as far as `avio_open` — which truncates — and then die in the header
+    /// write, leaving a zero-byte file and a dead recorder thread.
+    #[test]
+    fn a_container_is_not_given_a_stream_it_cannot_hold() {
+        for name in ["out.opus", "out.flac", "out.wav", "out.m4a", "out.mka", "out.aac"] {
+            let refused = check_the_format(name, None, true).unwrap_err().to_string();
+            assert_eq!(refused, "Audio container does not support video stream", "{name}");
+            assert!(check_the_format(name, None, false).is_ok(), "{name} with no video");
+        }
+        for name in ["out.mp4", "out.mkv"] {
+            assert!(check_the_format(name, None, true).is_ok(), "{name}");
+        }
+
+        // And a format nobody has is said so rather than quietly written as an
+        // mp4 with the log announcing "out.webm (mp4)".
+        let refused = check_the_format("out", Some("webm"), true).unwrap_err().to_string();
+        assert_eq!(
+            refused,
+            "Unsupported record format: webm \
+             (expected mp4, mkv, m4a, mka, opus, aac, flac or wav)"
+        );
+        assert!(check_the_format("out.webm", None, true).is_err(), "and by extension too");
+        // A name with no extension still means mp4, which is a format.
+        assert!(check_the_format("recording", None, true).is_ok());
     }
 }

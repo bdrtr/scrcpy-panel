@@ -144,7 +144,7 @@ impl Recorder {
                 // the one telling the user their file is written, and it used
                 // to say so whatever had happened in here.
                 let outcome = run_recorder(
-                    state,
+                    Arc::clone(&state),
                     &filename,
                     format.as_deref(),
                     has_video,
@@ -154,6 +154,18 @@ impl Recorder {
                 if let Err(ref e) = outcome {
                     log::error!("Recorder failed: {}", e);
                 }
+                // Whatever happened, this thread is gone and nothing will drain
+                // the queues again. `stopped` was set in exactly one place —
+                // `stop()` — so every other way out of `run_recorder` (a
+                // container that will not take the stream, an `avio_open` that
+                // could not make the file, a header that would not write, a
+                // packet the muxer refused) left the recorder installed, dead,
+                // and still accepting. The demuxers push into it for every
+                // packet and drop the `false` it returns, so both queues grew
+                // at the video bit rate — 8 Mb/s by default, about 1 MB a
+                // second, some 1.8 GB over half an hour — with nothing to say
+                // the recording had died.
+                mark_stopped(&state);
                 outcome
             })
             .expect("Failed to spawn recorder thread")
@@ -163,6 +175,21 @@ impl Recorder {
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal recorder logic
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Close the queues and let go of what is in them.
+///
+/// The producers read `stopped` under the same lock before pushing, so this is
+/// what makes `push_video` and `push_audio` start answering false. Clearing the
+/// queues as well is the other half: they hold the packets nobody will ever
+/// write, and until the session ends nothing else frees them.
+fn mark_stopped(state: &Arc<(Mutex<RecorderState>, Condvar)>) {
+    let (lock, cvar) = &**state;
+    let mut s = lock.lock().unwrap();
+    s.stopped = true;
+    s.video_queue.clear();
+    s.audio_queue.clear();
+    cvar.notify_all();
+}
 
 /// Whether to take another packet from a stream's queue this time round.
 ///
@@ -241,6 +268,8 @@ unsafe fn open_and_record(
 ) -> Result<()> {
     ffi::av_log_set_level(ffi::AV_LOG_WARNING);
 
+    // Before the file is opened, because `avio_open` creates and truncates it.
+    check_the_format(filename, format, has_video)?;
     let fmt_name = muxer_format_for(filename, format);
 
     let cfilename = CString::new(filename).unwrap();
@@ -793,5 +822,54 @@ mod tests {
             rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(),
             "the recorder is still waiting for audio that is never coming"
         );
+    }
+
+    /// A recorder whose thread has died has to stop accepting packets.
+    ///
+    /// `stopped` was set in one place, `stop()`, so every other way out of
+    /// `run_recorder` left the recorder installed and dead while the demuxers
+    /// went on pushing into it for every packet of the session — and dropping
+    /// the `false` they were not being given. Both queues grew at the video bit
+    /// rate for the rest of the run with nothing to say the recording had
+    /// ended. The same unopenable path as above is the way in.
+    #[test]
+    fn a_recorder_that_died_stops_taking_packets() {
+        let recorder = Recorder::new();
+        recorder.set_video_codec(VideoCodecInfo { codec_id: 27, width: 64, height: 48 });
+        let handle = recorder.spawn(
+            "/proc/self/no/such/place.mp4".to_string(),
+            Some("mp4".to_string()),
+            true,
+            None,
+            0,
+        );
+        assert!(handle.join().expect("the thread ran").is_err(), "that path cannot be opened");
+
+        assert!(
+            !recorder.push_video(RecPacket { data: vec![0u8; 4], pts: 0, is_key: true }),
+            "a dead recorder must refuse the packet rather than queue it for ever"
+        );
+        let (lock, _) = &*recorder.state;
+        assert!(lock.lock().unwrap().video_queue.is_empty(), "and hold nothing");
+    }
+
+    /// The container is checked before the file is made, not after.
+    #[test]
+    fn an_audio_container_with_video_fails_without_creating_the_file() {
+        let path = std::env::temp_dir().join("scrcpy-panel-should-not-exist.opus");
+        let _ = std::fs::remove_file(&path);
+
+        let recorder = Recorder::new();
+        recorder.set_video_codec(VideoCodecInfo { codec_id: 27, width: 64, height: 48 });
+        let handle = recorder.spawn(
+            path.to_string_lossy().into_owned(),
+            None,
+            true,
+            None,
+            0,
+        );
+        let refused = handle.join().expect("the thread ran").unwrap_err().to_string();
+        assert_eq!(refused, "Audio container does not support video stream");
+        assert!(!path.exists(), "and it did not create a zero-byte file first");
     }
 }
