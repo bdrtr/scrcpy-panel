@@ -800,6 +800,18 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **The failure card and a running session had never been seen, and both hold up.** Two
+  states the panel spends real time in cannot be reached without a phone, so nobody had
+  looked at either: the card `src/panel/failure.rs` builds when adb refuses, and the Session
+  tab with a session in it. Neither needs a phone to *draw* — only to happen — so the sweep
+  puts the state in and photographs it, with the card's words coming from the real
+  classifier rather than written out by hand. `adb: device unauthorized` comes back as
+  ERROR · AUTHORISATION, "The device is not authorised", the prompt to confirm on the
+  device, the raw output verbatim in the terminal block, and three buttons: scan again,
+  restart the adb server, open the log. The Session tab shows the LIVE chip, the five
+  metric rows `session_run.rs` rebuilds every second, the transfer card and the device keys.
+  Nothing was wrong with either. That is worth a line all the same: the last four things
+  this sweep looked at were all broken, and these two were the first that were not.
 - **Ten more Turkish lines in the English panel, and a fourth way for one to get there.**
   The guards read how a string is *built*: `tr!` with a literal, `format!`,
   `.to_string()`, `@tr` in `ui/`. The plainest way is none of those — a `&str` handed
@@ -1541,9 +1553,13 @@ WGPU=1 ./target/release/examples/frame_cost 1080x2400 400
 
 # The panel, at a width of one's own choosing. A real window is whatever size
 # the compositor decides, so this draws the real PanelWindow offscreen with the
-# software renderer instead, in English, and measures the picture. PANEL_SHOT
-# writes each size out beside the others — /tmp/panel-948x1028.ppm and its
-# fellows — which `ffmpeg -i panel-948x1028.ppm x.png` turns into a picture.
+# software renderer instead, in either language, and measures the picture.
+# PANEL_SHOT writes each size out beside the others — /tmp/panel-en-948x1028.ppm
+# and its fellows — which `ffmpeg -i panel-en-948x1028.ppm x.png` turns into a
+# picture. `photograph_every_tab` asserts nothing and photographs the lot:
+# every tab empty, then with devices, profiles, log lines and a session in
+# them, and the Devices tab's failure card put through the real classifier.
+# PANEL_LANG=tr for the source language.
 PANEL_SHOT=/tmp/panel \
   cargo test --release -- --ignored --nocapture --test-threads=1 picture
 ```

@@ -895,6 +895,9 @@ mod picture_tests {
     //! into something that can be looked at.
 
     use super::*;
+    // Only the pictures need this one; the panel itself builds its metric rows
+    // in session_run.rs.
+    use crate::ui::MetricRow;
     use slint::platform::software_renderer::{
         MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType,
     };
@@ -1035,6 +1038,26 @@ mod picture_tests {
             self.window
                 .global::<App>()
                 .set_devices(ModelRc::from(Rc::new(VecModel::from(rows))));
+        }
+
+        /// A real failure on the Devices tab, put through the real
+        /// classifier, so the card in the picture is the card a user gets.
+        fn failure(&self, text: &str) {
+            show_failure(&self.window, text);
+        }
+
+        /// A session in flight: the Session tab has never been photographed
+        /// with one, because that needs a phone and this does not.
+        fn session(&self, title: &str, meta: &str, metrics: Vec<MetricRow>) {
+            let app = self.window.global::<App>();
+            app.set_session_running(true);
+            app.set_session_title(title.into());
+            app.set_session_meta(meta.into());
+            app.set_metrics(ModelRc::from(Rc::new(VecModel::from(metrics))));
+        }
+
+        fn no_session(&self) {
+            self.window.global::<App>().set_session_running(false);
         }
 
         fn log(&self, rows: Vec<LogRow>) {
@@ -1190,12 +1213,48 @@ mod picture_tests {
             })
             .collect(),
         );
-        for tab in ["devices", "profiles", "log"] {
+        // The five rows session_run.rs builds every second, with the values a
+        // Redmi at 1080x2400 gives.
+        panel.session(
+            "Redmi Note 11",
+            &tr!("{} · gömülü", "a1683d6b0013"),
+            [
+                ("Çözünürlük", "1080 × 2400"),
+                ("Kare hızı", "58.7 fps"),
+                ("Kodek", "h264 + opus"),
+                ("Döndürme", "0°"),
+                ("Süre", "04:12"),
+            ]
+            .iter()
+            .map(|(key, value)| MetricRow {
+                key: tr!(key).as_str().into(),
+                value: (*value).into(),
+            })
+            .collect(),
+        );
+        for tab in ["devices", "profiles", "log", "session"] {
             panel.tab(tab);
             panel
                 .shot(948, 1028)
                 .write_ppm(&format!("{prefix}-tab-{tab}-filled-948x1028.ppm"));
         }
+
+        // And the card the Devices tab shows when adb refuses, put through the
+        // real classifier rather than written out by hand.
+        panel.devices(Vec::new());
+        panel.no_session();
+        panel.failure(
+            concat!(
+                "adb: device unauthorized.\n",
+                "This adb server's $ADB_VENDOR_KEYS is not set\n",
+                "Try 'adb kill-server' if that seems wrong.\n",
+                "Otherwise check for a confirmation dialog on your device."
+            ),
+        );
+        panel.tab("devices");
+        panel
+            .shot(948, 1028)
+            .write_ppm(&format!("{prefix}-tab-devices-error-948x1028.ppm"));
     }
 
     /// Below the width the panel says it supports, the form is cut off — and
