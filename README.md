@@ -803,6 +803,28 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **Three server options were wrong on the wire, and one of them by a factor of a
+  thousand.** `--screen-off-timeout` takes seconds and the server reads milliseconds. scrcpy
+  converts: `parse_screen_off_timeout` in its `cli.c` says "value in seconds, but must fit in
+  31 bits in milliseconds" and stores a tick, and `server.c` sends
+  `screen_off_timeout=%PRIu64` of `SC_TICK_TO_MS(...)`. This client sent the seconds straight
+  through, so a minute asked for was sixty milliseconds given — the device screen went off at
+  once whatever the user typed. `--turn-screen-off` made it worse in a different direction: it
+  was answered here with `screen_off_timeout=0`, which upstream never sends for it, so `-S`
+  quietly rewrote a device setting scrcpy leaves alone. It never needed to: `-S` turns the
+  screen off with a control message and `session/mod.rs` has been pushing `SetDisplayPower`
+  for it all along. And `--no-cleanup` reached nothing at all — upstream sends `cleanup=false`
+  and this sent nothing, so the flag parsed, the panel offered it, and the device was restored
+  on exit anyway.
+- **`--orientation` took any number, and the two things it feeds disagreed about it.** Its
+  siblings `--display-orientation` and `--record-orientation` both name the values they
+  accept; the shorthand that stands behind them had no parser at all, so `--orientation=45`
+  went through. The window then fell down `Orientation::from_degrees`'s `_` arm to 0 and
+  stayed upright, while `record_rotation()` handed 45 to the muxer and wrote a display matrix
+  every player honours: one flag, an unrotated window and a rotated file. scrcpy refuses the
+  value outright and so does this now — named as possible values rather than checked in a
+  function, so that clap advertises them in `--help`, in completions, and to
+  `every_supported_flag_parses`, which asks an argument what it accepts rather than guessing.
 - **The mirror window had never been in a picture at all, and half of it still cannot be.**
   It needs a device to *have* a picture, not to draw one, so the sweep paints its own — a
   phone-shaped frame with one corner filled in, so a turn or a flip would be visible rather
@@ -1621,7 +1643,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 214 tests, 15 ignored
+cargo test --release        # 219 tests, 15 ignored
 cargo clippy --all-targets  # the tree is warning-free
 ```
 

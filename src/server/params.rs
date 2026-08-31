@@ -43,11 +43,23 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_forward: bool) -> Vec
         args.push(format!("crop={}", crop));
     }
 
-    // Screen off: use explicit timeout if provided, else 0 if turn_screen_off
-    if let Some(t) = opts.screen_off_timeout {
-        args.push(format!("screen_off_timeout={}", t));
-    } else if opts.turn_screen_off {
-        args.push("screen_off_timeout=0".to_string());
+    // In milliseconds, which is what the server reads and not what the flag
+    // takes. scrcpy's own client parses --screen-off-timeout as seconds into a
+    // tick — "value in seconds, but must fit in 31 bits in milliseconds", says
+    // cli.c — and sends `screen_off_timeout=%PRIu64` of SC_TICK_TO_MS. Sending
+    // the seconds straight through asked a device for 60 milliseconds when the
+    // user asked for a minute. A negative value is the documented "no timeout",
+    // and upstream sends nothing for it rather than a negative number.
+    //
+    // `--turn-screen-off` used to be answered here with `screen_off_timeout=0`,
+    // which upstream never sends: -S turns the screen off with a control
+    // message, and session/mod.rs has been sending SetDisplayPower for it all
+    // along. All the line here did was change a device setting scrcpy leaves
+    // alone.
+    if let Some(seconds) = opts.screen_off_timeout {
+        if seconds >= 0 {
+            args.push(format!("screen_off_timeout={}", i64::from(seconds) * 1000));
+        }
     }
 
     if opts.show_touches {
@@ -56,6 +68,13 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_forward: bool) -> Vec
 
     if opts.stay_awake {
         args.push("stay_awake=true".to_string());
+    }
+
+    // The server cleans up after itself unless told not to, and it was never
+    // told: --no-cleanup parsed, reached nothing, and the device was restored
+    // anyway. Upstream sends the same parameter the same way round.
+    if opts.no_cleanup {
+        args.push("cleanup=false".to_string());
     }
 
     if !opts.power_on || opts.no_power_on {
@@ -211,6 +230,44 @@ mod tests {
         argv.extend_from_slice(flags);
         let opts = Options::try_parse_from(argv).expect("valid arguments");
         build_server_args(&opts, 0, true)
+    }
+
+    /// The flag takes seconds and the server reads milliseconds, and this used
+    /// to hand over the one as the other: a minute asked for came out as sixty
+    /// milliseconds. scrcpy's own client says so in `cli.c` — "value in
+    /// seconds, but must fit in 31 bits in milliseconds" — and sends
+    /// `SC_TICK_TO_MS` of it.
+    #[test]
+    fn a_screen_off_timeout_crosses_in_milliseconds() {
+        let args = args_for(&["--screen-off-timeout", "60"]);
+        assert!(args.contains(&"screen_off_timeout=60000".to_string()), "{args:?}");
+    }
+
+    /// `-1` is the documented "no timeout", and a negative number is not a
+    /// duration the server can be given: upstream sends nothing at all for it.
+    #[test]
+    fn no_timeout_is_sent_as_no_option() {
+        // Written with the `=`, because a bare `-1` is a short flag to clap.
+        let args = args_for(&["--screen-off-timeout=-1"]);
+        assert!(!args.iter().any(|a| a.starts_with("screen_off_timeout")), "{args:?}");
+    }
+
+    /// -S turns the screen off with a control message — session/mod.rs pushes
+    /// SetDisplayPower for it — and upstream never sends a screen_off_timeout
+    /// for it. Answering it here as `screen_off_timeout=0` changed a device
+    /// setting scrcpy leaves alone.
+    #[test]
+    fn turning_the_screen_off_does_not_rewrite_the_devices_timeout() {
+        let args = args_for(&["--turn-screen-off"]);
+        assert!(!args.iter().any(|a| a.starts_with("screen_off_timeout")), "{args:?}");
+    }
+
+    /// The server tidies up after itself unless told not to, and it was never
+    /// told: --no-cleanup parsed and reached nothing.
+    #[test]
+    fn no_cleanup_reaches_the_server() {
+        assert!(args_for(&["--no-cleanup"]).contains(&"cleanup=false".to_string()));
+        assert!(!args_for(&[]).iter().any(|a| a.starts_with("cleanup")));
     }
 
     /// The torch and the zoom are the server's to apply — the camera is opened

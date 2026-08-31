@@ -118,6 +118,26 @@ pub(super) fn alignment(value: &str) -> Result<u32, String> {
 
 #[cfg(test)]
 mod tests {
+    /// `--orientation` is the shorthand the other two override, and it used to
+    /// take any u16: `--orientation=45` parsed, the window fell through
+    /// `Orientation::from_degrees`'s `_` arm and stayed upright, and the
+    /// recorder wrote a 45-degree display matrix into the file. One flag, two
+    /// answers. scrcpy refuses the value at the command line and so does this.
+    #[test]
+    fn an_orientation_that_is_not_a_quarter_turn_is_refused() {
+        for good in ["0", "90", "180", "270"] {
+            let opts = super::super::parse(&["--orientation", good]);
+            assert_eq!(opts.orientation.to_string(), good);
+        }
+        for bad in ["45", "360", "-90", "flip90"] {
+            let argv = vec!["scrcpy-panel", "--orientation", bad];
+            assert!(
+                clap::Parser::try_parse_from(argv).map(|_: super::super::Options| ()).is_err(),
+                "--orientation={bad} was accepted"
+            );
+        }
+    }
+
     use super::*;
     use crate::options::{parse, Options};
     use clap::Parser;

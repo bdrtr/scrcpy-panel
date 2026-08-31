@@ -1,4 +1,5 @@
 use clap::Parser;
+use clap::builder::TypedValueParser as _;
 
 mod derived;
 mod values;
@@ -435,7 +436,23 @@ pub struct Options {
     pub record_orientation: Option<String>,
 
     /// Initial display orientation: 0, 90, 180, 270
-    #[arg(long, default_value = "0")]
+    ///
+    /// Held to those four the way `--display-orientation` and
+    /// `--record-orientation` are. Without it `--orientation=45` parsed, and
+    /// the two things it feeds disagreed about what to do with it: the window
+    /// fell through `Orientation::from_degrees`'s `_` arm to 0 and stayed
+    /// upright, while `record_rotation()` handed 45 to the recorder and wrote a
+    /// display matrix every player honours. scrcpy refuses the value outright.
+    /// The four are named rather than checked in a function of our own, so
+    /// that clap advertises them — in `--help`, in completions, and to
+    /// `every_supported_flag_parses`, which asks an argument what it accepts
+    /// rather than guessing a value for it.
+    #[arg(
+        long,
+        default_value = "0",
+        value_parser = clap::builder::PossibleValuesParser::new(["0", "90", "180", "270"])
+            .map(|degrees| degrees.parse::<u16>().expect("one of the four listed")),
+    )]
     pub orientation: u16,
 
     /// Skip server cleanup on exit
