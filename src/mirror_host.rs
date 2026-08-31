@@ -261,50 +261,76 @@ fn wire_input(
         mirror.on_borders_double_clicked(move || on_action(WindowAction::ResizeToFit));
     }
 
-    // Every one of these ends in a message to the device, so a session with no
-    // control channel leaves them unset. The keys below are wired either way,
-    // because some of them never leave the window.
-    if let Some(controller) = controller.clone() {
-        {
-            let input = input.clone();
-            let controller = controller.clone();
-            mirror.on_pointer_down(move |u, v, button, alt, control, shift| {
-                // Slint reports no Meta for pointer events, and the pointer
-                // path does not consult it.
-                let mods = Mods { alt, control, shift, ..Mods::NONE };
-                input.borrow_mut().pointer_down(u, v, button, mods, &controller);
-            });
-        }
-        {
-            let input = input.clone();
-            let controller = controller.clone();
-            mirror.on_pointer_up(move |u, v, button| {
-                input.borrow_mut().pointer_up(u, v, button, &controller);
-            });
-        }
-        {
-            let input = input.clone();
-            let controller = controller.clone();
-            mirror.on_pointer_moved(move |u, v, pressed| {
-                input.borrow_mut().pointer_moved(u, v, pressed, &controller);
-            });
-        }
-        {
-            let input = input.clone();
-            mirror.on_pointer_scroll(move |u, v, dx, dy| {
-                input.borrow_mut().pointer_scroll(u, v, dx, dy, &controller);
-            });
-        }
+    // Weak, and every handler registered whatever this session has.
+    //
+    // Two things were wrong with a strong `Rc` behind an `if let`. These are
+    // the only writers of `Mirror.on_pointer_*`, and Slint's setters replace a
+    // handler rather than clear one, so a session with no control channel left
+    // the *previous* session's four pointer handlers installed — still holding
+    // that session's controller, still mapping coordinates through its frame
+    // size, still pushing InjectTouch into a queue nobody was reading. "Salt
+    // izleme · --no-control" stopped the keyboard and left the mouse wired to
+    // the session before it.
+    //
+    // And the clones those closures kept were owned by the `Mirror` global,
+    // which belongs to the window and outlives every session. `Attachment`
+    // holds no handle on them, so dropping it released none, and
+    // `stop_session`'s `panel.controller.take()` dropped one reference out of
+    // seven: the `Controller` was never dropped, its `Sender<ControlMsg>`
+    // never closed, and the control thread stayed parked on `receiver.iter()`
+    // with its socket open for the life of the panel. A `Weak` here means the
+    // session's own reference is the last one.
+    let controller = controller.as_ref().map(Rc::downgrade);
+    let alive = {
+        let controller = controller.clone();
+        move || controller.as_ref().and_then(std::rc::Weak::upgrade)
+    };
+
+    {
+        let input = input.clone();
+        let alive = alive.clone();
+        mirror.on_pointer_down(move |u, v, button, alt, control, shift| {
+            let Some(controller) = alive() else { return };
+            // Slint reports no Meta for pointer events, and the pointer
+            // path does not consult it.
+            let mods = Mods { alt, control, shift, ..Mods::NONE };
+            input.borrow_mut().pointer_down(u, v, button, mods, &controller);
+        });
     }
     {
         let input = input.clone();
-        let controller = controller.clone();
+        let alive = alive.clone();
+        mirror.on_pointer_up(move |u, v, button| {
+            let Some(controller) = alive() else { return };
+            input.borrow_mut().pointer_up(u, v, button, &controller);
+        });
+    }
+    {
+        let input = input.clone();
+        let alive = alive.clone();
+        mirror.on_pointer_moved(move |u, v, pressed| {
+            let Some(controller) = alive() else { return };
+            input.borrow_mut().pointer_moved(u, v, pressed, &controller);
+        });
+    }
+    {
+        let input = input.clone();
+        let alive = alive.clone();
+        mirror.on_pointer_scroll(move |u, v, dx, dy| {
+            let Some(controller) = alive() else { return };
+            input.borrow_mut().pointer_scroll(u, v, dx, dy, &controller);
+        });
+    }
+    {
+        let input = input.clone();
+        let alive = alive.clone();
         let orientation = orientation.clone();
         let on_action = on_action.clone();
         mirror.on_key_down(move |text, alt, control, shift, meta, repeat| {
             // The rotation shortcut changes `orientation`; feed it back so the
             // next click maps to the right device pixel.
             input.borrow_mut().set_orientation(orientation.get());
+            let controller = alive();
             let action = input.borrow_mut().key_down(
                 text.as_str(),
                 Mods { alt, control, shift, meta },
@@ -320,6 +346,7 @@ fn wire_input(
     {
         let input = input.clone();
         mirror.on_key_up(move |text, alt, control, shift, meta| {
+            let controller = alive();
             input.borrow_mut().key_up(
                 text.as_str(),
                 Mods { alt, control, shift, meta },
@@ -441,6 +468,13 @@ fn start_pump(
 /// Kept out of [`crate::session`] because a cpal stream is not `Send` and a
 /// session has to cross a thread boundary to reach the window.
 pub fn start_audio(audio: AudioStream) -> Option<crate::audio::player::AudioPlayer> {
+    // The one test of this, and it is before the sound device is opened. There
+    // used to be a second one after the regulator and the cpal player had been
+    // built, on a plain `bool` of a value that was moved in and that nothing
+    // between them could change — so it was unreachable, its line could never
+    // be printed, and it said the opposite of this one about the same
+    // condition. It also read as though a session with playback off opened a
+    // sound device before giving up, which it does not.
     if !audio.playback {
         log::info!("Audio playback disabled; nothing will reach the speakers");
         return None;
@@ -462,11 +496,6 @@ pub fn start_audio(audio: AudioStream) -> Option<crate::audio::player::AudioPlay
             return None;
         }
     };
-
-    if !audio.playback {
-        log::info!("Audio playback disabled; the stream is still decoded");
-        return None;
-    }
 
     let samples = audio.samples;
     if let Err(e) = std::thread::Builder::new()

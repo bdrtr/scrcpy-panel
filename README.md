@@ -803,6 +803,27 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **A stopped session kept its control thread, its socket and its mouse.** `wire_input` is
+  the only writer of `Mirror.on_pointer_down/up/moved/scroll`, and Slint's setters replace a
+  handler rather than clear one. The four were registered inside `if let Some(controller)`,
+  so a session started with `--no-control` installed none — and left the *previous* session's
+  four in place, still holding that session's controller and mapping coordinates through its
+  frame size. "Salt izleme · --no-control" stopped the keyboard and left the mouse wired to
+  the session before it, pushing `InjectTouch` into a queue nobody was reading.
+  The same closures were also where the controller went to live forever. Six clones of
+  `Rc<Controller>` were owned by the `Mirror` global, which belongs to the window and
+  outlives every session; `Attachment` keeps no handle on them, so dropping it released
+  none, and `stop_session`'s `panel.controller.take()` dropped one reference out of seven.
+  The `Controller` was therefore never dropped, its `Sender<ControlMsg>` never closed, and
+  the `scrcpy-controller` thread stayed parked on `receiver.iter()` with its socket open for
+  as long as the panel ran — one more with every session started. The handlers hold a `Weak`
+  now and are registered whatever the session has, so a session with no control channel
+  installs handlers that do nothing and the session's own reference is the last one.
+  Beside them, `start_audio` tested `audio.playback` twice. The second test was after the
+  regulator and the cpal player had been built, on a plain `bool` moved in that nothing in
+  between could change: unreachable, and its line says the opposite of the first about the
+  same condition. It read as though playback being off still opened a sound device before
+  giving up. It is gone.
 - **`--time-limit` did nothing when the mirror was embedded, which is the default.** It is
   enforced in three places, all in `main.rs`, and none of them is on the embedded path: a
   windowed session re-executes this binary and gets it from there, an embedded one runs in
