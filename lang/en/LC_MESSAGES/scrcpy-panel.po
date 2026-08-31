@@ -1007,6 +1007,9 @@ msgstr "No session is running."
 msgid "Oturum sona erdi."
 msgstr "The session has ended."
 
+msgid "Süre sınırına ulaşıldı ({} s)."
+msgstr "The time limit was reached ({} s)."
+
 msgid "Oturum durduruldu."
 msgstr "The session was stopped."
 

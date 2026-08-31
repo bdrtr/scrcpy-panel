@@ -267,6 +267,7 @@ pub(super) fn install_embedded(panel: &Rc<Panel>, result: Result<Session>, opts:
     );
     app.set_session_running(true);
     sync_tray(true);
+    start_the_time_limit(panel, opts);
 
     *panel.embedded.borrow_mut() = Some(session);
     panel.info(&tr!("Oturum başladı."));
@@ -409,6 +410,34 @@ pub(super) fn stop_child(child: &mut std::process::Child) -> Option<std::process
     let _ = child.kill();
     child.wait().ok()
 }
+/// --time-limit, for a session running in this process.
+///
+/// It is enforced in three places in main.rs and none of them is on this path,
+/// so the "Süre sınırı" field did exactly what it says when the mirror mode was
+/// a separate window — that re-executes the binary, and main.rs handles it —
+/// and nothing at all when the mirror was embedded. Same form, same number, two
+/// answers, decided by a radio button in another tab.
+fn start_the_time_limit(panel: &Rc<Panel>, opts: &Options) {
+    let Some(seconds) = opts.time_limit.filter(|&s| s > 0) else {
+        panel.time_limit.borrow_mut().take();
+        return;
+    };
+    log::info!("Time limit: {} s", seconds);
+    let timer = slint::Timer::default();
+    let panel_for_limit = Rc::downgrade(panel);
+    timer.start(
+        slint::TimerMode::SingleShot,
+        Duration::from_secs(seconds as u64),
+        move || {
+            if let Some(panel) = panel_for_limit.upgrade() {
+                panel.info(&tr!("Süre sınırına ulaşıldı ({} s).", seconds));
+                stop_session(&panel);
+            }
+        },
+    );
+    *panel.time_limit.borrow_mut() = Some(timer);
+}
+
 /// Stop whichever kind of session is running.
 pub(super) fn stop_session(panel: &Rc<Panel>) {
     let mut stopped = panel.pending.borrow_mut().take().is_some();
@@ -428,6 +457,14 @@ pub(super) fn stop_session(panel: &Rc<Panel>) {
     panel.audio.borrow_mut().take();
     panel.metrics_timer.borrow_mut().take();
     panel.gamepad_timer.borrow_mut().take();
+    // This one can be dropped from inside its own callback, which is what
+    // happens when the limit is what stopped the session. Checked rather than
+    // assumed: `Timer::drop` goes to `remove_timer`, which marks an entry
+    // `removed` instead of removing it while `being_activated` is set, and the
+    // activation loop clears it up afterwards — and a single-shot callback has
+    // been moved out by value before it runs, so nothing drops the closure
+    // under itself.
+    panel.time_limit.borrow_mut().take();
     if let Some(gamepads) = panel.gamepads.borrow_mut().take() {
         gamepads.borrow_mut().detach();
     }

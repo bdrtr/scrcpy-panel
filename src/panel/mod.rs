@@ -91,6 +91,9 @@ struct Panel {
     uhid: RefCell<Option<crate::input::uhid::UhidInput>>,
     /// Refreshes the Ölçümler table once a second.
     metrics_timer: RefCell<Option<slint::Timer>>,
+    /// --time-limit, for a session running in this process. A windowed one gets
+    /// it from main.rs, which is why the field appeared to work.
+    time_limit: RefCell<Option<slint::Timer>>,
     started_at: std::cell::Cell<Option<std::time::Instant>>,
     /// Which profile "Düzenle" loaded, so the next save overwrites it instead
     /// of leaving a near-duplicate behind.
@@ -173,6 +176,7 @@ pub fn run(opts: &Options) -> Result<()> {
         gamepad_timer: RefCell::new(None),
         uhid: RefCell::new(uhid),
         metrics_timer: RefCell::new(None),
+        time_limit: RefCell::new(None),
         started_at: std::cell::Cell::new(None),
         editing_profile: std::cell::Cell::new(None),
         selected: Arc::new(Mutex::new(Vec::new())),

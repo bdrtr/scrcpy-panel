@@ -803,6 +803,19 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **`--time-limit` did nothing when the mirror was embedded, which is the default.** It is
+  enforced in three places, all in `main.rs`, and none of them is on the embedded path: a
+  windowed session re-executes this binary and gets it from there, an embedded one runs in
+  the panel's own process and nobody was counting. So the "Süre sınırı" field did exactly
+  what it says with one radio button in Ayarlar and nothing at all with the other — the same
+  form, the same number, two answers. The panel installs its own single-shot timer now,
+  alongside the metrics timer, and drops it where every other per-session timer is dropped.
+  Dropping it there means dropping it from inside its own callback when the limit is what
+  stopped the session, and Slint supports that: `Timer::drop` reaches `remove_timer`, which
+  marks the entry `removed` rather than removing it while `being_activated` is set and lets
+  the activation loop clear it afterwards. Checked in `i-slint-core`'s `timers.rs` rather than
+  assumed, because the comment on the neighbouring timer says the opposite. **Unverified on a
+  device**: there is none here, so this is read and reasoned rather than watched.
 - **A flag nothing reads, an edit that ended itself, and a query that failed successfully.**
   `--no-mipmaps` was in `SUPPORTED`, the list whose own comment says "Parsing a flag is not
   enough to be in here: several were accepted by the argument parser and then read by nobody,
