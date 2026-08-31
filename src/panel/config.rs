@@ -300,7 +300,7 @@ fn read_profiles(path: &std::path::Path) -> Vec<Profile> {
         Ok(profiles) => profiles,
         Err(e) => {
             let aside = path.with_extension("json.broken");
-            match std::fs::rename(&path, &aside) {
+            match std::fs::rename(path, &aside) {
                 Ok(()) => log::warn!(
                     "{} could not be read ({e}); it has been moved to {} and the panel \
                      started with no profiles",
