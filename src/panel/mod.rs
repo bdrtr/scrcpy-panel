@@ -916,6 +916,10 @@ mod picture_tests {
     /// Where the section body starts: the section list is 216px and its divider
     /// is the two before that.
     const BODY: u32 = 217;
+    /// `Theme.divider` where an `Inp` draws its own 1px border, and the same
+    /// border at the half opacity a disabled one is drawn with.
+    const BORDER: (u8, u8, u8) = (0x98, 0x97, 0x96);
+    const BORDER_OFF: (u8, u8, u8) = (0xc4, 0xc2, 0xc2);
 
     struct Picture {
         width: u32,
@@ -1055,7 +1059,14 @@ mod picture_tests {
                 if fill == SURFACE || fill == SURFACE_OFF {
                     start.get_or_insert(x);
                 } else if let Some(from) = start.take() {
-                    if x - from >= 6 {
+                    // The run has to end at the box's own border. A run that
+                    // ends at a glyph is the fill between two letters, and one
+                    // that ends at the window's edge or under a scrollbar is a
+                    // box the viewport cut in half — which has no gutter after
+                    // it to measure at all. Below the panel's minimum width the
+                    // first row holds nothing but cut-off boxes, so the
+                    // measurement moves down to one that is whole.
+                    if x - from >= 6 && matches!(picture.at(x, y), BORDER | BORDER_OFF) {
                         found = Some((y, from, x - 1));
                         break 'rows;
                     }
@@ -1081,6 +1092,49 @@ mod picture_tests {
             clear += 1;
         }
         Some(Field { left, right, gutter: clear - (border + 1) })
+    }
+
+    /// Below the width the panel says it supports, the form is cut off — and
+    /// that is not academic here, because the compositor hands it 468x492
+    /// whenever there are four windows on the workspace.
+    ///
+    /// It is cut off rather than scrolled to, and the reason is worth writing
+    /// down. A `Flickable`'s viewport is `max(its own width, the minimum width
+    /// of its layout children)`, which is how the Devices table's own scroller
+    /// knows to widen; but the eight sections are `if App.section == "…"`, and
+    /// a conditional child is a repeater, and `passes/flickable.rs` folds
+    /// layout info over `.filter(|x| x.borrow().repeated.is_none())` — with a
+    /// FIXME naming slint#407. So the body's minimum width is zero whatever is
+    /// in it, the viewport is never wider than the window, and there is
+    /// nothing to scroll. Giving it a number of its own is possible and is not
+    /// done, because the number is the widest row in any section in whichever
+    /// language is showing, and a stale constant would scroll a form that fits.
+    ///
+    /// What is asserted is the part that must hold anyway: cut off or not,
+    /// nothing is drawn on top of anything else.
+    #[test]
+    #[ignore = "renders the whole panel and fixes the platform for the thread"]
+    fn the_form_is_cut_off_below_its_minimum_and_still_overdraws_nothing() {
+        let panel = Panel::open("config", "video");
+        for (width, height) in [(700, 600), (468, 492)] {
+            let picture = panel.shot(width, height);
+            if let Ok(prefix) = std::env::var("PANEL_SHOT") {
+                picture.write_ppm(&format!("{prefix}-narrow-{width}x{height}.ppm"));
+            }
+            let field = field(&picture).expect("an input box in the section body");
+            assert!(
+                field.gutter > 0,
+                "at {width}x{height} a field is drawn past its own border at x={}",
+                field.right + 1
+            );
+            println!(
+                "{width}x{height}: the form is cut off, horizontal scrollbar {}, \
+                 and the first field ends at x={} with {}px of page after it",
+                if picture.has_a_horizontal_scrollbar() { "drawn" } else { "absent" },
+                field.right,
+                field.gutter
+            );
+        }
     }
 
     /// The Devices tab's table is eight columns wide and seven of them are a

@@ -778,7 +778,17 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   fits, with a scrollbar down the side for the height. Below 900 — the width the panel itself
   declares as the least it supports — there is no horizontal scrolling in the configuration
   body and the right of the form is simply cut off; at the 468 COSMIC hands it with four
-  windows on a workspace that is most of it. Section 05's two longest checkbox labels still
+  windows on a workspace that is most of it. The reason is worth knowing, because the
+  Devices table's own scroller works: a `Flickable`'s viewport is `max(its own width, the
+  minimum width of its layout children)`, but the eight sections are `if App.section == "…"`,
+  a conditional child is a repeater, and `passes/flickable.rs` folds that layout info over
+  `.filter(|x| x.borrow().repeated.is_none())` — with a FIXME naming slint#407. So the body's
+  minimum width is zero whatever is in it, and there is nothing for the viewport to widen to.
+  Giving it a number of its own is possible and is not done: the number is the widest row in
+  whichever language is showing, and a stale constant would put a scrollbar under a form that
+  fits. `the_form_is_cut_off_below_its_minimum_and_still_overdraws_nothing` photographs it at
+  700 and 468 and checks the part that has to hold anyway — cut off or not, nothing is drawn
+  on top of anything else. Section 05's two longest checkbox labels still
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
@@ -804,14 +814,21 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   is drawn at 948 and 900 and absent at 1200. This is the one entry here that was raised from
   arithmetic before it was ever seen: `docs/screenshots/devices.png` is the empty state, so no
   row had been photographed on this machine at all.
-- **Neither font the theme names is on this machine, so nothing in these pictures is the
-  design's type.** `ui/theme.slint` asks for `Archivo`, and for the monospace surfaces —
-  placeholders, serials, the command bar — it asks for `monospace`. `fc-list` has no Archivo
-  at all, and `monospace` is a fontconfig alias rather than a family name: Slint hands the
-  name to fontique to look up as a family, so that one does not resolve either. Both fall
-  back to Noto Sans. Measured rather than assumed: `c2.android.avc.encoder` in the encoder
-  field is 152px of ink, and that string sets to 153.0px in Noto Sans against 184.9 in Noto
-  Sans Mono. The overlap above was as small as it was for the same reason.
+- **The panel had no monospace in it anywhere, and the theme said it did.**
+  `ui/theme.slint` asks for `Archivo`, and for the monospace surfaces — placeholders,
+  serials, paths, the command bar, the adb line in the corner — it asked for `monospace`.
+  The mockup's rule there is a CSS fallback chain,
+  `ui-monospace, "SF Mono", Menlo, Consolas, monospace`, and the port transcribed its last
+  link. That link is the one that is not a family name: `monospace` is a fontconfig alias,
+  and Slint hands the string to fontique to look up as a family, so it matched nothing and
+  every one of those surfaces was drawn in the proportional fallback. Measured rather than
+  assumed: `c2.android.avc.encoder` in the encoder field was 152px of ink, and that string
+  sets to 153.0px in Noto Sans against 184.9 in Noto Sans Mono. Slint takes one family
+  rather than a chain, so the theme names the family fontconfig resolves the alias to here,
+  and the same string measures 183px now. `Archivo` is left as it stands: the mockup fetches
+  it from Google Fonts rather than shipping it, `fc-list` has none here, and Slint falls back
+  to the system sans — so the headings in these pictures are still not the design's face, and
+  shipping a font with the source is a larger decision than this one.
 - **The server version is pinned exactly.** The server refuses to start unless the client
   announces its own version, so `SCRCPY_SERVER_VERSION` in `src/main.rs` must match the
   `scrcpy-server` you run. It is currently `4.1`, and 3.x servers are not merely rejected —
@@ -1506,7 +1523,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 213 tests, 12 ignored
+cargo test --release        # 213 tests, 13 ignored
 cargo clippy --all-targets  # clean bar one lint the toolchain brought with it
 ```
 

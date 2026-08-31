@@ -44,10 +44,21 @@ export global Theme {
     out property <color> text-60: #201e1d99;
     out property <color> text-70: #201e1db3;
 
-    // Type. Archivo is the mockup's face; Slint falls back to the system sans
-    // when it is not installed.
+    // Type. Archivo is the mockup's face — which the mockup itself fetches from
+    // Google Fonts rather than shipping — and Slint falls back to the system
+    // sans where it is not installed, which is most places.
+    //
+    // The mockup's monospace is a CSS fallback chain, `ui-monospace, "SF Mono",
+    // Menlo, Consolas, monospace`, and this was transcribed as its last link.
+    // That is the one link that is not a family name: `monospace` is a
+    // fontconfig alias, and Slint hands the string to fontique to look up as a
+    // family, so it matched nothing and every serial, path and command line in
+    // the panel was drawn in the proportional fallback. Slint takes one family
+    // rather than a chain, so this names the family fontconfig resolves the
+    // alias to here; where that is missing the fallback is the one this had
+    // all along.
     out property <string> font: "Archivo";
-    out property <string> mono: "monospace";
+    out property <string> mono: "Noto Sans Mono";
     out property <int> heading-weight: 800;
 
     // Space scale
