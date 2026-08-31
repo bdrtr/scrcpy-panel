@@ -96,12 +96,15 @@ mod linux {
     /// Sized once and then written over, rather than extended a pixel at a
     /// time: 1.25 ms a frame at 1080x2400 against 1.42, a growth check for
     /// every three bytes being worth that much. A pixel that is not all there
-    /// is left out of both, which is what the `chunks_exact` on either side is
-    /// doing. `SWS=1 cargo run --release --example frame_cost` prints it.
+    /// is left out of both, which is what the remainder each `as_chunks`
+    /// returns and nobody reads is doing.
+    /// `SWS=1 cargo run --release --example frame_cost` prints it.
     pub(super) fn pack_rgba_into_rgb(rgba: &[u8], out: &mut Vec<u8>) {
         out.clear();
         out.resize(rgba.len() / 4 * 3, 0);
-        for (packed, pixel) in out.chunks_exact_mut(3).zip(rgba.chunks_exact(4)) {
+        let (packed, _) = out.as_chunks_mut::<3>();
+        let (pixels, _) = rgba.as_chunks::<4>();
+        for (packed, pixel) in packed.iter_mut().zip(pixels) {
             packed.copy_from_slice(&pixel[..3]);
         }
     }

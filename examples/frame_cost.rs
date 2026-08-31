@@ -228,9 +228,13 @@ fn build_the_ring(
         .map(|source| {
             let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width, height);
             let bytes = buffer.make_mut_bytes();
-            for (out, pixel) in bytes.chunks_exact_mut(4).zip(source.as_bytes().chunks_exact(3)) {
-                out[..3].copy_from_slice(pixel);
-                out[3] = 255;
+            // Stored a pixel at a time rather than three bytes and then a
+            // fourth: measured 6 to 12 per cent faster at 1080x2400, which is
+            // the one of these three loops where the shape made a difference.
+            let (outs, _) = bytes.as_chunks_mut::<4>();
+            let (pixels, _) = source.as_bytes().as_chunks::<3>();
+            for (out, pixel) in outs.iter_mut().zip(pixels) {
+                *out = [pixel[0], pixel[1], pixel[2], 255];
             }
             buffer
         })
@@ -484,7 +488,9 @@ fn swscale_both_ways(width: u32, height: u32, count: u32) {
         // The same loop `pack_rgba_into_rgb` runs.
         packed.clear();
         packed.resize(rgba.len() / 4 * 3, 0);
-        for (out, pixel) in packed.chunks_exact_mut(3).zip(rgba.chunks_exact(4)) {
+        let (outs, _) = packed.as_chunks_mut::<3>();
+        let (pixels, _) = rgba.as_chunks::<4>();
+        for (out, pixel) in outs.iter_mut().zip(pixels) {
             out.copy_from_slice(&pixel[..3]);
         }
     }

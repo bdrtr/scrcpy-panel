@@ -1075,6 +1075,23 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   audio decoder was carrying two buffers nothing wrote to, and the sample rate and channel
   count it reports were read by nobody — the session checks them against the 48 kHz stereo
   the player is built for now, and says so if a device ever disagrees.
+- **One warning arrived later with the compiler rather than with the code, and measuring it
+  was worth more than silencing it.** `clippy::chunks_exact_to_as_chunks` is new in 1.98 and
+  fired seven times over four pixel loops, on the reasoning that a fixed-size chunk
+  vectorises better than a slice whose length is only known at run time. A pixel loop is not
+  rewritten here on a lint's say-so, so the three distinct loops were pulled into a
+  standalone `rustc -O` bench at 1080x2400 and run against each other a frame at a time, four
+  hundred times, keeping the fastest of each — a mean would have been a mean of whatever else
+  was on the machine, and two other sessions were. All six versions agree byte for byte.
+  The lint is right in the general case and wrong here in one of three. Reversing a row and
+  packing RGBA into RGB come out the same either way — within ±5% run to run, which is the
+  noise floor on a busy machine, and the real `--v4l2-sink` figure in `frame_cost` is 1.25 to
+  1.27 ms a frame before and after. **Widening RGB into RGBA got 6 to 10 per cent *slower*
+  as the lint would write it** — `as_chunks`, then `copy_from_slice` into three bytes of the
+  array and a fourth written after. Storing the whole pixel at once instead —
+  `*out = [r, g, b, 255]` — is 6 to 12 per cent faster than either, repeating across three
+  runs. So two of the loops took the suggestion because it costs nothing and the third took a
+  shape the lint does not suggest, and `cargo clippy --all-targets` is silent again.
 - **A frame is not copied at all on its way to the screen now.** It used to be copied
   twice: once to take swscale's row padding off, and once more to get the packed bytes into
   a buffer Slint owns. `DecodedFrame` holds the Slint buffer itself, and swscale is pointed
@@ -1560,15 +1577,8 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 
 ```bash
 cargo test --release        # 214 tests, 14 ignored
-cargo clippy --all-targets  # clean bar one lint the toolchain brought with it
+cargo clippy --all-targets  # the tree is warning-free
 ```
-
-**That one lint arrived with the compiler rather than with the code.**
-`clippy::chunks_exact_to_as_chunks` is new in 1.98 and fires seven times over four lines —
-`src/ui/mod.rs:151`, `src/display/v4l2_sink.rs:104` and two in `examples/frame_cost.rs`. All
-four are pixel loops, and a pixel loop is not rewritten here without a measurement behind it,
-so they are written down rather than swapped for `as_chunks` on a lint's say-so. Nothing else
-warns; a patch that adds a warning still needs to say why.
 
 If a change touches the panel's form, add the flag to `SUPPORTED` in
 `src/panel/command/flags.rs` as well, or the panel will build a command line the binary

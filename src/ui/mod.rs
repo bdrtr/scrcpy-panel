@@ -148,7 +148,7 @@ fn mirror_rows(source: &[u8], width: usize, target: &mut [u8]) {
         let Some(line) = source.get(row * stride..(row + 1) * stride) else {
             break;
         };
-        for (x, pixel) in out.chunks_exact_mut(PIXEL).enumerate() {
+        for (x, pixel) in out.as_chunks_mut::<PIXEL>().0.iter_mut().enumerate() {
             let mirrored = (width - 1 - x) * PIXEL;
             pixel.copy_from_slice(&line[mirrored..mirrored + PIXEL]);
         }
