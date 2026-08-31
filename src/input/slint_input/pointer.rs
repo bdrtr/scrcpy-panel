@@ -197,10 +197,22 @@ impl SlintInput {
         }
         let (x, y) = self.to_frame(u, v);
         // Slint reports scroll in pixels; the server wants notches, as a float
-        // that the message encodes to fixed point. One notch a step, which is
-        // what a wheel click is.
-        let h = if dx.abs() > 0.5 { dx.signum() } else { 0.0 };
-        let vscroll = if dy.abs() > 0.5 { dy.signum() } else { 0.0 };
+        // that the message encodes to fixed point. Dividing by the size of a
+        // notch is what makes a wheel click one and a finger's slow drag the
+        // fraction of one it is — taking the sign instead made every event a
+        // full notch, so a touchpad frame of half a pixel scrolled as far as a
+        // detent and a hard flick of the wheel no further.
+        //
+        // The horizontal axis is negated because winit counts it the other way
+        // from the toolkit scrcpy was written against: winit's is "positive
+        // values indicate that the content being scrolled should move right",
+        // i.e. the user scrolled *left*, while SDL's is "positive to the right"
+        // and Android's AXIS_HSCROLL runs -1.0 left to 1.0 right. Its X11
+        // backend settles it — button 6, which X calls scroll-left, is
+        // `LineDelta(1.0, 0.0)`. The vertical axis needs no such thing: both
+        // toolkits make a scroll away from the user positive.
+        let h = -dx / PIXELS_PER_NOTCH;
+        let vscroll = dy / PIXELS_PER_NOTCH;
         if h == 0.0 && vscroll == 0.0 {
             return;
         }
@@ -240,6 +252,41 @@ mod tests {
 
         input.pointer_moved(0.6, 0.6, true, &controller);
         assert!(messages.try_recv().is_ok(), "a drag is not a hover");
+    }
+
+    /// A wheel detent is one notch and a finger's nudge is a fraction of one.
+    /// Taking the sign made both of them a whole notch, so the smallest
+    /// touchpad movement scrolled as far as a hard turn of the wheel — and
+    /// anything under half a pixel scrolled not at all and was not carried
+    /// over. Slint's own backend sets the scale: it turns winit's one line into
+    /// sixty pixels.
+    #[test]
+    fn a_detent_is_a_notch_and_a_nudge_is_a_fraction_of_one() {
+        let (controller, messages) = Controller::collecting();
+        let mut input = input();
+
+        input.pointer_scroll(0.5, 0.5, 0.0, 60.0, &controller);
+        let Ok(ControlMsg::InjectScroll { vscroll, hscroll, .. }) = messages.try_recv() else {
+            panic!("a scroll");
+        };
+        assert_eq!(vscroll, 1.0, "one detent is one notch");
+        assert_eq!(hscroll, 0.0);
+
+        input.pointer_scroll(0.5, 0.5, 0.0, 6.0, &controller);
+        let Ok(ControlMsg::InjectScroll { vscroll, .. }) = messages.try_recv() else {
+            panic!("a scroll");
+        };
+        assert!((vscroll - 0.1).abs() < 1e-6, "a tenth of a detent is a tenth of a notch");
+
+        // And the horizontal axis is the one winit counts backwards from the
+        // toolkit this was ported from: its positive x moves the content right,
+        // which is a scroll to the left, and Android's AXIS_HSCROLL runs -1.0
+        // left to 1.0 right.
+        input.pointer_scroll(0.5, 0.5, 60.0, 0.0, &controller);
+        let Ok(ControlMsg::InjectScroll { hscroll, .. }) = messages.try_recv() else {
+            panic!("a scroll");
+        };
+        assert_eq!(hscroll, -1.0, "winit's positive x is a scroll to the left");
     }
 
     /// One mechanism, three gestures: which axes the second finger is mirrored

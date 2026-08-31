@@ -7,16 +7,26 @@
 pub(super) const BUTTON_LEFT: i32 = 1;
 pub(super) const BUTTON_RIGHT: i32 = 2;
 pub(super) const BUTTON_MIDDLE: i32 = 3;
+pub(super) const BUTTON_BACK: i32 = 4;
+pub(super) const BUTTON_FORWARD: i32 = 5;
 
-/// Slint numbers its buttons 1, 2, 3; Android's `MotionEvent` uses a bit per
+/// Slint numbers its buttons 1..5; Android's `MotionEvent` uses a bit per
 /// button, and 2 there is the middle one rather than the right. Forwarding a
 /// secondary click used to send `1` whatever had been clicked, so a right-click
 /// arrived at the device as a left-click.
+///
+/// The two thumb buttons had no bit at all and so went out as a press with no
+/// button in it — `actionButton` 0 and `buttons` 0, a nameless tap. They are
+/// the two `--mouse-bind` slots the default spec binds to *Forward*, and
+/// `MotionEvent` names them: BUTTON_BACK is 0x8 and BUTTON_FORWARD is 0x10 in
+/// android-36's own stubs.
 pub(super) fn android_button(button: i32) -> u32 {
     match button {
-        BUTTON_LEFT => 1,   // BUTTON_PRIMARY
-        BUTTON_RIGHT => 2,  // BUTTON_SECONDARY
-        BUTTON_MIDDLE => 4, // BUTTON_TERTIARY
+        BUTTON_LEFT => 1,     // BUTTON_PRIMARY
+        BUTTON_RIGHT => 2,    // BUTTON_SECONDARY
+        BUTTON_MIDDLE => 4,   // BUTTON_TERTIARY
+        BUTTON_BACK => 8,     // BUTTON_BACK
+        BUTTON_FORWARD => 16, // BUTTON_FORWARD
         _ => 0,
     }
 }
@@ -137,6 +147,16 @@ mod tests {
             super::android_button(super::BUTTON_MIDDLE),
             4,
             "the middle button is the third bit, not the second"
+        );
+        assert_eq!(
+            super::android_button(super::BUTTON_BACK),
+            8,
+            "the 4th button is BUTTON_BACK, not nothing"
+        );
+        assert_eq!(
+            super::android_button(super::BUTTON_FORWARD),
+            16,
+            "the 5th button is BUTTON_FORWARD, not nothing"
         );
         assert_eq!(super::android_button(9), 0, "a button Android has no bit for");
     }

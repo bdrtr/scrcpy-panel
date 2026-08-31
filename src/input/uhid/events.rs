@@ -136,6 +136,19 @@ pub struct UhidHandler {
     inner: Rc<RefCell<Uhid>>,
 }
 
+/// The capture change the window still owes, taken off the books.
+///
+/// Split out of `apply_capture` because it is the half that can be tested: the
+/// other half needs a real winit window. `detach` is why it matters — it sets
+/// `captured` false and leaves the release owed, and nothing in `Uhid` can pay
+/// it, since it has no window of its own.
+pub(super) fn take_pending_capture(uhid: &mut Uhid) -> Option<bool> {
+    (uhid.captured != uhid.capture_applied).then(|| {
+        uhid.capture_applied = uhid.captured;
+        uhid.captured
+    })
+}
+
 impl UhidHandler {
     /// Ask the window for the pointer, or give it back.
     ///
@@ -144,12 +157,11 @@ impl UhidHandler {
     /// enough for relative motion, and a refusal is worth a line rather than a
     /// panic.
     fn apply_capture(uhid: &mut Uhid, window: &WinitWindow) {
-        if uhid.captured == uhid.capture_applied {
+        let Some(capture) = take_pending_capture(uhid) else {
             return;
-        }
-        uhid.capture_applied = uhid.captured;
+        };
 
-        if uhid.captured {
+        if capture {
             let grabbed = window
                 .set_cursor_grab(CursorGrabMode::Locked)
                 .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined));
@@ -174,6 +186,20 @@ impl CustomApplicationHandler for UhidHandler {
         event: &WindowEvent,
     ) -> EventResult {
         let mut uhid = self.inner.borrow_mut();
+        // Before the guard below, not after it. A capture that is owed a
+        // release is owed it whether or not there is still anywhere to send
+        // input: `detach` gives the mouse back by setting `captured` false,
+        // and if the only place that acts on it sits behind "is anything
+        // attached" — which `detach` has just made false — the release is
+        // never applied. The window keeps the pointer for the rest of its
+        // life: locked and the cursor hidden under Wayland, an active
+        // `grab_pointer` confined to the window under X11, and the LAlt toggle
+        // that would rescue it is behind the same guard. It bites the panel
+        // rather than the standalone mirror, because the panel goes on running
+        // after a session is stopped.
+        if let Some(window) = winit_window {
+            Self::apply_capture(&mut uhid, window);
+        }
         // Not "is there a controller": `--otg` has none — no adb, no server,
         // no socket — and a keyboard and a mouse over the cable are the whole
         // of what it is for. What matters is whether there is anything
@@ -204,6 +230,10 @@ impl CustomApplicationHandler for UhidHandler {
                 if let PhysicalKey::Code(code) = key.physical_key {
                     if uhid.mouse.is_some() && uhid.capture_toggled(code, pressed) {
                         uhid.captured = !uhid.captured;
+                        // Whatever was held goes with it; see `release_buttons`.
+                        if !uhid.captured {
+                            uhid.release_buttons();
+                        }
                         log::info!(
                             "Pointer {}",
                             if uhid.captured { "captured" } else { "given back" }
@@ -252,13 +282,9 @@ impl CustomApplicationHandler for UhidHandler {
                 }
                 uhid.release_everything();
             }
-            _ => {
-                // Somewhere to catch up on a capture asked for before there
-                // was a window to ask.
-                if let Some(window) = winit_window {
-                    Self::apply_capture(&mut uhid, window);
-                }
-            }
+            // A capture asked for before there was a window to ask has already
+            // been caught up on, above the guard.
+            _ => {}
         }
 
         // Passed on regardless: Slint keeps the modifier state the shortcut

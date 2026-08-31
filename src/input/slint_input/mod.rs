@@ -69,6 +69,15 @@ const MOD_ALT: u8 = 1 << 0;
 const MOD_CONTROL: u8 = 1 << 1;
 const MOD_META: u8 = 1 << 2;
 
+/// A scroll of this many logical pixels is one notch of a wheel.
+///
+/// Not a taste: it is the number Slint's own winit backend multiplies by. One
+/// wheel detent arrives from winit as `LineDelta(_, 1.0)` and `event_loop.rs`
+/// turns it into sixty pixels — `LineDelta(lx, ly) => (lx * 60., ly * 60.)` —
+/// while a touchpad's pixels come through as they are. Dividing by the same
+/// sixty gives the detent its notch back and leaves the finger its fraction.
+const PIXELS_PER_NOTCH: f32 = 60.0;
+
 /// Which modifier, or which combination of them, opens the shortcut layer.
 ///
 /// scrcpy's `--shortcut-mod` is a list rather than a key: alternatives

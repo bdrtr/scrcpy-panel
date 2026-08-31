@@ -174,15 +174,30 @@ impl Uhid {
         if let Some((report, road)) = keyboard {
             self.deliver(HID_ID_KEYBOARD, road, &report);
         }
-        if self.buttons != 0 {
-            self.buttons = 0;
-            let mouse = self
-                .mouse
-                .as_ref()
-                .map(|(mouse, road)| (mouse.click_report(0), *road));
-            if let Some((report, road)) = mouse {
-                self.deliver(HID_ID_MOUSE, road, &report);
-            }
+        self.release_buttons();
+    }
+
+    /// Let go of the mouse buttons alone, and tell the device so.
+    ///
+    /// Handing the pointer back is not the same event as the button coming up,
+    /// and the gap between them used to swallow the release. The press reached
+    /// the device while the capture was held; `pointing()` is false the instant
+    /// it is given away, so `on_button` takes the physical release, clears the
+    /// bit and sends nothing. The device is left holding the button with a
+    /// `buttons` byte that no longer remembers it — which puts it out of reach
+    /// of `release_everything` too, since that has nothing left to see. A drag
+    /// begun before LAlt never ends.
+    fn release_buttons(&mut self) {
+        if self.buttons == 0 {
+            return;
+        }
+        self.buttons = 0;
+        let mouse = self
+            .mouse
+            .as_ref()
+            .map(|(mouse, road)| (mouse.click_report(0), *road));
+        if let Some((report, road)) = mouse {
+            self.deliver(HID_ID_MOUSE, road, &report);
         }
     }
 
@@ -203,8 +218,17 @@ impl Uhid {
             MouseButton::Left => 1 << 0,
             MouseButton::Right => 1 << 1,
             MouseButton::Middle => 1 << 2,
-            // A HID boot mouse has three, and the report descriptor in
-            // hid_mouse.rs declares three.
+            // The descriptor is scrcpy's, copied byte for byte, and it
+            // declares *five*: Usage Minimum 1, Usage Maximum 5, Report Count
+            // 5 on the Button page. The comment that used to stand here said
+            // three and dropped the thumb buttons on the strength of it, so
+            // the one thing a mouse on a phone is most often wanted for —
+            // BUTTON_BACK, which is where Android sends BTN_SIDE — did nothing
+            // on the very road (`aoa`) chosen because it works where injection
+            // does not. `click_report` writes a whole byte, so the room was
+            // always there.
+            MouseButton::Back => 1 << 3,
+            MouseButton::Forward => 1 << 4,
             _ => return None,
         };
         if pressed {
@@ -224,6 +248,15 @@ impl Uhid {
     }
 
     /// Wheel notches, vertical then horizontal.
+    ///
+    /// The horizontal one is negated. This is a port of scrcpy's `hid_mouse.c`,
+    /// which feeds SDL's wheel x straight into the AC Pan byte, and the two
+    /// toolkits count that axis opposite ways: SDL's is "positive to the
+    /// right", winit's is "positive values indicate that the content being
+    /// scrolled should move right", which is the user scrolling *left*. winit's
+    /// X11 backend is the proof rather than the prose — X button 6 is
+    /// scroll-left and it arrives as `LineDelta(1.0, 0.0)`. The vertical axis
+    /// agrees between them and is left alone.
     fn on_scroll(&self, delta: MouseScrollDelta) -> Option<(i32, i32)> {
         if !self.pointing() {
             return None;
@@ -235,7 +268,7 @@ impl Uhid {
                 (position.y / PIXELS_PER_NOTCH).round() as i32,
             ),
         };
-        (h != 0 || v != 0).then_some((v, h))
+        (h != 0 || v != 0).then_some((v, -h))
     }
 
     /// Make a HID device at the far end, whichever way it is reached, and say
@@ -552,7 +585,68 @@ mod tests {
         assert_eq!(uhid.on_button(MouseButton::Right, true), Some(0b011));
         assert_eq!(uhid.on_button(MouseButton::Left, false), Some(0b010));
         assert_eq!(uhid.on_button(MouseButton::Right, false), Some(0b000));
-        assert_eq!(uhid.on_button(MouseButton::Back, true), None, "HID has three");
+    }
+
+    /// The descriptor declares five buttons — Usage Minimum 1, Usage Maximum 5,
+    /// Report Count 5 — and the thumb ones used to be dropped on a comment that
+    /// said it declared three. BTN_SIDE is the Back gesture on Android, which
+    /// is most of what a mouse on a phone is for.
+    #[test]
+    fn the_thumb_buttons_are_in_the_descriptor_and_now_in_the_report() {
+        let mut uhid = with_mouse();
+        assert_eq!(uhid.on_button(MouseButton::Back, true), Some(0b01000));
+        assert_eq!(uhid.on_button(MouseButton::Forward, true), Some(0b11000));
+        assert_eq!(uhid.on_button(MouseButton::Back, false), Some(0b10000));
+        assert_eq!(
+            uhid.on_button(MouseButton::Other(9), true),
+            None,
+            "a sixth button has no bit in a five-button descriptor"
+        );
+    }
+
+    /// Handing the pointer back has to end whatever was being dragged with it.
+    /// The device took the press while the capture was held; after it is given
+    /// away `on_button` sends nothing, so the physical release would clear the
+    /// mask and tell the device nothing at all.
+    #[test]
+    fn giving_the_pointer_back_ends_the_drag() {
+        let mut uhid = with_mouse();
+        assert_eq!(uhid.on_button(MouseButton::Left, true), Some(0b001));
+
+        uhid.captured = false;
+        uhid.release_buttons();
+        assert_eq!(uhid.buttons, 0, "the device has been told the button came up");
+
+        // And what the release used to run into: with the mask already cleared
+        // by an un-captured release, the focus-loss sweep has nothing to send.
+        let mut stuck = with_mouse();
+        stuck.on_button(MouseButton::Left, true);
+        stuck.captured = false;
+        stuck.on_button(MouseButton::Left, false);
+        assert_eq!(stuck.buttons, 0, "cleared without a report ever going out");
+    }
+
+    /// `detach` gives the pointer back by setting `captured`, and cannot apply
+    /// it — it has no window. The change has to stay owed until a window event
+    /// pays it, which is why the catch-up sits above the "is anything attached"
+    /// guard rather than below it.
+    #[test]
+    fn a_release_owed_by_detach_stays_owed_until_it_is_paid() {
+        use super::events::take_pending_capture;
+        let mut uhid = with_mouse();
+        assert_eq!(take_pending_capture(&mut uhid), Some(true), "the grab was asked for");
+        assert_eq!(take_pending_capture(&mut uhid), None, "and only once");
+
+        // What `detach` does to the pair, with the devices taken away.
+        uhid.keyboard = None;
+        uhid.mouse = None;
+        uhid.captured = false;
+        assert!(!uhid.has_somewhere_to_send(), "this is the shape after detach");
+        assert_eq!(
+            take_pending_capture(&mut uhid),
+            Some(false),
+            "the release is still owed, and nothing about it depends on the devices"
+        );
     }
 
     /// Motion carries the buttons with it, so a drag is a drag.
@@ -581,7 +675,11 @@ mod tests {
     fn a_touchpad_is_counted_in_notches_too() {
         let uhid = with_mouse();
         assert_eq!(uhid.on_scroll(MouseScrollDelta::LineDelta(0.0, 1.0)), Some((1, 0)));
-        assert_eq!(uhid.on_scroll(MouseScrollDelta::LineDelta(-1.0, 0.0)), Some((0, -1)));
+        assert_eq!(
+            uhid.on_scroll(MouseScrollDelta::LineDelta(-1.0, 0.0)),
+            Some((0, 1)),
+            "winit's negative x is a scroll to the right, which AC Pan counts positive"
+        );
         assert_eq!(
             uhid.on_scroll(MouseScrollDelta::PixelDelta((0.0, 100.0).into())),
             Some((2, 0)),
