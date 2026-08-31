@@ -38,6 +38,14 @@ export component SectionVideo inherits VerticalLayout {
                     changed => { Cfg.changed(); }
                 }
             }
+            // Three cells, because the mockup's .grp is
+            // `grid-template-columns: repeat(3, 1fr)` and this is the only Row
+            // in the panel that ever had four. The fourth was this button,
+            // which the mockup does not have at all — it names --list-encoders
+            // in the section's own description and leaves it there — and a
+            // button never shrinks below its own text, so at any width the
+            // panel is actually given it took the encoder field's space and
+            // left it 51px. It goes under the field it fills in.
             Fld {
                 label: @tr("Kodlayıcı · --video-encoder");
                 Inp {
@@ -46,9 +54,6 @@ export component SectionVideo inherits VerticalLayout {
                     mono: true;
                     edited => { Cfg.changed(); }
                 }
-            }
-            Fld {
-                label: @tr("Kodlayıcı listesi");
                 Btn {
                     text: @tr("Cihazdan seç · --list-encoders");
                     height: 36px;

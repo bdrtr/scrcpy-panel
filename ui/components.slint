@@ -159,6 +159,10 @@ export component Inp inherits Rectangle {
 export component Fld inherits VerticalLayout {
     in property <string> label;
     spacing: 5px;
+    // A label sits directly above the thing it names. Without this, a field
+    // in a grid row made tall by another cell spreads its two children over
+    // the whole of it, and the label drifts away from its own control.
+    alignment: start;
 
     if root.label != "": Text {
         text: root.label;

@@ -42,9 +42,6 @@ msgstr "Codec · --video-codec"
 msgid "Kodlayıcı · --video-encoder"
 msgstr "Encoder · --video-encoder"
 
-msgid "Kodlayıcı listesi"
-msgstr "Encoder list"
-
 msgid "Cihazdan seç · --list-encoders"
 msgstr "Pick from the device · --list-encoders"
 

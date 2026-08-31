@@ -752,14 +752,36 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   section is a stack of rows at their own height rather than something to spread over a
   window, so the configuration body is `alignment: start` now and the slack stays at the
   bottom where it belongs. Nothing moves at 1200x800, where the form fills the height already.
-- **What is still true is that the form does not fit, and only the overlap was ever a bug.**
-  At 948 the encoder field is 51px wide, which is about three characters of a codec name, and
-  section 05's two longest checkbox labels elide by a few pixels. At 900 — the width the panel
-  itself declares as the least it supports — the third column of every row is a ten-pixel
-  sliver, and the section body has grown a scrollbar. Nothing is drawn on top of anything
-  else at any of them, which is the part that was fixed. `min-width: 900px` is a promise the
-  content cannot keep, and in Slint it replaces the layout's own minimum rather than raising
-  it, so it is the only minimum the panel ever states.
+- **And the row that overlapped was a four-cell row in a three-column grid.** Bounding the
+  placeholder stopped anything being drawn over anything else; it did not give the encoder
+  field any room. At 948 that field was 51px wide, 49 of it fill — `Grp` is a `GridLayout`,
+  one short of space takes it from the cells that can give, and the two `Seg`s and the button
+  all have a minimum equal to their own text, so the whole shortfall landed on the one cell
+  with no minimum at all. A `GridLayout`'s columns are shared down the whole grid, so that
+  squeezed the third column of every row in the section rather than only the first: at 900 it
+  was a ten-pixel sliver in all three.
+  The mockup settles what to do about it. `.grp` is `grid-template-columns: repeat(3, 1fr)`,
+  and section 01's group there has nine fields in it and no button at all — `--list-encoders`
+  is named in the section's own description and nowhere else. The four-cell row is this
+  port's addition, so the button now sits under the field it fills in rather than beside it.
+  The encoder field went from 51px to 311 at 948, 295 at 900 and 395 at 1200, and
+  `the_encoder_field_has_room_and_keeps_its_placeholder_to_itself` measures it rather than
+  taking anyone's word: against the four-cell row it fails with *at 948x1028 the encoder
+  field is 49px wide, which is not enough of an encoder name to read*. The same test then
+  walks the other seven sections at 900 and checks that none of their fields is drawn past
+  its own border either.
+  A `Fld` packs to the top now as well. A label belongs directly above its control, and
+  without that a field sharing a grid row with a taller cell — which is exactly what the
+  encoder field's cell became — spreads its two children over the whole row and leaves the
+  label floating away from the thing it names.
+- **What is still true is that the panel is drawn for 1200 and given less.** At 900 the form
+  fits, with a scrollbar down the side for the height. Below 900 — the width the panel itself
+  declares as the least it supports — there is no horizontal scrolling in the configuration
+  body and the right of the form is simply cut off; at the 468 COSMIC hands it with four
+  windows on a workspace that is most of it. Section 05's two longest checkbox labels still
+  elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
+  Slint it replaces the layout's own minimum rather than raising it, so it is the only
+  minimum the panel ever states.
 - **The Devices table was wider than the window it is given, and sheared rather than
   scrolled.** Seven of its eight columns are a fixed number of pixels — 34 for the tick box,
   170 for the serial, then 90, 80, 100, 90 and 90 — and with the eighth column's floor of

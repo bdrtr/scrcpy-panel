@@ -901,6 +901,12 @@ mod picture_tests {
     /// `Theme.surface`, which is the fill of an `Inp` and of nothing else in a
     /// configuration row.
     const SURFACE: (u8, u8, u8) = (0xea, 0xe9, 0xe9);
+    /// The same fill in a section whose master switch is off. `Inp` halves its
+    /// opacity when it is disabled, so the box is Theme.surface at 50% over
+    /// the page — section 05's two fields are drawn this way until "Create a
+    /// new virtual display" is ticked, and looking only for the opaque colour
+    /// finds no box there at all.
+    const SURFACE_OFF: (u8, u8, u8) = (0xed, 0xed, 0xed);
     /// The colour a `ScrollView` draws its thumb in, which nothing else in
     /// this panel lays 400 pixels of down in a single row. Sampled from the
     /// middle of the bar rather than its end: the rounded ends are two pixels
@@ -996,6 +1002,10 @@ mod picture_tests {
             Self { adapter, window }
         }
 
+        fn section(&self, section: &str) {
+            self.window.global::<App>().set_section(section.into());
+        }
+
         /// Two devices in the list, so the table has rows to lay out. The
         /// panel's own device scan needs a phone; this needs the widths.
         fn devices(&self, rows: Vec<DeviceRow>) {
@@ -1022,9 +1032,16 @@ mod picture_tests {
         }
     }
 
-    /// The gutter between the encoder field and the cell beside it, in pixels
-    /// of untouched page, and where the field's own border was found.
-    fn gutter(picture: &Picture) -> (u32, u32) {
+    /// The first input box in a section body: where it starts and ends, and
+    /// how many pixels of untouched page lie past its border before whatever
+    /// comes next.
+    struct Field {
+        left: u32,
+        right: u32,
+        gutter: u32,
+    }
+
+    fn field(picture: &Picture) -> Option<Field> {
         // The first `Inp` of the topmost row that has one, found by its fill:
         // `Theme.surface` is an exact colour and nothing else in a row is
         // filled with it. The first rather than the widest, because at 900 the
@@ -1034,21 +1051,24 @@ mod picture_tests {
         'rows: for y in 0..picture.height {
             let mut start = None;
             for x in BODY..picture.width {
-                if picture.at(x, y) == SURFACE {
+                let fill = picture.at(x, y);
+                if fill == SURFACE || fill == SURFACE_OFF {
                     start.get_or_insert(x);
                 } else if let Some(from) = start.take() {
                     if x - from >= 6 {
-                        found = Some((y, x - 1));
+                        found = Some((y, from, x - 1));
                         break 'rows;
                     }
                 }
             }
         }
-        let (top, right) = found.expect("an input box in the section body");
+        let (top, left, right) = found?;
 
         // The row band that box occupies.
         let mut bottom = top;
-        while bottom + 1 < picture.height && picture.at(right, bottom + 1) == SURFACE {
+        while bottom + 1 < picture.height
+            && matches!(picture.at(right, bottom + 1), SURFACE | SURFACE_OFF)
+        {
             bottom += 1;
         }
         let band = top..bottom + 1;
@@ -1060,26 +1080,9 @@ mod picture_tests {
         while clear < picture.width && !picture.drawn(clear, band.clone()) {
             clear += 1;
         }
-        (clear - (border + 1), border)
+        Some(Field { left, right, gutter: clear - (border + 1) })
     }
 
-    /// The configuration form's first row is the only one in the panel with
-    /// four cells in it, and at a width the panel is given rather than asks
-    /// for, the encoder field used to be drawn across the gutter beside it.
-    ///
-    /// `Grp` is a `GridLayout`, and a `GridLayout` short of space takes it from
-    /// the cells that can give: both `Seg`s and the `Btn` have a minimum equal
-    /// to their own text, so the whole shortfall lands on the encoder field,
-    /// which has no minimum at all. At 948 that leaves it 51px wide holding a
-    /// 152px placeholder — and a `Rectangle` in Slint does not clip its
-    /// children, so `c2.android.avc.encoder` was painted 112px past its own
-    /// border, over the gutter and under the button drawn after it. Measured
-    /// on this picture before the fix: 71 inked pixels in the 16px gutter,
-    /// filling all sixteen columns of it.
-    ///
-    /// Both halves of the row are still worth having — the field is cramped at
-    /// 948 and this does not widen it — but nothing is drawn on top of
-    /// anything else.
     /// The Devices tab's table is eight columns wide and seven of them are a
     /// fixed number of pixels, so there is a width below which it cannot be
     /// laid out at all. This renders it with rows in it — the panel's own scan
@@ -1135,35 +1138,82 @@ mod picture_tests {
         }
     }
 
-    #[test]
-    #[ignore = "renders the whole panel and fixes the platform for the process"]
-    fn the_encoder_field_keeps_its_placeholder_to_itself() {
+    /// The configuration form's first row was the only one in the panel with
+    /// four cells in it, and the fourth was a button.
+    ///
+    /// `Grp` is a `GridLayout`, and one short of space takes it from the cells
+    /// that can give: both `Seg`s and the `Btn` have a minimum equal to their
+    /// own text, so the whole shortfall landed on the encoder field, which has
+    /// no minimum at all. At 948 that left it 51px wide holding a 152px
+    /// placeholder — and a `Rectangle` in Slint does not clip its children, so
+    /// `c2.android.avc.encoder` was painted 112px past its own border, over
+    /// the gutter and under the button drawn after it: 71 inked pixels filling
+    /// all sixteen columns of a gap that should have held nothing.
+    ///
+    /// Two things came out of that. The placeholder is bounded now, like every
+    /// other `Text` in the library, so nothing can be drawn outside its own
+    /// box in any section at any width. And the row is three cells, which is
+    /// what the mockup's `.grp` — `grid-template-columns: repeat(3, 1fr)` —
+    /// has always been: the button is this port's own addition and the mockup
+    /// does not have one at all, so it moved under the field it fills in
+    /// rather than beside it, and the field went from 51px to the width of a
+    /// column.
+        #[test]
+    #[ignore = "renders the whole panel and fixes the platform for the thread"]
+    fn the_encoder_field_has_room_and_keeps_its_placeholder_to_itself() {
         let panel = Panel::open("config", "video");
 
         // The size the compositor handed the window when the README's pictures
-        // were taken, the size the panel actually asks for, and the smallest
-        // it says it supports — where the form is taller than the window and
-        // the section body has to scroll rather than squeeze.
+        // were taken, the size the panel actually asks for, and the smallest it
+        // says it supports.
         for (width, height) in [(948, 1028), (1200, 800), (900, 600)] {
             let picture = panel.shot(width, height);
             if let Ok(prefix) = std::env::var("PANEL_SHOT") {
                 picture.write_ppm(&format!("{prefix}-{width}x{height}.ppm"));
             }
-            let (gutter, border) = gutter(&picture);
+            let field = field(&picture).expect("an input box in the video section");
+            let box_width = field.right - field.left + 1;
             assert!(
-                gutter > 0,
+                field.gutter > 0,
                 "at {width}x{height} the encoder field's placeholder is drawn outside it: \
-                 its border is at x={border} and x={} is inked as well",
-                border + 1
+                 its border is at x={} and x={} is inked as well",
+                field.right + 1,
+                field.right + 2
             );
             assert!(
-                gutter >= 12,
-                "at {width}x{height} only {gutter}px of page between the encoder field and \
-                 the cell beside it; the layout leaves 16"
+                box_width >= 200,
+                "at {width}x{height} the encoder field is {box_width}px wide, which is not \
+                 enough of an encoder name to read"
             );
             println!(
-                "{width}x{height}: the encoder field's border is at x={border}, \
-                 then {gutter}px of page before the next cell"
+                "{width}x{height}: the encoder field is {box_width}px, x={}..{}, \
+                 with {}px of page past its border",
+                field.left,
+                field.right,
+                field.gutter
+            );
+        }
+
+        // And the first field of every other section, at the narrowest width
+        // the panel claims to support: whatever the grid does to them, none of
+        // them is drawn over its neighbour. Tall rather than 600, so that every
+        // section's first box is on screen to be looked at — the width is what
+        // this is about.
+        for section in [
+            "audio", "record", "control", "vdisplay", "camera", "window", "network",
+        ] {
+            panel.section(section);
+            let picture = panel.shot(900, 1028);
+            if let Ok(prefix) = std::env::var("PANEL_SHOT") {
+                picture.write_ppm(&format!("{prefix}-{section}-900x1028.ppm"));
+            }
+            let field = field(&picture).unwrap_or_else(|| {
+                panic!("section {section} has no input box six pixels wide at 900x1028")
+            });
+            assert!(
+                field.gutter > 0,
+                "in section {section} at 900x1028 a field is drawn past its own border at x={}",
+                field.right + 1
             );
         }
     }
