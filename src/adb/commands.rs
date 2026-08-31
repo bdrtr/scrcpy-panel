@@ -40,16 +40,42 @@ pub fn forward_remove(serial: &str, local: &str) -> Result<()> {
     Ok(())
 }
 
-/// Get the list of connected devices (only "device" state)
-pub fn get_devices() -> Result<Vec<String>> {
-    let devices = protocol::list_devices()?;
-    let serials: Vec<String> = devices
-        .into_iter()
+/// The serials in state `device`, which are the only ones worth starting on.
+fn ready_devices(listed: &[(String, String)]) -> Vec<String> {
+    listed
+        .iter()
         .filter(|(_, state)| state == "device")
-        .map(|(serial, _)| serial)
-        .collect();
-    Ok(serials)
+        .map(|(serial, _)| serial.clone())
+        .collect()
 }
+
+/// What to say when nothing can be started, given everything adb listed.
+///
+/// The state was thrown away before anyone could use it, so "nothing in state
+/// `device`" and "nothing attached at all" were the same case and got the same
+/// sentence: *No device connected. Plug in your phone and enable USB
+/// debugging.* A phone showing the "Allow USB debugging?" dialog is connected
+/// and has USB debugging on, and that sentence sends its owner to a setting
+/// that is already set instead of to the dialog in front of them. The state is
+/// on the wire — `host:devices` answers `127.0.0.1:5602\toffline\n` — so it is
+/// what the message is built from.
+fn nothing_to_start_on(listed: &[(String, String)]) -> String {
+    if listed.is_empty() {
+        return "No device connected. Plug in your phone and enable USB debugging.".to_string();
+    }
+    let named: Vec<String> = listed
+        .iter()
+        .map(|(serial, state)| match state.as_str() {
+            "unauthorized" => {
+                format!("{serial} is unauthorized — accept the USB debugging prompt on it")
+            }
+            "offline" => format!("{serial} is offline"),
+            other => format!("{serial} is {other}"),
+        })
+        .collect();
+    format!("No device is ready to mirror: {}", named.join("; "))
+}
+
 /// Which connections `--select-usb` and `--select-tcpip` narrow the search to.
 ///
 /// A wireless device's serial is `host:port`; a USB one's never is, which is
@@ -83,7 +109,8 @@ pub fn select_device_filtered(serial: Option<&str>, filter: DeviceFilter) -> Res
     if let Some(s) = serial {
         return Ok(s.to_string());
     }
-    let all = get_devices()?;
+    let listed = protocol::list_devices()?;
+    let all = ready_devices(&listed);
     let devices: Vec<String> = all
         .iter()
         .filter(|serial| filter.accepts(serial))
@@ -91,9 +118,7 @@ pub fn select_device_filtered(serial: Option<&str>, filter: DeviceFilter) -> Res
         .collect();
 
     match devices.len() {
-        0 if all.is_empty() => {
-            bail!("No device connected. Plug in your phone and enable USB debugging.")
-        }
+        0 if all.is_empty() => bail!("{}", nothing_to_start_on(&listed)),
         0 => bail!(
             "No {} device among {:?}",
             match filter {
@@ -261,6 +286,40 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    /// A phone showing the "Allow USB debugging?" dialog is connected and has
+    /// USB debugging on, and used to be told neither was true. The state is on
+    /// the wire and was thrown away one function too early, so "nothing
+    /// attached" and "attached but not ready" were the same case.
+    #[test]
+    fn a_device_that_is_there_is_not_reported_as_missing() {
+        let pairs = |v: &[(&str, &str)]| -> Vec<(String, String)> {
+            v.iter().map(|(s, t)| (s.to_string(), t.to_string())).collect()
+        };
+
+        assert_eq!(
+            nothing_to_start_on(&[]),
+            "No device connected. Plug in your phone and enable USB debugging.",
+            "with nothing attached the old sentence is the right one"
+        );
+
+        let said = nothing_to_start_on(&pairs(&[("a1683d6b0013", "unauthorized")]));
+        assert!(said.contains("a1683d6b0013"), "it names the device: {said}");
+        assert!(said.contains("unauthorized"), "and its state: {said}");
+        assert!(
+            !said.contains("Plug in your phone"),
+            "and does not send them to a setting that is already on: {said}"
+        );
+
+        let said = nothing_to_start_on(&pairs(&[("192.168.1.44:5555", "offline")]));
+        assert!(said.contains("offline"), "{said}");
+
+        // And what is ready is still what is ready.
+        assert_eq!(
+            ready_devices(&pairs(&[("a", "device"), ("b", "offline"), ("c", "device")])),
+            vec!["a".to_string(), "c".to_string()]
+        );
+    }
 
     /// Letting a shell handle go has to end the shell.
     ///

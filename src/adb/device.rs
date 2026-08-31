@@ -109,6 +109,12 @@ pub fn list_detailed() -> Result<Vec<Device>> {
 /// Pulled out of the command so it can be tested: the panel's copy of this had
 /// no test at all, and the shape of adb's output is exactly the kind of thing
 /// that changes underneath you.
+/// The `key:value` columns `adb devices -l` writes after the state.
+///
+/// Named rather than sniffed for a colon, because the state adb composes for a
+/// device with no permissions has a URL in it and a URL has a colon.
+const ATTRIBUTES: [&str; 5] = ["usb:", "product:", "model:", "device:", "transport_id:"];
+
 pub fn parse_list(stdout: &str) -> Vec<Device> {
     let mut devices = Vec::new();
     // The first line is "List of devices attached".
@@ -117,13 +123,37 @@ pub fn parse_list(stdout: &str) -> Vec<Device> {
         if line.is_empty() {
             continue;
         }
-        let mut parts = line.split_whitespace();
-        let Some(serial) = parts.next() else { continue };
-        let state = parts.next().unwrap_or("unknown");
+        let Some(serial) = line.split_whitespace().next() else { continue };
+        let rest = line[serial.len()..].trim_start();
+
+        // Where the `-l` attributes begin; everything before them is the
+        // state, and the state is not one word. adb writes the line as
+        // `%-22s %s` with whatever `connection_state_name()` returns, and for
+        // a device the udev rules do not cover it composes that name:
+        // `no permissions; see [http://developer.android.com/tools/device.html]`.
+        // Taking the second whitespace-separated token read that as the state
+        // "no", so the DURUM column showed a device that cannot be mirrored
+        // and gave the word "no" as the reason, where adb's own CLI names the
+        // cause and links the fix.
+        let mut state_end = rest.len();
+        let mut cursor = 0usize;
+        for token in rest.split(' ') {
+            if ATTRIBUTES.iter().any(|key| token.starts_with(key)) {
+                state_end = cursor;
+                break;
+            }
+            cursor += token.len() + 1;
+        }
+        // Only as far as the first `;`: the rest of adb's sentence for
+        // `no permissions` is a URL, which is more than a table cell holds,
+        // and "no permissions" is the half that says what happened.
+        let state = rest[..state_end].trim();
+        let state = state.split(';').next().unwrap_or(state).trim();
+        let state = if state.is_empty() { "unknown" } else { state };
 
         let mut model = String::new();
         let mut conn = if serial.contains(':') { "tcp/ip" } else { "usb" }.to_string();
-        for token in parts {
+        for token in rest[state_end..].split_whitespace() {
             if let Some(value) = token.strip_prefix("model:") {
                 model = value.replace('_', " ");
             } else if token.starts_with("usb:") {
@@ -285,9 +315,26 @@ pub fn pair(address: &str, code: &str) -> Result<String> {
 /// that does not resolve "failed to resolve host" and exits 0. Trusting the
 /// status showed all three in the panel as an ordinary info line, with the
 /// device list refreshed underneath as though something had arrived.
+///
+/// This is a whitelist, and it is the second attempt. Listing the refusals let
+/// through every refusal adb has a different word for: `adb connect
+/// 1.2.3.4:abc` prints `bad port number 'abc' in '1.2.3.4:abc'` on stdout with
+/// status 0, and that matches none of "failed", "failure", "error:" or
+/// "adb: " — so the panel showed adb's refusal as an ordinary info line and
+/// refreshed the device list under it, which is verbatim the fault the
+/// paragraph above describes as fixed. An ordinary typo reaches it, because
+/// the panel only appends `:5555` when the address has no colon of its own.
+///
+/// What adb says when it worked is short and does not change, and all three
+/// are in the binary's own strings: `connected to %s`, `already connected to
+/// %s`, and `Successfully paired to `. Anything else is a refusal, whatever it
+/// happens to be called.
 pub fn did_not_connect(said: &str) -> bool {
     let said = said.to_lowercase();
-    said.starts_with("failed") || said.contains("failed to ") || refused(&said)
+    let said = said.trim();
+    !(said.starts_with("connected to ")
+        || said.starts_with("already connected to ")
+        || said.starts_with("successfully paired to "))
 }
 
 /// One key event, by name — KEYCODE_HOME and friends.
@@ -628,6 +675,10 @@ mod tests {
             "failed to connect to '10.255.255.1:5555': Connection timed out",
             "failed to resolve host: 'notahost': Name or service not known",
             "error: protocol fault (couldn't read status message): Success",
+            // The one that got through: adb writes it on stdout, exits 0, and
+            // it carries none of the words the old refusal list looked for.
+            "bad port number 'abc' in '192.168.1.44:abc'",
+            "bad port number '99999' in '192.168.1.44:99999'",
         ] {
             assert!(did_not_connect(said), "taken as a success: {said}");
         }
@@ -701,6 +752,31 @@ mod tests {
         assert_eq!(devices[0].name, "a1683d6b0013", "no model to show");
         assert_eq!(devices[1].state, "offline");
         assert_eq!(devices[1].conn, "usb", "no colon in the serial");
+    }
+
+    /// A state with spaces in it is still one state. adb composes this one —
+    /// `StringPrintf("%s; see [%s]", "no permissions", the URL)` — and the
+    /// listing is `%-22s %s`, so splitting the line on whitespace read the
+    /// state as "no" and told the user that and nothing else.
+    #[test]
+    fn a_state_made_of_several_words_is_not_read_as_its_first_one() {
+        let devices = parse_list(
+            "List of devices attached\n\
+             04a1c8f2               no permissions; see [http://developer.android.com/tools/device.html] usb:1-2 transport_id:3\n",
+        );
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].serial, "04a1c8f2");
+        assert_eq!(devices[0].state, "no permissions", "not \"no\"");
+        assert!(!devices[0].is_usable());
+        assert_eq!(devices[0].conn, "usb", "and the attributes are still read");
+
+        // The single-word states are unchanged, attributes and all.
+        let devices = parse_list(
+            "List of devices attached\n\
+             a1683d6b0013           device usb:5-1.2 model:2209116AG transport_id:1\n",
+        );
+        assert_eq!(devices[0].state, "device");
+        assert_eq!(devices[0].name, "2209116AG");
     }
 
     /// Nothing attached, and the header on its own.

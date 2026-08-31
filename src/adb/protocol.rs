@@ -118,6 +118,37 @@ impl AdbConnection {
         Ok(String::from_utf8_lossy(&data).to_string())
     }
 
+    /// The status the *device* sends after the daemon's own.
+    ///
+    /// `reverse:` requests are relayed to adbd rather than answered by the
+    /// daemon, so they carry two statuses: the daemon's, saying the service
+    /// opened, and the device's, saying whether it did the thing. Some old
+    /// daemons send only the first, and a connection that ends there is not a
+    /// failure — but a FAIL is the device refusing and has to be carried out to
+    /// the caller.
+    pub fn read_devices_answer(&mut self) -> Result<()> {
+        let mut peek = [0u8; 1];
+        match self.stream.peek(&mut peek) {
+            // Closed with nothing more to say, or said nothing before the
+            // connection's own read timeout: an answer that never comes is the
+            // old shape, and only an answer that comes and says FAIL is a
+            // refusal.
+            Ok(0) => Ok(()),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::UnexpectedEof
+                        | std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                Ok(())
+            }
+            Err(e) => Err(e).context("Failed to read ADB status"),
+            Ok(_) => self.read_status(),
+        }
+    }
+
     /// Switch to a device transport
     pub fn switch_transport(&mut self, serial: &str) -> Result<()> {
         let cmd = format!("host:transport:{}", serial);
@@ -169,9 +200,19 @@ pub fn reverse(serial: &str, remote: &str, local: &str) -> Result<()> {
     let cmd = format!("reverse:forward:{};{}", remote, local);
     conn.send_command(&cmd)?;
     conn.read_status()?;
-    // Some ADB versions send a second OKAY or a port number
-    // Try to read it but don't fail if not present
-    let _ = conn.read_status();
+    // And the device's own answer, which is the one that matters here. A
+    // `reverse:` request is not the daemon's to grant: the first status is the
+    // daemon saying it opened the service, and adbd on the phone answers after
+    // it. That second status used to be read into `let _` on the theory that
+    // it was an optional OKAY, so a device refusing to bind — `OKAY OKAY FAIL
+    // cannot bind listener: Address already in use` on the wire, exit 1 from
+    // adb's own CLI — was reported as a tunnel that had opened. The session
+    // then started the server with tunnel_forward=false, its connect to an
+    // abstract socket nobody was listening on failed, and the client waited
+    // out `accept_with_timeout` and blamed the socket. It also meant the
+    // documented fallback to a forward tunnel could never fire for the one
+    // refusal it exists for.
+    conn.read_devices_answer()?;
     Ok(())
 }
 
@@ -183,6 +224,7 @@ pub fn reverse_remove(serial: &str, remote: &str) -> Result<()> {
     let cmd = format!("reverse:killforward:{}", remote);
     conn.send_command(&cmd)?;
     conn.read_status()?;
+    conn.read_devices_answer()?;
     Ok(())
 }
 
