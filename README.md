@@ -803,6 +803,26 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **The command preview could not be pasted, and for two devices it was not what runs.**
+  The module header says the preview is canonical scrcpy flags "so it can be copied into a
+  terminal or pasted into an issue", and there is a button whose only job is putting it on
+  the clipboard — but the free-text fields reached it raw. A window title of `Ali'nin
+  telefonu`, an ordinary name in the language this interface is written in, produced a line
+  that leaves bash waiting for a quote that never comes; a recording folder with a space in
+  it produced two arguments where the user meant one. Every token is quoted the way a shell
+  needs it now, and only when it needs it, so an untouched form still reads
+  `scrcpy --max-size=1920`.
+  The multi-device line had a worse problem than punctuation: it handed every client in the
+  loop the same `--record` path. That is the collision the launch path was fixed for — "Every
+  client used to be handed the same --record path, so two ticked devices wrote the same file
+  and each ruined the other's" — so the bar showed a line that was not what Başlat runs, and
+  pasting it reproduced a fixed bug. The loop retags the file per device with the same
+  function the launch uses, which means `$s` has to survive the quoting, and it does.
+  And an explicit `0` in either orientation override was suppressed for equalling its own
+  default, while `display_rotation()` falls back to `--orientation` when the flag is absent.
+  Set the section 07 rotation to 90 and the section 01 control to 0 and the picture turned
+  while the control that governs it read 0. Both are compared against the flag they override
+  now, which is the only comparison that changes anything.
 - **`--audio-dup` was a silent no-op that muted the device it promises to keep playing on.**
   On the server the flag is read on the playback capture path and nowhere else, and the
   source used when none is given is a direct one — `output`, which is the capture that takes
@@ -1779,7 +1799,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 222 tests, 15 ignored
+cargo test --release        # 225 tests, 15 ignored
 cargo clippy --all-targets  # the tree is warning-free
 ```
 

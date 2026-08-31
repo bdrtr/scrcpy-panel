@@ -151,11 +151,15 @@ impl PanelConfig {
         opt("--crop", &self.crop, &d.crop);
         opt("--display-id", &self.display_id, &d.display_id);
         opt("--video-buffer", &self.video_buffer, &d.video_buffer);
-        opt(
-            "--display-orientation",
-            &self.display_orientation,
-            &d.display_orientation,
-        );
+        // Not through `opt`. "0" is a value the user can pick here and not
+        // only the value the form starts at, because --display-orientation
+        // overrides --orientation for the window and --record-orientation does
+        // the same for the file. `opt` suppresses anything equal to the
+        // default, so an explicit 0 vanished, `display_rotation()` fell back to
+        // --orientation, and the picture turned while the control that governs
+        // it read 0. Sent whenever it differs from the flag it overrides, which
+        // is the only case where saying it changes anything.
+        opt("--display-orientation", &self.display_orientation, &self.orientation);
 
         // 02 · Ses
         opt("--audio-codec", &self.audio_codec, &d.audio_codec);
@@ -171,11 +175,7 @@ impl PanelConfig {
 
         // 03 · Kayıt
         opt("--time-limit", &self.time_limit, &d.time_limit);
-        opt(
-            "--record-orientation",
-            &self.record_orientation,
-            &d.record_orientation,
-        );
+        opt("--record-orientation", &self.record_orientation, &self.orientation);
 
         // 04 · Kontrol ve giriş
         opt("--keyboard", &self.keyboard, &d.keyboard);
@@ -321,7 +321,7 @@ impl PanelConfig {
     /// user can paste into a terminal unchanged.
     pub fn to_command_line_for(&self, serials: &[String]) -> String {
         if serials.len() < 2 {
-            let flags = self.to_flags();
+            let flags: Vec<String> = self.to_flags().iter().map(|f| shell_quoted(f)).collect();
             return if flags.is_empty() {
                 "scrcpy".to_string()
             } else {
@@ -329,11 +329,21 @@ impl PanelConfig {
             };
         }
 
-        // --serial is per device here, so drop the one the form carries.
+        // --serial is per device here, so drop the one the form carries — and
+        // so is --record, for the same reason. Every client used to be handed
+        // the same path, so two ticked devices wrote the same file and each
+        // ruined the other's; session_run.rs retags it per serial when it
+        // launches, and this line has to say so or it is not the line that
+        // runs. Pasting it used to reproduce the bug that was fixed.
         let flags: Vec<String> = self
             .to_flags()
             .into_iter()
             .filter(|flag| !flag.starts_with("--serial="))
+            .map(|flag| match flag.strip_prefix("--record=") {
+                Some(path) => format!("--record={}", tag_file_name(path, "$s")),
+                None => flag,
+            })
+            .map(|flag| shell_quoted(&flag))
             .collect();
 
         let joined = if flags.is_empty() {
@@ -381,6 +391,41 @@ impl PanelConfig {
 /// whole string, so a recording folder with a dot in its name —
 /// `~/Videos/scrcpy 2.0/capture` — had the tag inserted into the *directory* and
 /// the client was pointed somewhere that does not exist.
+/// One token of the preview, written the way a shell would need it.
+///
+/// The module header says the preview is canonical scrcpy flags "so it can be
+/// copied into a terminal or pasted into an issue", and there is a button whose
+/// only job is putting it on the clipboard — but the free-text fields reached it
+/// raw. A window title of `Ali'nin telefonu`, which is an ordinary name in the
+/// language this interface is written in, produced a line that leaves bash
+/// waiting for a quote that never comes; a recording folder with a space in it
+/// produced two arguments where the user meant one.
+///
+/// `$s` is left as a variable, because the multi-device line is a shell loop
+/// and that is its loop variable. Everything on either side of it is quoted.
+fn shell_quoted(argument: &str) -> String {
+    let plain = |text: &str| {
+        !text.is_empty()
+            && text
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_=/.:,+@%".contains(&b))
+    };
+    if plain(argument) {
+        return argument.to_string();
+    }
+    argument
+        .split("$s")
+        .map(|piece| {
+            if piece.is_empty() {
+                String::new()
+            } else {
+                format!("'{}'", piece.replace('\'', r"'\''"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\"$s\"")
+}
+
 pub fn tag_file_name(path: &str, tag: &str) -> String {
     if path.is_empty() || tag.is_empty() {
         return path.to_string();
@@ -402,6 +447,79 @@ pub fn tag_file_name(path: &str, tag: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The preview says it can be pasted into a terminal, and there is a
+    /// button whose only job is putting it on the clipboard. Free text reached
+    /// it raw: a window title of `Ali'nin telefonu` — an ordinary name in the
+    /// language this interface is written in — left bash waiting for a quote
+    /// that never came, and a folder with a space in it became two arguments.
+    #[test]
+    fn a_value_a_shell_would_misread_is_quoted() {
+        let config = PanelConfig {
+            window_title: "Ali'nin telefonu".to_string(),
+            ..PanelConfig::default()
+        };
+        let line = config.to_command_line();
+        assert!(
+            line.contains(r"'--window-title=Ali'\''nin telefonu'"),
+            "{line}"
+        );
+
+        let config = PanelConfig {
+            record_enabled: true,
+            record_path: "/home/b/Videos/scrcpy 2.0/x.mp4".to_string(),
+            record_timestamp: false,
+            ..PanelConfig::default()
+        };
+        let line = config.to_command_line();
+        assert!(line.contains("'--record=/home/b/Videos/scrcpy 2.0/x.mp4'"), "{line}");
+
+        // Nothing that does not need it.
+        let plain = PanelConfig { max_size: "1920".to_string(), ..PanelConfig::default() };
+        assert_eq!(plain.to_command_line(), "scrcpy --max-size=1920");
+    }
+
+    /// Two ticked devices are two clients, and they used to be handed one
+    /// recording path between them: the same file, each ruining the other's.
+    /// The launch path was fixed and the line in the bar was not, so pasting
+    /// what the panel showed reproduced the bug — and `$s` has to survive the
+    /// quoting, because it is the loop's own variable.
+    #[test]
+    fn the_loop_gives_every_device_its_own_recording() {
+        let config = PanelConfig {
+            record_enabled: true,
+            record_path: "/home/b/Videos/oturum.mp4".to_string(),
+            record_timestamp: false,
+            ..PanelConfig::default()
+        };
+        let line = config.to_command_line_for(&["ABC123".to_string(), "DEF456".to_string()]);
+        assert!(line.contains("--record="), "{line}");
+        assert!(line.contains("oturum-"), "{line}");
+        assert!(line.contains("$s"), "{line}");
+        assert!(!line.contains("oturum.mp4"), "the shared path survived: {line}");
+    }
+
+    /// `0` is a value the user can choose here, not only the one the form
+    /// starts at: --display-orientation overrides --orientation for the window
+    /// and --record-orientation does the same for the file. Suppressing it
+    /// because it equalled its own default let the picture turn while the
+    /// control that governs it read 0.
+    #[test]
+    fn an_explicit_upright_survives_a_rotated_orientation() {
+        let config = PanelConfig {
+            orientation: "90".to_string(),
+            display_orientation: "0".to_string(),
+            record_orientation: "0".to_string(),
+            ..PanelConfig::default()
+        };
+        let flags = config.to_flags();
+        assert!(flags.contains(&"--display-orientation=0".to_string()), "{flags:?}");
+        assert!(flags.contains(&"--record-orientation=0".to_string()), "{flags:?}");
+
+        // And an untouched form still produces nothing.
+        let flags = PanelConfig::default().to_flags();
+        assert!(!flags.iter().any(|f| f.contains("orientation")), "{flags:?}");
+    }
+
     use super::*;
 
     /// Every value the panel's pickers offer has to survive the whole way to
