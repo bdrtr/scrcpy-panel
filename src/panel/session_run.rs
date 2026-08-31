@@ -437,7 +437,7 @@ pub(super) fn stop_session(panel: &Rc<Panel>) {
     panel.controller.borrow_mut().take();
     panel.camera_session.set(false);
     panel.started_at.set(None);
-    if let Some(session) = panel.embedded.borrow_mut().take() {
+    if let Some(mut session) = panel.embedded.borrow_mut().take() {
         session.shutdown();
         stopped = true;
     }

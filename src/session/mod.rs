@@ -67,10 +67,20 @@ pub struct AudioStream {
     pub playback: bool,
 }
 
-/// A running session. Dropping it is not enough — call [`Session::shutdown`],
-/// which unwinds the pipeline in the order that avoids a crash in FFmpeg's
-/// hardware teardown.
+/// A running session.
+///
+/// [`Session::shutdown`] unwinds the pipeline in the order that avoids a crash
+/// in FFmpeg's hardware teardown, and dropping one calls it. It did not use to,
+/// and the doc here said so — which left every `?` between `Session::start` and
+/// the call at the bottom of `run()` able to walk out on a live session. Two of
+/// them could: a window that would not open and an event loop that returned an
+/// error. The recorder is the part that costs something, because `shutdown` is
+/// the only thing that sets `stopped` on it, and the recorder thread waits on
+/// that flag with no timeout before it writes the file's trailer. So the flag
+/// is on the struct now instead of in a sentence.
 pub struct Session {
+    /// Whether `shutdown` has run, so that dropping after it is a no-op.
+    shut_down: bool,
     pub device_name: String,
     /// The serial adb chose, which is also what AOA looks the USB device up by.
     pub serial: String,
@@ -272,6 +282,7 @@ impl Session {
         }
 
         let mut session = Session {
+            shut_down: false,
             device_name: device_info.device_name,
             serial: serial.clone(),
             video: None,
@@ -405,7 +416,12 @@ impl Session {
     /// still runs tears that context down underneath it, and CUDA crashes on the
     /// way out. So: drop the frame receiver, shut the socket to release the
     /// demuxer, then join both.
-    pub fn shutdown(mut self) {
+    pub fn shutdown(&mut self) {
+        if self.shut_down {
+            return;
+        }
+        self.shut_down = true;
+
         // What the audio actually did, said where it can be heard: the pipeline
         // is a thread nobody joins, so anything it says after its own loop is
         // said into a process that is already leaving.
@@ -456,5 +472,15 @@ impl Session {
             let _ = crate::adb::settings::command().arg("kill-server").status();
         }
         // The tunnel closes as it drops.
+    }
+}
+
+impl Drop for Session {
+    /// The same unwinding, for the paths that never asked for it. Idempotent,
+    /// so the callers that do ask — and they should, because the order they put
+    /// it in relative to the window and the input devices is deliberate — do
+    /// not pay for it twice.
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }

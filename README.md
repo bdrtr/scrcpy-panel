@@ -803,6 +803,24 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **A session that was dropped rather than shut down left its recording without a trailer,
+  and two `?` in `run()` could do exactly that.** `Session`'s own doc said "Dropping it is not
+  enough — call `Session::shutdown`", and there was no `Drop` impl to make dropping enough.
+  Between `Session::start` and the `session.shutdown()` at the bottom of `run()` there are two
+  `?` exits — a window that will not open, and an event loop that returns an error — and both
+  walked out on a live session. The part that costs data is the recorder: `shutdown` is the
+  only thing that calls `Recorder::stop`, `stop` is the only thing that sets the flag the
+  recorder thread is waiting on, and that wait has no timeout, so the trailer is never
+  written and the thread never ends. `shutdown` never moved out of `self` — every line of it
+  is a `take()` — so it takes `&mut self` now, keeps a flag so a second call does nothing,
+  and `Drop` calls it. The explicit calls stay, because where they sit relative to the window
+  and the input devices is deliberate; they are simply no longer the only thing standing
+  between a recording and its trailer. Structural rather than tested: a `Session` cannot be
+  built without a device, so this is verified by reading and by the compiler, not by a test.
+  It also covers the audio-only case the hunt raised separately — a pipeline with no demuxer
+  thread to stop the recorder for it. Stopping the recorder from the audio side instead was
+  considered and not done: `stop_recorder` is unconditional, so an audio stream that ends
+  first would cut a video recording short.
 - **Three places the panel said one thing and did another.** The "Kopyala" button beside the
   command bar did not copy the command bar: it called `to_command_line()`, which is
   `to_command_line_for(&[])`, while everything that *fills* the bar passes the ticked devices.
