@@ -803,6 +803,23 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **A profiles.json that would not parse cost you every profile in it.** `load_profiles`
+  ended `.and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()`, so an
+  unreadable file was indistinguishable from a first run: the tab came up empty, nothing was
+  logged, and the next "Profil olarak kaydet" or "Sil" serialised that empty list and wrote
+  it over the file. Every profile gone, nothing moved aside, nothing to put back. The fix is
+  not new thinking — `load_stored_settings`, twenty lines below in the same file, has done
+  the right thing about exactly this for settings.json since it was written, and says so in
+  its own doc comment: "A file that will not parse is not the same as no file, and used to be
+  treated as one". The profiles path now does the same, and the loader is split so a test can
+  hand it a file instead of an environment: a file that parses is left alone, one that does
+  not is renamed to `profiles.json.broken` and is still there to read afterwards.
+- **And every setting could fail to save without a word.** `save_settings` was
+  `if let Ok(text) = … { let _ = std::fs::write(path, text); }` — both the serialisation
+  error and the write error dropped on the floor, while `save_profiles` eighty lines above
+  reports both. On a read-only or full configuration directory, or one owned by root after a
+  sudo run, every change in the Ayarlar tab appeared to take and none of them survived a
+  restart, with nothing in the Log tab and nothing on stderr.
 - **Three server options were wrong on the wire, and one of them by a factor of a
   thousand.** `--screen-off-timeout` takes seconds and the server reads milliseconds. scrcpy
   converts: `parse_screen_off_timeout` in its `cli.c` says "value in seconds, but must fit in
@@ -1643,7 +1660,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 219 tests, 15 ignored
+cargo test --release        # 220 tests, 15 ignored
 cargo clippy --all-targets  # the tree is warning-free
 ```
 

@@ -273,11 +273,50 @@ pub(super) fn under_home(path: &std::path::Path) -> String {
         _ => shown,
     }
 }
+/// The profiles, or none — and a file that will not parse is not none.
+///
+/// Both `.ok()`s used to throw the reason away, which made an unreadable
+/// profiles.json indistinguishable from a first run: the tab came up empty,
+/// nothing was said, and the next "Profil olarak kaydet" or "Sil" wrote that
+/// empty list over the file. Every profile the user had, gone, with nothing
+/// moved aside and nothing to put back. `load_stored_settings` twenty lines
+/// below has been doing the right thing about exactly this for settings.json;
+/// this does the same now.
 pub(super) fn load_profiles() -> Vec<Profile> {
-    profiles_path()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+    match profiles_path() {
+        Some(path) => read_profiles(&path),
+        None => Vec::new(),
+    }
+}
+
+/// The half of it that does not need a configuration directory, so that a test
+/// can hand it a file rather than an environment.
+fn read_profiles(path: &std::path::Path) -> Vec<Profile> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        // No file is the ordinary case on a first run and says nothing.
+        return Vec::new();
+    };
+    match serde_json::from_str(&text) {
+        Ok(profiles) => profiles,
+        Err(e) => {
+            let aside = path.with_extension("json.broken");
+            match std::fs::rename(&path, &aside) {
+                Ok(()) => log::warn!(
+                    "{} could not be read ({e}); it has been moved to {} and the panel \
+                     started with no profiles",
+                    path.display(),
+                    aside.display()
+                ),
+                Err(move_failed) => log::warn!(
+                    "{} could not be read ({e}) and could not be moved aside \
+                     ({move_failed}); the panel has no profiles and saving one will \
+                     overwrite the file",
+                    path.display()
+                ),
+            }
+            Vec::new()
+        }
+    }
 }
 pub(super) fn save_profiles(panel: &Rc<Panel>) {
     let Some(path) = profiles_path() else { return };
@@ -367,8 +406,17 @@ pub(super) fn save_settings(window: &PanelWindow) {
         check_version: s.get_check_version(),
         log_to_disk: s.get_log_to_disk(),
     };
-    if let Ok(text) = serde_json::to_string_pretty(&stored) {
-        let _ = std::fs::write(path, text);
+    // Said out loud, the way save_profiles says it. Both of these used to be
+    // dropped, so on a read-only or full configuration directory every change
+    // in the Ayarlar tab appeared to take and none of them survived a restart,
+    // with nothing in the Log tab and nothing on stderr to explain it.
+    match serde_json::to_string_pretty(&stored) {
+        Ok(text) => {
+            if let Err(e) = std::fs::write(&path, text) {
+                log::warn!("{} could not be written ({e})", path.display());
+            }
+        }
+        Err(e) => log::warn!("The settings could not be serialised ({e})"),
     }
 }
 pub(super) fn refresh_profile_cards(panel: &Rc<Panel>) {
@@ -388,6 +436,42 @@ pub(super) fn refresh_profile_cards(panel: &Rc<Panel>) {
 
 #[cfg(test)]
 mod tests {
+    /// A profiles.json that will not parse is not the same as no profiles, and
+    /// used to be treated as one: the tab came up empty, nothing was said, and
+    /// the next save wrote that emptiness over the file. It is moved aside now,
+    /// which is what leaves the user something to put back.
+    #[test]
+    fn a_profiles_file_that_will_not_parse_is_moved_aside_rather_than_overwritten() {
+        let dir = std::env::temp_dir().join(format!(
+            "scrcpy-panel-profiles-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        let path = dir.join("profiles.json");
+
+        // A first run: no file, no profiles, nothing moved.
+        assert!(super::read_profiles(&path).is_empty());
+        assert!(!path.with_extension("json.broken").exists());
+
+        // A file that parses comes back.
+        std::fs::write(&path, "[]").expect("writing the file");
+        assert!(super::read_profiles(&path).is_empty());
+        assert!(path.exists(), "a file that parses is left where it is");
+
+        // One that does not is renamed, and the original is still there to read.
+        std::fs::write(&path, "{ this is not a profile list").expect("writing the file");
+        assert!(super::read_profiles(&path).is_empty());
+        assert!(!path.exists(), "the unreadable file is not left in place");
+        let aside = path.with_extension("json.broken");
+        assert_eq!(
+            std::fs::read_to_string(&aside).expect("the file that was moved aside"),
+            "{ this is not a profile list"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Every path that rewrites the form has to say again which device is
     /// ticked.
     ///
