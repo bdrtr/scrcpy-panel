@@ -57,86 +57,132 @@ export component TabProfiles inherits VerticalLayout {
         // scrollbar; they wrap inside the card instead.
         viewport-width: self.visible-width;
 
-        // The ground the 2px gaps show through.
-        Rectangle {
-            background: Theme.divider;
+        VerticalLayout {
+            // The ground below is as tall as it is given unless something says
+            // otherwise, and what it is given is the whole viewport. In CSS a
+            // grid with nothing in it has no height at all, which is why the
+            // mockup can paint the same colour behind the same cards; here it
+            // painted the entire tab divider-grey on a fresh install, with no
+            // cards and nothing else to see. It takes its own height now.
+            alignment: start;
 
-            HorizontalLayout {
-                spacing: 2px;
-                alignment: start;
+            // ── Boş durum ────────────────────────────────────────────────
+            //
+            // The mockup has no empty state for this tab — it is drawn with six
+            // profiles in it and never without — but a fresh install has none, and
+            // the Devices tab already has a card for exactly this case.
+            if App.profiles.length == 0: Rectangle {
+                border-width: 2px;
+                border-color: Theme.divider;
 
-                for col in [0, 1, 2]: VerticalLayout {
-                    horizontal-stretch: 1;
+                VerticalLayout {
+                    padding: Theme.s8;
+                    spacing: Theme.s3;
                     alignment: start;
 
-                    for p[i] in App.profiles: slot := VerticalLayout {
-                        property <bool> mine: Math.mod(i, 3) == col;
-                        // Nothing of another column's card is laid out.
-                        vertical-stretch: 0;
+                    HorizontalLayout {
+                        alignment: start;
+                        Kicker { text: @tr("Boş durum").to-uppercase(); }
+                    }
 
-                        if slot.mine: VerticalLayout {
-                            Rectangle {
-                                background: Theme.bg;
+                    Text {
+                        text: @tr("Kayıtlı profil yok");
+                        font-family: Theme.font;
+                        font-size: 22px;
+                        font-weight: Theme.heading-weight;
+                        color: Theme.text;
+                    }
 
-                                VerticalLayout {
-                                    padding: Theme.s4;
-                                    spacing: Theme.s2;
+                    Text {
+                        text: @tr("Yapılandırma sekmesinde bir bayrak kümesi hazırlayın ve yukarıdaki düğmeyle buraya kaydedin. Bir profili uygulamak o kümenin tamamını geri yükler.");
+                        font-size: 13px;
+                        color: Theme.neutral-700;
+                        wrap: word-wrap;
+                    }
+                }
+            }
 
-                                    Kicker { text: p.kicker.to-uppercase(); }
+            // The ground the 2px gaps show through.
+            if App.profiles.length > 0: Rectangle {
+                background: Theme.divider;
 
-                                    Text {
-                                        text: p.name;
-                                        font-family: Theme.font;
-                                        font-size: 17px;
-                                        font-weight: Theme.heading-weight;
-                                        color: Theme.text;
-                                        overflow: elide;
-                                    }
+                HorizontalLayout {
+                    spacing: 2px;
+                    alignment: start;
 
-                                    Text {
-                                        text: p.desc;
-                                        font-size: 13px;
-                                        color: Theme.text-70;
-                                        wrap: word-wrap;
-                                    }
+                    for col in [0, 1, 2]: VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: start;
 
-                                    Mono {
-                                        text: p.flags;
-                                        font-size: 11px;
-                                        color: Theme.neutral-700;
-                                        wrap: word-wrap;
-                                    }
+                        for p[i] in App.profiles: slot := VerticalLayout {
+                            property <bool> mine: Math.mod(i, 3) == col;
+                            // Nothing of another column's card is laid out.
+                            vertical-stretch: 0;
 
-                                    // `border-top` on the action row in the mockup.
-                                    Rectangle {
-                                        height: 1px;
-                                        background: Theme.divider;
-                                    }
+                            if slot.mine: VerticalLayout {
+                                Rectangle {
+                                    background: Theme.bg;
 
-                                    HorizontalLayout {
+                                    VerticalLayout {
+                                        padding: Theme.s4;
                                         spacing: Theme.s2;
 
-                                        Btn {
-                                            text: @tr("Uygula");
-                                            kind: "ghost";
-                                            clicked => { App.apply-profile(i); }
+                                        Kicker { text: p.kicker.to-uppercase(); }
+
+                                        Text {
+                                            text: p.name;
+                                            font-family: Theme.font;
+                                            font-size: 17px;
+                                            font-weight: Theme.heading-weight;
+                                            color: Theme.text;
+                                            overflow: elide;
                                         }
-                                        Btn {
-                                            text: @tr("Düzenle");
-                                            kind: "ghost";
-                                            clicked => { App.edit-profile(i); }
+
+                                        Text {
+                                            text: p.desc;
+                                            font-size: 13px;
+                                            color: Theme.text-70;
+                                            wrap: word-wrap;
                                         }
-                                        Rectangle { horizontal-stretch: 1; }
-                                        Btn {
-                                            text: @tr("Sil");
-                                            kind: "ghost";
-                                            clicked => { App.delete-profile(i); }
+
+                                        Mono {
+                                            text: p.flags;
+                                            font-size: 11px;
+                                            color: Theme.neutral-700;
+                                            wrap: word-wrap;
+                                        }
+
+                                        // `border-top` on the action row in the mockup.
+                                        Rectangle {
+                                            height: 1px;
+                                            background: Theme.divider;
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: Theme.s2;
+
+                                            Btn {
+                                                text: @tr("Uygula");
+                                                kind: "ghost";
+                                                clicked => { App.apply-profile(i); }
+                                            }
+                                            Btn {
+                                                text: @tr("Düzenle");
+                                                kind: "ghost";
+                                                clicked => { App.edit-profile(i); }
+                                            }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            Btn {
+                                                text: @tr("Sil");
+                                                kind: "ghost";
+                                                clicked => { App.delete-profile(i); }
+                                            }
                                         }
                                     }
                                 }
+                                // The gap below the card, in the grid's colour.
+                                Rectangle { height: 2px; }
                             }
-                            // The gap below the card, in the grid's colour.
-                            Rectangle { height: 2px; }
                         }
                     }
                 }

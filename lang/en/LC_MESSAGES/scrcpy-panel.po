@@ -636,6 +636,12 @@ msgstr "A profile is a complete set of flags, not a difference. Applying one rew
 msgid "Geçerli ayarları kaydet"
 msgstr "Save the current settings"
 
+msgid "Kayıtlı profil yok"
+msgstr "No profile saved yet"
+
+msgid "Yapılandırma sekmesinde bir bayrak kümesi hazırlayın ve yukarıdaki düğmeyle buraya kaydedin. Bir profili uygulamak o kümenin tamamını geri yükler."
+msgstr "Build a set of flags in the Configuration tab and save it here with the button above. Applying a profile restores the whole of that set."
+
 msgid "Uygula"
 msgstr "Apply"
 

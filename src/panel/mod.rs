@@ -1006,6 +1006,10 @@ mod picture_tests {
             Self { adapter, window }
         }
 
+        fn tab(&self, tab: &str) {
+            self.window.global::<App>().set_tab(tab.into());
+        }
+
         fn section(&self, section: &str) {
             self.window.global::<App>().set_section(section.into());
         }
@@ -1016,6 +1020,12 @@ mod picture_tests {
             self.window
                 .global::<App>()
                 .set_devices(ModelRc::from(Rc::new(VecModel::from(rows))));
+        }
+
+        fn profiles(&self, cards: Vec<ProfileCard>) {
+            self.window
+                .global::<App>()
+                .set_profiles(ModelRc::from(Rc::new(VecModel::from(cards))));
         }
 
         fn shot(&self, width: u32, height: u32) -> Picture {
@@ -1092,6 +1102,61 @@ mod picture_tests {
             clear += 1;
         }
         Some(Field { left, right, gutter: clear - (border + 1) })
+    }
+
+    /// Every tab, at the width the compositor gives this panel, empty and
+    /// then with something in it.
+    ///
+    /// This asserts nothing. It is the sweep the other tests came out of —
+    /// three of the faults written up in the README were found by looking at
+    /// these pictures and nothing else — and it is here so the next one can be
+    /// done in a minute rather than rebuilt from scratch.
+    #[test]
+    #[ignore = "a sweep to look at, not an assertion"]
+    fn photograph_every_tab() {
+        let prefix = std::env::var("PANEL_SHOT").expect("PANEL_SHOT names the pictures");
+        let panel = Panel::open("devices", "video");
+        let tabs = ["devices", "session", "profiles", "log", "keys", "settings"];
+
+        // Empty first: no device, no profile, no session. That is a fresh
+        // install, and it is the state nobody had looked at.
+        for tab in tabs {
+            panel.tab(tab);
+            for (width, height) in [(948, 1028), (900, 600)] {
+                panel
+                    .shot(width, height)
+                    .write_ppm(&format!("{prefix}-tab-{tab}-{width}x{height}.ppm"));
+            }
+        }
+
+        // And then with rows in the models the panel's own scan would have
+        // filled from a device.
+        panel.devices(vec![DeviceRow {
+            name: "Redmi Note 11".into(),
+            serial: "a1683d6b0013".into(),
+            conn: "USB".into(),
+            android: "13".into(),
+            screen: "1080x2400".into(),
+            state: "device".into(),
+            selected: true,
+        }]);
+        panel.profiles(
+            ["Mirror", "Record"]
+                .iter()
+                .map(|name| ProfileCard {
+                    kicker: "profile".into(),
+                    name: (*name).into(),
+                    desc: "A saved set of flags.".into(),
+                    flags: "--video-codec=h264 --max-size=1920 --no-audio".into(),
+                })
+                .collect(),
+        );
+        for tab in ["devices", "profiles"] {
+            panel.tab(tab);
+            panel
+                .shot(948, 1028)
+                .write_ppm(&format!("{prefix}-tab-{tab}-filled-948x1028.ppm"));
+        }
     }
 
     /// Below the width the panel says it supports, the form is cut off — and

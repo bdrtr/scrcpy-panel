@@ -792,6 +792,19 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **A fresh install's Profiles tab was one grey rectangle.** The mockup lays the profile
+  cards on a three-column CSS grid whose own background is the divider colour, so the 2px
+  gaps between the cards are the ground showing through — a hairline grid for nothing but a
+  background and a gap. The port does the same with a `Rectangle` behind three columns, and
+  the two are not the same thing: a CSS grid with nothing in it has no height, and a
+  `Rectangle` in a `ScrollView` has all of it. With no profiles saved — which is every
+  install until somebody saves one — the whole tab was divider-grey, with no cards on it and
+  nothing else to see. The ground takes its own height now, and there is an empty-state card
+  saying what the tab is for, which the Devices tab has had all along and this one never did:
+  the mockup is drawn with six profiles in it and never without. A partial last row still
+  shows the ground in the cells no card reached, which is exactly what the CSS does too.
+  Found by photographing every tab at 948×1028 with nothing in the models — a fresh install
+  is the one state nobody had looked at.
 - **The Devices table was wider than the window it is given, and sheared rather than
   scrolled.** Seven of its eight columns are a fixed number of pixels — 34 for the tick box,
   170 for the serial, then 90, 80, 100, 90 and 90 — and with the eighth column's floor of
@@ -1523,7 +1536,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 213 tests, 13 ignored
+cargo test --release        # 213 tests, 14 ignored
 cargo clippy --all-targets  # clean bar one lint the toolchain brought with it
 ```
 
