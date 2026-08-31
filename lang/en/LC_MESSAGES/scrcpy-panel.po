@@ -920,6 +920,9 @@ msgstr "Not sent: the clipboard direction is \"to the computer only\"."
 msgid "Pano boş."
 msgstr "The clipboard is empty."
 
+msgid "Panoyu göndermek için gömülü bir oturum gerekiyor (Ayarlar > Ayna penceresi: Panele gömülü)."
+msgstr "Sending the clipboard needs an embedded session (Settings > Mirror window: Embedded in the panel)."
+
 msgid "Pano cihaza gönderildi."
 msgstr "The clipboard was sent to the device."
 

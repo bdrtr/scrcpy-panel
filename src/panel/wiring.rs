@@ -669,10 +669,10 @@ pub(super) fn wire_the_transfers(window: &PanelWindow, panel: &Rc<Panel>, opts: 
                         panel.warn(&tr!("Pano gönderilemedi: denetim kanalı yanıt vermiyor."));
                     }
                 }
-                None => panel.warn(
+                None => panel.warn(&tr!(
                     "Panoyu göndermek için gömülü bir oturum gerekiyor \
-                     (Ayarlar > Ayna penceresi: Panele gömülü).",
-                ),
+                     (Ayarlar > Ayna penceresi: Panele gömülü)."
+                )),
             }
         });
     }

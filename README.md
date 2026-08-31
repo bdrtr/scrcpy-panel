@@ -803,6 +803,18 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **An eleventh Turkish line, and both guards had the same blind spot.** A Rust literal can
+  be broken across lines with a trailing backslash, and the one warning in `wiring.rs` that
+  had never been wrapped in `tr!` was written exactly that way. Neither scanner could see it.
+  `translatable()`, which finds `tr!("…")` for the .po coverage test, kept the newline and
+  the twenty-one spaces of indentation, so it asked the .po for a msgid no .po will ever
+  have. `literals()`, the one written five commits ago to catch bare strings, read a line at
+  a time and so found an unterminated literal on the first line and a stray closing quote on
+  the second, and skipped both. Both now do what the compiler does with `\` at the end of a
+  line: join it to the next and eat that line's indentation. `literals()` also had to stop
+  reading line by line to do it, and once it reads whole files it has to skip character
+  literals as well — `'"'` appears four times in `src/panel/`, and taking that quote for the
+  start of a string swallows the file from there to the next one.
 - **A profiles.json that would not parse cost you every profile in it.** `load_profiles`
   ended `.and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()`, so an
   unreadable file was indistinguishable from a first run: the tab came up empty, nothing was

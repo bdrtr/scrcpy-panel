@@ -433,41 +433,95 @@ mod tests {
         out
     }
 
-    /// Every string literal on a line of code, comments left out.
+    /// Every string literal in a file, comments and character literals left out.
     ///
     /// Cruder than `translatable()` on purpose: this one is looking for
     /// literals nobody wrapped in anything, so there is no call to anchor to.
-    /// A `//` before the literal means the line is a comment, which is the
-    /// same rule the `tr!` scanner uses.
+    /// It has to read the whole file rather than a line at a time, which the
+    /// first version did — a Rust literal can be broken across lines with a
+    /// trailing backslash, and the one warning in `wiring.rs` that had never
+    /// been translated was written exactly that way, so the scanner walked
+    /// past it twice: an unterminated literal on the first line and a
+    /// stray closing quote on the second.
+    ///
+    /// Character literals are skipped because `'"'` appears four times in
+    /// `src/panel/`, and taking that quote for the start of a string swallows
+    /// the file from there to the next one. Raw strings are not handled and
+    /// there are none here.
     fn literals(source: &str) -> Vec<String> {
         let mut out = Vec::new();
-        for line in source.lines() {
-            let code = line.split("//").next().unwrap_or("");
-            let mut characters = code.chars();
-            while let Some(character) = characters.next() {
-                if character != '"' {
-                    continue;
-                }
-                let mut literal = String::new();
-                let mut closed = false;
-                while let Some(inner) = characters.next() {
-                    match inner {
-                        '"' => {
-                            closed = true;
+        let mut characters = source.chars().peekable();
+        while let Some(character) = characters.next() {
+            match character {
+                '/' if characters.peek() == Some(&'/') => {
+                    for c in characters.by_ref() {
+                        if c == '\n' {
                             break;
                         }
-                        '\\' => literal.push(match characters.next() {
-                            Some('n') => '\n',
-                            Some('t') => '\t',
-                            Some(other) => other,
-                            None => '\\',
-                        }),
-                        other => literal.push(other),
                     }
                 }
-                if closed {
-                    out.push(literal);
+                '/' if characters.peek() == Some(&'*') => {
+                    characters.next();
+                    let mut depth = 1;
+                    let mut previous = ' ';
+                    for c in characters.by_ref() {
+                        match (previous, c) {
+                            ('/', '*') => {
+                                depth += 1;
+                                previous = ' ';
+                            }
+                            ('*', '/') => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                                previous = ' ';
+                            }
+                            _ => previous = c,
+                        }
+                    }
                 }
+                // A character literal, or a lifetime. `'a` is the second and
+                // eating one character of it costs nothing.
+                '\'' => {
+                    if characters.peek() == Some(&'\\') {
+                        characters.next();
+                    }
+                    characters.next();
+                    if characters.peek() == Some(&'\'') {
+                        characters.next();
+                    }
+                }
+                '"' => {
+                    let mut literal = String::new();
+                    let mut closed = false;
+                    while let Some(c) = characters.next() {
+                        match c {
+                            '"' => {
+                                closed = true;
+                                break;
+                            }
+                            '\\' => match characters.next() {
+                                Some('n') => literal.push('\n'),
+                                Some('t') => literal.push('\t'),
+                                // A backslash at the end of a line joins it to
+                                // the next and eats that line's indentation.
+                                Some('\n') => {
+                                    while characters.peek().is_some_and(|c| c.is_whitespace()) {
+                                        characters.next();
+                                    }
+                                }
+                                Some(other) => literal.push(other),
+                                None => break,
+                            },
+                            other => literal.push(other),
+                        }
+                    }
+                    if closed {
+                        out.push(literal);
+                    }
+                }
+                _ => {}
             }
         }
         out
@@ -575,12 +629,24 @@ mod tests {
                 match bytes[cursor] {
                     b'\\' => {
                         let escaped = bytes.get(cursor + 1).copied().unwrap_or(b'\\');
+                        cursor += 2;
+                        // A backslash at the end of a line joins it to the next
+                        // and takes that line's indentation with it, so the
+                        // message is one line however it is written. Without
+                        // this the scanner asked the .po for a msgid with a
+                        // newline and twenty-one spaces in the middle of it,
+                        // which no .po will ever have.
+                        if escaped == b'\n' {
+                            while bytes.get(cursor).is_some_and(|c| c.is_ascii_whitespace()) {
+                                cursor += 1;
+                            }
+                            continue;
+                        }
                         message.push(match escaped {
                             b'n' => '\n',
                             b't' => '\t',
                             other => other as char,
                         });
-                        cursor += 2;
                     }
                     b'"' => break,
                     _ => {
