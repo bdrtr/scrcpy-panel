@@ -142,7 +142,7 @@ mod tests {
     fn every_message_the_code_builds_has_a_translation() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
-        collect_rust(&root, &mut files);
+        collect(&root, "rs", &mut files);
         assert!(files.len() > 20, "only {} source files found", files.len());
 
         let mut found = 0;
@@ -188,20 +188,12 @@ mod tests {
     /// sentence.
     #[test]
     fn nothing_in_the_panel_speaks_turkish_through_format() {
-        let mut turkish: std::collections::HashSet<String> = TRANSLATIONS
-            .iter()
-            .flat_map(|(msgid, _)| words(msgid))
-            .collect();
-        for (_, msgstr) in TRANSLATIONS.iter() {
-            for english in words(msgstr) {
-                turkish.remove(&english);
-            }
-        }
+        let turkish = turkish_words();
         assert!(turkish.len() > 100, "only {} Turkish words found", turkish.len());
 
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
-        collect_rust(&root, &mut files);
+        collect(&root, "rs", &mut files);
         let panel: Vec<_> = files.iter().filter(|f| f.to_string_lossy().contains("panel")).collect();
         assert!(panel.len() >= 5, "only {} panel files found", panel.len());
 
@@ -235,6 +227,128 @@ mod tests {
             caught.len(),
             caught.join("\n")
         );
+    }
+
+    /// And nothing in `ui/` does either.
+    ///
+    /// The two tests above read `src/`. The interface's own strings are not
+    /// there: they are `@tr("…")` in `ui/*.slint`, which slint-build bundles
+    /// out of the same .po, and no test had ever looked at that half. The
+    /// first one cannot simply be pointed at it — 49 of the 321 `@tr` strings
+    /// in `ui/` are deliberately absent from the .po, because a codec name, an
+    /// encoder id, an example path and the program's own name all want the
+    /// Turkish side, which is to say themselves — so "every `@tr` has an
+    /// entry" would fail forty-nine times over.
+    ///
+    /// The discriminator above separates them, and it found the one that
+    /// mattered. Section 08's label was shortened from "Sunucu günlük düzeyi ·
+    /// --verbosity" to "Günlük düzeyi · --verbosity" in 7dc4cb4, when
+    /// --verbosity stopped being the server's alone, and the .po kept the old
+    /// msgid; the English panel has read Turkish there ever since. Of the
+    /// fifty this flags that one and nothing else — `günlük` and `düzeyi` are
+    /// on the msgid side of the .po and never on the msgstr side, while
+    /// `c2.android.avc.encoder`, `mic-voice-recognition` and `1920x1080` have
+    /// no Turkish in them at all.
+    #[test]
+    fn nothing_in_the_interface_speaks_turkish_without_a_translation() {
+        let turkish = turkish_words();
+        assert!(turkish.len() > 100, "only {} Turkish words found", turkish.len());
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
+        let mut files = Vec::new();
+        collect(&root, "slint", &mut files);
+        assert!(files.len() > 10, "only {} .slint files found", files.len());
+
+        let mut found = 0;
+        let mut caught = Vec::new();
+        for file in &files {
+            let source = std::fs::read_to_string(file).expect("a .slint file");
+            for literal in translated_in_slint(&source) {
+                found += 1;
+                // With an entry it is translated, whatever language it is in.
+                if TRANSLATIONS
+                    .binary_search_by_key(&literal.as_str(), |(msgid, _)| *msgid)
+                    .is_ok()
+                {
+                    continue;
+                }
+                if literal.starts_with("--") || literal.contains('=') || literal.contains('/') {
+                    continue;
+                }
+                let hits: Vec<_> = words(&literal)
+                    .into_iter()
+                    .filter(|w| turkish.contains(w))
+                    .collect();
+                if !hits.is_empty() {
+                    let name = file.file_name().unwrap_or_default().to_string_lossy();
+                    caught.push(format!("  {name}: {literal:?} — {hits:?}"));
+                }
+            }
+        }
+        assert!(found > 200, "the scan found only {found} @tr strings in ui/");
+        caught.sort();
+        assert!(
+            caught.is_empty(),
+            "{} line(s) the English interface shows in Turkish:\n{}",
+            caught.len(),
+            caught.join("\n")
+        );
+    }
+
+    /// The words the .po uses on the Turkish side and never on the English one.
+    fn turkish_words() -> std::collections::HashSet<String> {
+        let mut turkish: std::collections::HashSet<String> = TRANSLATIONS
+            .iter()
+            .flat_map(|(msgid, _)| words(msgid))
+            .collect();
+        for (_, msgstr) in TRANSLATIONS.iter() {
+            for english in words(msgstr) {
+                turkish.remove(&english);
+            }
+        }
+        turkish
+    }
+
+    /// The string literal of every `@tr("…")` in one .slint file, as the
+    /// table will hold it.
+    ///
+    /// A `\"` inside one is part of the string — session.slint quotes a
+    /// button's name inside a sentence — so the closing quote is the first one
+    /// that is not escaped, and the escapes are then resolved. Both halves
+    /// matter: keeping the backslash finds the closing quote in the wrong
+    /// place, and leaving it in means the lookup misses. build.rs writes what
+    /// is between the .po's quotes straight into a Rust literal, so it is the
+    /// compiler that unescapes the table — that one sentence came back as
+    /// untranslated Turkish until this did the same.
+    fn translated_in_slint(source: &str) -> Vec<String> {
+        // Spelled in two halves so that this scanner does not find itself.
+        let call = concat!("@", "tr(");
+        let mut out = Vec::new();
+        let mut at = 0;
+        while let Some(offset) = source[at..].find(call) {
+            let after = at + offset + call.len();
+            at = after;
+            let rest = source[after..].trim_start();
+            let Some(text) = rest.strip_prefix('"') else {
+                continue;
+            };
+            let mut literal = String::new();
+            let mut characters = text.chars();
+            while let Some(character) = characters.next() {
+                match character {
+                    '"' => break,
+                    '\\' => literal.push(match characters.next() {
+                        Some('n') => '\n',
+                        Some('t') => '\t',
+                        Some(other) => other,
+                        None => '\\',
+                    }),
+                    other => literal.push(other),
+                }
+            }
+            out.push(literal);
+        }
+        out
     }
 
     /// The words in a string, lowercased, four letters or more.
@@ -287,15 +401,15 @@ mod tests {
         out
     }
 
-    fn collect_rust(directory: &std::path::Path, into: &mut Vec<std::path::PathBuf>) {
+    fn collect(directory: &std::path::Path, extension: &str, into: &mut Vec<std::path::PathBuf>) {
         let Ok(entries) = std::fs::read_dir(directory) else {
             return;
         };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                collect_rust(&path, into);
-            } else if path.extension().is_some_and(|e| e == "rs") {
+                collect(&path, extension, into);
+            } else if path.extension().is_some_and(|e| e == extension) {
                 into.push(path);
             }
         }

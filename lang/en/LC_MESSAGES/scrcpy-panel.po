@@ -396,8 +396,8 @@ msgstr "Tunnel host · --tunnel-host"
 msgid "Tünel portu · --tunnel-port"
 msgstr "Tunnel port · --tunnel-port"
 
-msgid "Sunucu günlük düzeyi · --verbosity"
-msgstr "Server log level · --verbosity"
+msgid "Günlük düzeyi · --verbosity"
+msgstr "Log level · --verbosity"
 
 msgid "Kablosuz bağlan · --tcpip"
 msgstr "Connect wirelessly · --tcpip"
