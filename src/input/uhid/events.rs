@@ -24,6 +24,7 @@ impl UhidInput {
                 aoa: None,
                 controller: None,
                 modifiers: 0,
+                device_modifiers: 0,
                 buttons: 0,
                 shortcut_mod: ShortcutMod::default(),
                 captured: false,

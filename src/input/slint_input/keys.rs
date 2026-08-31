@@ -195,6 +195,48 @@ pub(super) fn printable_keycode(c: char) -> Option<u32> {
     }
 }
 
+/// Every printable key `--raw-key-events` can name, which is a wider set.
+///
+/// `printable_keycode` is deliberately narrow, and rightly so for the mixed
+/// default: a digit or a bracket goes as text there, which is what lets an
+/// accented or a composed character through at all. Raw mode has no such
+/// second road — scrcpy's own help says it "inject[s] key events for all input
+/// keys, and ignore[s] text events" — so a character with no keycode here is a
+/// keystroke that goes nowhere, with no keycode, no text and no log line. That
+/// was every digit and every mark of punctuation, in the mode scrcpy documents
+/// for games.
+///
+/// Only the unshifted characters are here. A `!` is Shift+1 on one layout and
+/// something else on another, and Slint reports the character rather than the
+/// key, so guessing at the key behind it is the sort of thing raw mode exists
+/// to avoid.
+pub(super) fn raw_keycode(c: char) -> Option<u32> {
+    if let Some(code) = printable_keycode(c) {
+        return Some(code);
+    }
+    if c.is_ascii_digit() {
+        return Some(akeycode::K0 + (c as u32 - '0' as u32));
+    }
+    Some(match c {
+        ',' => akeycode::COMMA,
+        '.' => akeycode::PERIOD,
+        '-' => akeycode::MINUS,
+        '=' => akeycode::EQUALS,
+        '[' => akeycode::LEFT_BRACKET,
+        ']' => akeycode::RIGHT_BRACKET,
+        '\\' => akeycode::BACKSLASH,
+        ';' => akeycode::SEMICOLON,
+        '\'' => akeycode::APOSTROPHE,
+        '`' => akeycode::GRAVE,
+        '/' => akeycode::SLASH,
+        '@' => akeycode::AT,
+        '+' => akeycode::PLUS,
+        '*' => akeycode::STAR,
+        '#' => akeycode::POUND,
+        _ => return None,
+    })
+}
+
 /// Slint reports modifiers without a side, so only the side-agnostic Android
 /// metastate bits can be set.
 pub(super) fn metastate(alt: bool, control: bool, shift: bool, meta: bool) -> u32 {

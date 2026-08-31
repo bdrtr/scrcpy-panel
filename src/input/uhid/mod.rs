@@ -88,6 +88,17 @@ struct Uhid {
     /// The keyboard report's first byte, kept across events because a HID
     /// report carries the whole state rather than a change to it.
     modifiers: u8,
+    /// The same byte as the *device* has been told it, which is not always the
+    /// same thing.
+    ///
+    /// A HID report's byte 0 says which modifiers are down whether or not any
+    /// usage id is in the key array, so it can introduce a keystroke on its
+    /// own. The shortcut layer withholds the press of MOD and of everything
+    /// pressed under it, but a release still has to get out — and it used to
+    /// carry `modifiers`, MOD's bit and all. So the device saw a clean Left-Alt
+    /// tap around every MOD+f: down on the f-release, up on the Alt-release.
+    /// A modifier's bit goes in here only when its own press was delivered.
+    device_modifiers: u8,
     /// The mouse buttons the device believes are down, for the same reason.
     buttons: u8,
     /// While the shortcut modifier is held the keys are the window's, so they
@@ -119,6 +130,7 @@ impl Uhid {
                 self.modifiers |= bit;
             } else {
                 self.modifiers &= !bit;
+                self.device_modifiers &= !bit;
             }
         }
 
@@ -131,7 +143,16 @@ impl Uhid {
         if self.keyboard.is_none() || (pressed && self.shortcut_held()) {
             return None;
         }
-        hid_usage(code).map(|usage| (usage, self.modifiers))
+        // The press got out, so the device may be told about it. Anything
+        // withheld above never reaches this line, which is what keeps MOD's
+        // own bit out of `device_modifiers` and so out of every report until
+        // it is pressed again outside the shortcut layer.
+        if pressed {
+            if let Some(bit) = modifier_bit(code) {
+                self.device_modifiers |= bit;
+            }
+        }
+        hid_usage(code).map(|usage| (usage, self.device_modifiers))
     }
 
     /// Whether this key press or release asks for the pointer back.
@@ -167,6 +188,7 @@ impl Uhid {
     /// says why.
     fn release_everything(&mut self) {
         self.modifiers = 0;
+        self.device_modifiers = 0;
         let keyboard = self
             .keyboard
             .as_mut()
@@ -370,6 +392,7 @@ mod tests {
             aoa: None,
             controller: None,
             modifiers: 0,
+            device_modifiers: 0,
             buttons: 0,
             shortcut_mod: ShortcutMod::parse(shortcut_mod),
             captured: false,
@@ -506,6 +529,39 @@ mod tests {
         assert_eq!(uhid.on_key(key(KeyCode::KeyF), true), None);
         uhid.on_key(key(KeyCode::AltLeft), false);
         assert_eq!(uhid.on_key(key(KeyCode::KeyF), true), Some((0x09, 0)));
+    }
+
+    /// And it keeps MOD itself out of the byte. A HID report's byte 0 says
+    /// which modifiers are down whether or not any key is in the array, so the
+    /// release that is deliberately let through used to carry the Alt the press
+    /// had been withheld to hide: the device saw a clean Left-Alt tap around
+    /// every MOD+f.
+    #[test]
+    fn the_shortcut_modifier_does_not_reach_the_device_in_the_byte_either() {
+        let mut uhid = uhid("lalt");
+        uhid.on_key(key(KeyCode::AltLeft), true);
+        assert_eq!(
+            uhid.on_key(key(KeyCode::KeyF), false),
+            Some((0x09, 0x00)),
+            "the f-release goes out, and not with Alt riding on it"
+        );
+        assert_eq!(
+            uhid.on_key(key(KeyCode::AltLeft), false),
+            Some((0xE2, 0x00)),
+            "and the Alt-release is the byte it always was"
+        );
+
+        // A key the device really is holding keeps the modifiers it was
+        // pressed with. Shift was delivered, so it stays.
+        let mut shifted = super::tests::uhid("lalt");
+        shifted.on_key(key(KeyCode::ShiftLeft), true);
+        shifted.on_key(key(KeyCode::KeyA), true);
+        shifted.on_key(key(KeyCode::AltLeft), true);
+        assert_eq!(
+            shifted.on_key(key(KeyCode::KeyA), false),
+            Some((0x04, 0x02)),
+            "Shift is the device's, Alt is the window's"
+        );
     }
 
     /// --shortcut-mod says which one that is; the others are ordinary keys the

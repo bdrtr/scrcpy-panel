@@ -54,10 +54,23 @@ impl SlintInput {
             return WindowAction::None;
         }
 
+        // The window's own repeat flag, because the backend's is always false;
+        // see `held`. A press for a character already down is the keyboard
+        // repeating it.
+        let repeat = repeat || !self.held.insert(c);
+        if repeat {
+            self.repeat_count = self.repeat_count.saturating_add(1);
+        } else {
+            self.repeat_count = 0;
+        }
+        let repeat_count = self.repeat_count;
+
         // F11 is fullscreen with no modifier at all, as it is in scrcpy — and
         // it is a key no device has a use for, so nothing is lost by keeping it.
+        // Its repeats are dropped for the same reason the shortcuts' are: a
+        // held key is one request, not one every 30 ms.
         if c == key::F11 {
-            return WindowAction::ToggleFullscreen;
+            return if repeat { WindowAction::None } else { WindowAction::ToggleFullscreen };
         }
 
         let shortcut_active = self.shortcut_mod.active(alt, control, meta);
@@ -107,52 +120,45 @@ impl SlintInput {
 
         let metastate = metastate(alt, control, shift, meta);
 
-        if let Some(code) = special_keycode(c) {
+        if let Some(code) = self.keycode_for(c) {
             controller.push_msg(ControlMsg::InjectKeycode {
                 action: AKEY_ACTION_DOWN,
                 keycode: code,
-                repeat: if repeat { 1 } else { 0 },
+                repeat: repeat_count,
                 metastate,
             });
-            return WindowAction::None;
-        }
-
-        match self.key_inject_mode.as_str() {
-            // Everything as keycodes, nothing as text.
-            "raw" => {
-                if let Some(code) = printable_keycode(c) {
-                    controller.push_msg(ControlMsg::InjectKeycode {
-                        action: AKEY_ACTION_DOWN,
-                        keycode: code,
-                        repeat: if repeat { 1 } else { 0 },
-                        metastate,
-                    });
-                }
-            }
-            // Everything as text.
-            "text" => {
-                if !repeat {
-                    controller.push_msg(ControlMsg::InjectText { text: text.to_string() });
-                }
-            }
-            // Default: letters and space travel as keycodes so that key repeat
-            // and modifiers behave, everything else goes as text so that
-            // accented and composed characters survive.
-            _ => {
-                if let Some(code) = printable_keycode(c) {
-                    controller.push_msg(ControlMsg::InjectKeycode {
-                        action: AKEY_ACTION_DOWN,
-                        keycode: code,
-                        repeat: if repeat { 1 } else { 0 },
-                        metastate,
-                    });
-                } else if !repeat {
-                    controller.push_msg(ControlMsg::InjectText { text: text.to_string() });
-                }
-            }
+            // So the release can be sent for this and only this; see
+            // `sent_down`.
+            self.sent_down.insert(code);
+        } else if self.key_inject_mode != "raw" && !repeat {
+            // Raw mode has no text road by definition. In the other two, a
+            // character with no keycode — an accented or a composed one, and
+            // in the mixed default a digit or a mark of punctuation — is what
+            // text injection is for.
+            controller.push_msg(ControlMsg::InjectText { text: text.to_string() });
         }
 
         WindowAction::None
+    }
+
+    /// The keycode this character travels as in this mode, if it travels as one.
+    ///
+    /// One answer for both halves of a keypress, because a press and a release
+    /// that disagree about it are a key the device is left holding.
+    fn keycode_for(&self, c: char) -> Option<u32> {
+        if let Some(code) = special_keycode(c) {
+            return Some(code);
+        }
+        match self.key_inject_mode.as_str() {
+            // Everything as keycodes, nothing as text.
+            "raw" => raw_keycode(c),
+            // Everything as text.
+            "text" => None,
+            // Default: letters and space travel as keycodes so that key repeat
+            // and modifiers behave, everything else goes as text so that
+            // accented and composed characters survive.
+            _ => printable_keycode(c),
+        }
     }
 
     pub fn key_up(
@@ -165,33 +171,36 @@ impl SlintInput {
         // The modifier state is the window's, not the device's, so it is kept
         // up to date whether or not there is anywhere to send a key.
         self.alt_held = alt;
-        let Some(controller) = controller else { return };
         let Some(c) = text.chars().next() else { return };
-        if self.camera
-            || self.uhid
-            || is_modifier(c)
-            || self.shortcut_mod.active(alt, control, meta)
-        {
+        // The window's own bookkeeping goes first: it has to be right whether
+        // or not the key is one the device hears about, or a later press of
+        // the same character looks like a repeat for ever.
+        self.held.remove(&c);
+        self.repeat_count = 0;
+        let Some(controller) = controller else { return };
+        if self.camera || self.uhid || is_modifier(c) {
+            return;
+        }
+
+        let Some(code) = self.keycode_for(c) else { return };
+        // Only what the device was told went down. The shortcut modifier used
+        // to be the test here, and it answered a different question twice
+        // over: a plain Ctrl+V pastes the host clipboard and sends no key at
+        // all, so its release reached the device as an ACTION_UP with no
+        // ACTION_DOWN under it — and a key pressed *before* MOD was held is a
+        // key the device is holding, whose release was swallowed for as long
+        // as MOD stayed down.
+        if !self.sent_down.remove(&code) {
             return;
         }
 
         let metastate = metastate(alt, control, shift, meta);
-        let code = special_keycode(c).or_else(|| {
-            if self.key_inject_mode == "text" {
-                None
-            } else {
-                printable_keycode(c)
-            }
+        controller.push_msg(ControlMsg::InjectKeycode {
+            action: AKEY_ACTION_UP,
+            keycode: code,
+            repeat: 0,
+            metastate,
         });
-
-        if let Some(code) = code {
-            controller.push_msg(ControlMsg::InjectKeycode {
-                action: AKEY_ACTION_UP,
-                keycode: code,
-                repeat: 0,
-                metastate,
-            });
-        }
     }
 
     fn run_shortcut(
@@ -388,6 +397,11 @@ mod tests {
 
         input.key_down("a", Mods::NONE, true, Some(&controller));
         assert!(messages.try_recv().is_ok(), "repeats travel by default");
+        // A release between the two halves, because the repeat flag is now
+        // derived from what is held rather than taken from the backend — which
+        // never sets it — and a key that was never let go is still held.
+        input.key_up("a", Mods::NONE, Some(&controller));
+        let _ = messages.try_recv();
 
         input.set_event_filters(false, true);
         input.key_down("a", Mods::NONE, false, Some(&controller));
@@ -398,6 +412,106 @@ mod tests {
 
         input.key_down("a", Mods::NONE, true, Some(&controller));
         assert!(messages.try_recv().is_err(), "the repeat must not");
+    }
+
+    /// Slint's winit backend never sets the repeat flag, so a held key arrives
+    /// as a run of fresh presses. Derived here, it is the difference between a
+    /// shortcut firing once and firing at the keyboard's repeat rate: MOD+f
+    /// held used to strobe fullscreen, and MOD+r ask the device to rotate over
+    /// and over.
+    #[test]
+    fn a_held_key_is_a_repeat_even_though_the_backend_says_it_is_not() {
+        let (controller, messages) = Controller::collecting();
+        let mut input = input();
+
+        // Every one of these arrives with the flag false, as the backend
+        // reports it.
+        assert_eq!(input.key_down("f", Mods::MOD, false, Some(&controller)),
+                   WindowAction::ToggleFullscreen);
+        assert_eq!(input.key_down("f", Mods::MOD, false, Some(&controller)),
+                   WindowAction::None, "the second is the keyboard repeating");
+        assert_eq!(input.key_down("f", Mods::MOD, false, Some(&controller)),
+                   WindowAction::None);
+        input.key_up("f", Mods::MOD, Some(&controller));
+        assert_eq!(input.key_down("f", Mods::MOD, false, Some(&controller)),
+                   WindowAction::ToggleFullscreen, "let go and pressed again is a press");
+        assert!(messages.try_recv().is_err(), "none of that goes to the device");
+
+        // And the counter climbs, as scrcpy's does, rather than sitting at 1.
+        let mut counted = super::tests::input();
+        counted.key_down("a", Mods::NONE, false, Some(&controller));
+        counted.key_down("a", Mods::NONE, false, Some(&controller));
+        counted.key_down("a", Mods::NONE, false, Some(&controller));
+        let repeats: Vec<u32> = (0..3)
+            .map(|_| match messages.try_recv() {
+                Ok(ControlMsg::InjectKeycode { repeat, .. }) => repeat,
+                other => panic!("a keycode, not {other:?}"),
+            })
+            .collect();
+        assert_eq!(repeats, vec![0, 1, 2]);
+    }
+
+    /// A release for a press the device never saw is an ACTION_UP with no
+    /// ACTION_DOWN under it. Two ways in: a plain Ctrl+V, which pastes the host
+    /// clipboard as text and sends no key at all, and a key pressed under MOD,
+    /// which belongs to the shortcut layer.
+    #[test]
+    fn only_what_went_down_comes_back_up() {
+        let (controller, messages) = Controller::collecting();
+        let mut input = input();
+
+        input.key_down("v", Mods { control: true, ..Mods::NONE }, false, Some(&controller));
+        assert!(matches!(messages.try_recv(), Ok(ControlMsg::InjectText { .. })),
+                "the clipboard is typed");
+        input.key_up("v", Mods { control: true, ..Mods::NONE }, Some(&controller));
+        assert!(messages.try_recv().is_err(), "and no key was pressed to release");
+
+        input.key_down("f", Mods::MOD, false, Some(&controller));
+        input.key_up("f", Mods::MOD, Some(&controller));
+        assert!(messages.try_recv().is_err(), "MOD+f is the window's on both halves");
+
+        // The other side of the same coin: a key pressed *before* MOD is one
+        // the device is holding, and its release has to get out even though MOD
+        // is down by the time it comes.
+        input.key_down("a", Mods::NONE, false, Some(&controller));
+        assert!(matches!(
+            messages.try_recv(),
+            Ok(ControlMsg::InjectKeycode { action: AKEY_ACTION_DOWN, .. })
+        ));
+        input.key_up("a", Mods::MOD, Some(&controller));
+        assert!(matches!(
+            messages.try_recv(),
+            Ok(ControlMsg::InjectKeycode { action: AKEY_ACTION_UP, .. })
+        ), "the device is holding it, so the release has to reach it");
+    }
+
+    /// --raw-key-events injects key events and ignores text events, so a
+    /// character it has no keycode for goes nowhere at all. Digits and
+    /// punctuation had none, in the mode scrcpy documents for games.
+    #[test]
+    fn raw_key_events_can_type_a_digit_and_a_full_stop() {
+        for (mode, c, expect) in [
+            ("raw", '1', Some(8)),   // KEYCODE_1
+            ("raw", '.', Some(56)),  // KEYCODE_PERIOD
+            ("raw", '-', Some(69)),  // KEYCODE_MINUS
+            ("raw", 'a', Some(29)),  // KEYCODE_A, which always worked
+            ("raw", 'é', None),      // no keycode, and raw has no text road
+            ("mixed", '1', None),    // still text in the default mode
+        ] {
+            let (controller, messages) = Controller::collecting();
+            let mut input = SlintInput::new(1080, 1920, "lalt", mode, false, None, Orientation::Normal);
+            input.key_down(&c.to_string(), Mods::NONE, false, Some(&controller));
+            match (expect, messages.try_recv()) {
+                (Some(code), Ok(ControlMsg::InjectKeycode { keycode, .. })) => {
+                    assert_eq!(keycode, code, "{mode} {c:?}");
+                }
+                (None, got) => assert!(
+                    !matches!(got, Ok(ControlMsg::InjectKeycode { .. })),
+                    "{mode} {c:?} should not travel as a keycode, got {got:?}"
+                ),
+                (Some(_), got) => panic!("{mode} {c:?} should be a keycode, got {got:?}"),
+            }
+        }
     }
 
     /// F11 is fullscreen with no modifier, and a device that never sees it

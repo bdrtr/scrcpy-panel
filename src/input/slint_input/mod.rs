@@ -28,8 +28,8 @@ mod clipboard;
 mod keys;
 
 use bindings::{android_button, MouseBindings, SecondaryClick, BUTTON_LEFT};
-use keys::{a_camera_takes, is_modifier, key, metastate, printable_keycode, send_key, shortcut_for,
-           special_keycode};
+use keys::{a_camera_takes, is_modifier, key, metastate, printable_keycode, raw_keycode, send_key,
+           shortcut_for, special_keycode};
 pub use clipboard::{clipboard_for_device, get_clipboard_text, set_clipboard_text};
 
 /// The modifier keys as the window reported them.
@@ -191,6 +191,32 @@ pub struct SlintInput {
     /// Which axes the second finger is mirrored through, for as long as it is
     /// down: the modifiers are read once, when it goes down.
     vfinger_invert: (bool, bool),
+    /// The characters the window has reported down and not yet up.
+    ///
+    /// This is where the repeat flag comes from. Slint's winit backend never
+    /// sets its own: the keyboard branch of `event_loop.rs` builds the event as
+    /// `KeyEvent::default()` and never reads winit's `event.repeat`, and the
+    /// only native writers of that field in i-slint-core are the C FFI and
+    /// `WindowEvent::KeyPressRepeated`, neither of which the winit backend
+    /// uses. So every auto-repeat arrived here as a fresh press with
+    /// `repeat: false`, `--no-key-repeat` dropped nothing, and the guard that
+    /// stops a held MOD+f from firing again could never fire — holding it
+    /// strobed fullscreen at the keyboard's repeat rate.
+    held: std::collections::HashSet<char>,
+    /// scrcpy's own repeat counter: it climbs while a key is held rather than
+    /// sitting at 1, which is what tells the device a long press from a
+    /// drum-roll of separate ones.
+    repeat_count: u32,
+    /// The keycodes the *device* has been told are down.
+    ///
+    /// Not the same as `held`: a press swallowed by the shortcut layer, or by
+    /// the Ctrl+V that pastes the host clipboard instead, never reached the
+    /// device — and the release that followed it used to be sent all the same,
+    /// so the device got an ACTION_UP with no ACTION_DOWN under it. It is also
+    /// what lets a release out while MOD is held: the device is holding that
+    /// key, and swallowing the release leaves it held for the rest of the
+    /// session.
+    sent_down: std::collections::HashSet<u32>,
 }
 
 impl SlintInput {
@@ -221,6 +247,9 @@ impl SlintInput {
             uhid: false,
             uhid_mouse: false,
             vfinger_invert: (true, true),
+            held: std::collections::HashSet::new(),
+            repeat_count: 0,
+            sent_down: std::collections::HashSet::new(),
         }
     }
 
