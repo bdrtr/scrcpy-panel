@@ -375,7 +375,7 @@ pub(super) fn start_windowed(
                     window.global::<App>().set_session_running(false);
                     sync_tray(false);
                 }
-                panel_watch.info("Oturum sona erdi.");
+                panel_watch.info(&tr!("Oturum sona erdi."));
             } else if after < before {
                 panel_watch.info(&tr!("Bir pencere kapandı, {} sürüyor.", after));
             }
@@ -451,7 +451,7 @@ pub(super) fn stop_session(panel: &Rc<Panel>) {
     }
 
     if stopped {
-        panel.info("Oturum durduruldu.");
+        panel.info(&tr!("Oturum durduruldu."));
     } else {
         panel.warn(&tr!("Çalışan bir oturum yok."));
     }

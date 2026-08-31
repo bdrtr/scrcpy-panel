@@ -731,9 +731,9 @@ fn autostart_if_wanted(panel: &Rc<Panel>, window: &PanelWindow, ready: Option<&s
     *panel.autostarted.borrow_mut() = Some(serial.to_string());
 
     let Some((name, config)) = first else {
-        panel.warn(
-            "Otomatik başlatma açık ama kayıtlı profil yok — Profiller sekmesinden bir profil kaydedin.",
-        );
+        panel.warn(&tr!(
+            "Otomatik başlatma açık ama kayıtlı profil yok — Profiller sekmesinden bir profil kaydedin."
+        ));
         return;
     };
 

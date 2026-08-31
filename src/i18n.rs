@@ -229,6 +229,88 @@ mod tests {
         );
     }
 
+    /// And nothing the panel hands a user is Turkish the .po has never seen.
+    ///
+    /// The two tests above look at how a string is *built* — `tr!` with a
+    /// literal, `format!`, `.to_string()`. There is a fourth way, and it is
+    /// the plainest: a `&str` handed straight to `info`, `warn` or a table.
+    /// `shortcut_rows()` is a list of pairs translated by value —
+    /// `tr!(combo)`, with a variable — so the literals in it never appear in a
+    /// `tr!("…")` for the first test to find, and they are not `format!` for
+    /// the second. Seven of the twenty-nine combos in that table are words
+    /// rather than key names, and the English panel showed all seven in
+    /// Turkish: `Sağ tık`, `Orta tık`, `MOD+w / çift tık`, three kinds of
+    /// `sürükle` and `4. tık / 5. tık`. Three more were bare literals passed
+    /// to `info` and `warn` with a `tr!` call on the line below.
+    ///
+    /// This scans every literal in `src/panel/` and keeps the ones the .po has
+    /// never heard of, which needs two discriminators rather than one. The
+    /// dictionary the test above uses cannot see these: it is built from the
+    /// .po, and a word that never reached the .po is not in it — `sürükle` is
+    /// not a Turkish word as far as that dictionary knows, because no msgid
+    /// contains it. So a second rule, which is the letters: ç, ğ, ı, İ, ö, ş
+    /// and ü are written in Turkish and in nothing else this program says.
+    ///
+    /// The two are complementary rather than redundant, which is the argument
+    /// for having both. Of the ten this found, six were caught only by the
+    /// letters — `Ctrl+sürükle` has no word the .po knows — and three only by
+    /// the words: `Oturum sona erdi.` is Turkish with nothing in it that is
+    /// not also an English letter.
+    #[test]
+    fn nothing_the_panel_says_is_turkish_the_po_has_never_seen() {
+        let turkish = turkish_words();
+        assert!(turkish.len() > 100, "only {} Turkish words found", turkish.len());
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/panel");
+        let mut files = Vec::new();
+        collect(&root, "rs", &mut files);
+        assert!(files.len() >= 5, "only {} panel files found", files.len());
+
+        let mut caught = Vec::new();
+        for file in &files {
+            let source = std::fs::read_to_string(file).expect("a source file");
+            for literal in literals(&source) {
+                // With an entry it is translated, whatever language it is in.
+                if TRANSLATIONS
+                    .binary_search_by_key(&literal.as_str(), |(msgid, _)| *msgid)
+                    .is_ok()
+                {
+                    continue;
+                }
+                // A flag, a path or a key: `MOD+w / çift tık` spaces its slash
+                // and /sdcard/Download does not, which is enough to tell them
+                // apart without listing either.
+                if literal.starts_with("--")
+                    || literal.contains('=')
+                    || (literal.contains('/') && !literal.contains(" / "))
+                {
+                    continue;
+                }
+                let by_word: Vec<_> = words(&literal)
+                    .into_iter()
+                    .filter(|w| turkish.contains(w))
+                    .collect();
+                let by_letter: Vec<char> = "çÇğĞıİöÖşŞüÜ"
+                    .chars()
+                    .filter(|c| literal.contains(*c))
+                    .collect();
+                if !by_word.is_empty() || !by_letter.is_empty() {
+                    let name = file.file_name().unwrap_or_default().to_string_lossy();
+                    caught.push(format!(
+                        "  {name}: {literal:?} — {by_word:?} {by_letter:?}"
+                    ));
+                }
+            }
+        }
+        caught.sort();
+        assert!(
+            caught.is_empty(),
+            "{} line(s) the panel says in Turkish with no translation to reach for:\n{}",
+            caught.len(),
+            caught.join("\n")
+        );
+    }
+
     /// And nothing in `ui/` does either.
     ///
     /// The two tests above read `src/`. The interface's own strings are not
@@ -347,6 +429,46 @@ mod tests {
                 }
             }
             out.push(literal);
+        }
+        out
+    }
+
+    /// Every string literal on a line of code, comments left out.
+    ///
+    /// Cruder than `translatable()` on purpose: this one is looking for
+    /// literals nobody wrapped in anything, so there is no call to anchor to.
+    /// A `//` before the literal means the line is a comment, which is the
+    /// same rule the `tr!` scanner uses.
+    fn literals(source: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for line in source.lines() {
+            let code = line.split("//").next().unwrap_or("");
+            let mut characters = code.chars();
+            while let Some(character) = characters.next() {
+                if character != '"' {
+                    continue;
+                }
+                let mut literal = String::new();
+                let mut closed = false;
+                while let Some(inner) = characters.next() {
+                    match inner {
+                        '"' => {
+                            closed = true;
+                            break;
+                        }
+                        '\\' => literal.push(match characters.next() {
+                            Some('n') => '\n',
+                            Some('t') => '\t',
+                            Some(other) => other,
+                            None => '\\',
+                        }),
+                        other => literal.push(other),
+                    }
+                }
+                if closed {
+                    out.push(literal);
+                }
+            }
         }
         out
     }

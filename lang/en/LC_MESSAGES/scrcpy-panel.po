@@ -1001,6 +1001,15 @@ msgstr "scrcpy-server found: {} (the client expects v{})."
 msgid "Çalışan bir oturum yok."
 msgstr "No session is running."
 
+msgid "Oturum sona erdi."
+msgstr "The session has ended."
+
+msgid "Oturum durduruldu."
+msgstr "The session was stopped."
+
+msgid "Otomatik başlatma açık ama kayıtlı profil yok — Profiller sekmesinden bir profil kaydedin."
+msgstr "Autostart is on but no profile is saved — save one from the Profiles tab."
+
 msgid "Sistem tepsisi kullanılamıyor: {}"
 msgstr "The system tray is not available: {}"
 
@@ -1267,6 +1276,29 @@ msgstr "Slide two fingers left and right"
 
 msgid "Son uygulamalar / bildirimler"
 msgstr "Recents / notifications"
+
+# The left-hand column of the same table. Most of it is key names that are the
+# same in both languages; these are the ones that are words.
+msgid "MOD+w / çift tık"
+msgstr "MOD+w / double click"
+
+msgid "Ctrl+sürükle"
+msgstr "Ctrl+drag"
+
+msgid "Shift+sürükle"
+msgstr "Shift+drag"
+
+msgid "Ctrl+Shift+sürükle"
+msgstr "Ctrl+Shift+drag"
+
+msgid "Sağ tık"
+msgstr "Right click"
+
+msgid "Orta tık"
+msgstr "Middle click"
+
+msgid "4. tık / 5. tık"
+msgstr "4th click / 5th click"
 
 msgid "Kamera aynalanırken cihazın panosuna yazılamaz."
 msgstr "A camera mirror cannot write to the device's clipboard."

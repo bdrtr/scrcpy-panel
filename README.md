@@ -792,6 +792,22 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **Ten more Turkish lines in the English panel, and a fourth way for one to get there.**
+  The guards read how a string is *built*: `tr!` with a literal, `format!`,
+  `.to_string()`, `@tr` in `ui/`. The plainest way is none of those — a `&str` handed
+  straight to `info` or `warn`, or a literal in a table translated by value.
+  `shortcut_rows()` is twenty-nine pairs put through `tr!(combo)` with a variable, so
+  nothing looking for `tr!("…")` ever saw the left-hand column, and seven of those combos
+  are words rather than key names: the English Shortcuts tab read `Sağ tık`, `Orta tık`,
+  `MOD+w / çift tık`, three kinds of `sürükle` and `4. tık / 5. tık`. Three more were bare
+  literals handed to `info` and `warn` with a `tr!` call on the line below them.
+  The guard that catches them needs two discriminators rather than one, and the reason is
+  worth stating: the dictionary the other tests use is built from the .po, so a word that
+  never reached the .po is not in it — `sürükle` is not a Turkish word as far as that
+  dictionary knows, because no msgid contains it. The second rule is the alphabet. ç, ğ, ı,
+  İ, ö, ş and ü are written in Turkish and in nothing else this program says. Of the ten,
+  six were caught only by the letters and three only by the words, which is the argument for
+  keeping both.
 - **A fresh install's Profiles tab was one grey rectangle.** The mockup lays the profile
   cards on a three-column CSS grid whose own background is the divider colour, so the 2px
   gaps between the cards are the ground showing through — a hairline grid for nothing but a
@@ -1513,7 +1529,9 @@ this tree work by scanning the repository itself, because that is where the faul
 pickers through the real argument parser, `nothing_in_the_panel_speaks_turkish_through_format`
 uses the `.po` as a dictionary to find sentences that never asked to be translated,
 `nothing_in_the_interface_speaks_turkish_without_a_translation` points the same dictionary at
-the `@tr` strings in `ui/`, and `nothing_rewrites_the_form_and_leaves_the_serial_behind`
+the `@tr` strings in `ui/`, `nothing_the_panel_says_is_turkish_the_po_has_never_seen` reads
+every literal in `src/panel/` and adds the Turkish alphabet to that dictionary because a word
+the .po never saw cannot be in it, and `nothing_rewrites_the_form_and_leaves_the_serial_behind`
 checks an invariant at its call sites because there is no window in a unit test. If a class of bug has bitten twice, a guard that
 reads the source is often the honest way to stop the third.
 
@@ -1536,7 +1554,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 213 tests, 14 ignored
+cargo test --release        # 214 tests, 14 ignored
 cargo clippy --all-targets  # clean bar one lint the toolchain brought with it
 ```
 
