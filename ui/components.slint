@@ -123,13 +123,18 @@ export component Inp inherits Rectangle {
         clicked => { input.focus(); }
     }
 
+    // Bounded, because a Rectangle does not clip and this is the one Text in
+    // the library that was left free to be as wide as it liked: at a window
+    // width the field cannot have, the placeholder drew across its neighbour.
     if root.text == "" && !input.has-focus: Text {
         x: 10px;
+        width: parent.width - 20px;
         y: (parent.height - self.height) / 2;
         text: root.placeholder;
         font-family: root.mono ? Theme.mono : Theme.font;
         font-size: 14px;
         color: Theme.text-50;
+        overflow: elide;
     }
 
     input := TextInput {

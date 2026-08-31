@@ -28,9 +28,11 @@ Android devices from a single control panel.
 </tr>
 </table>
 
-<sub>Taken on Linux with Slint's own <code>take_snapshot</code> on the software renderer, at the
-size the panel opens at here — 948×1028. It asks for 1200×800 and does not get it, which is
-[a known issue](#known-issues).</sub>
+<sub>Taken on Linux at the size the panel is given here — 948×1028. It asks for 1200×800 and
+the desktop's tiler decides otherwise, which is [a known issue](#known-issues). The six tabs
+were photographed from a real window with Slint's own <code>take_snapshot</code> on the
+software renderer; the configuration form above them is drawn offscreen at the same size,
+because a real window is not 948 wide on this desktop any more.</sub>
 
 ## A note on the name
 
@@ -710,16 +712,62 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
 
 ## Known issues
 
-- **The panel opens narrower than it asks for, and its widest row overlaps there.**
-  `ui/panel.slint` declares `preferred-width: 1200px` on the `PanelWindow`, and the window
-  opens at 948 — measured on this desktop, both on Wayland and on Xwayland, and unchanged by
-  calling `set_size` before the window is shown or after (it reports the new size and then
-  goes back). A `Window` takes the preference of the layout inside it, and this layout's own
-  preference wins. At 948 the Configuration tab's "Pick from the device · --list-encoders"
-  button is wider than its cell and draws over the encoder field beside it. Moving the
-  preference onto the layout was tried and made it worse — 948×492 — so it is written down
-  rather than guessed at. `min-width` is 900, so this is inside the size the panel says it
-  supports; widening the window by hand fixes the overlap.
+- **The panel is given its width rather than choosing it, and one row used to overlap when
+  that width was small.** `ui/panel.slint` declares `preferred-width: 1200px` on the
+  `PanelWindow` and the window opened at 948×1028 when the screenshots above were taken. That
+  number is not Slint's. COSMIC's auto-tiler is on here — `autotile` is `true` in
+  `~/.config/cosmic/com.system76.CosmicComp/v1/` — so the window is handed whatever the tile
+  is, and the tile depends on what else is on the workspace: the same binary was given
+  468×492 on a later day. The height settles the origin on its own. A Slint window's size is
+  `preferred.min(max).max(min)` over what it declares, and this one declares 800 with no
+  maximum anywhere in `ui/`, so Slint can never ask for 1028 — and width and height arrive in
+  the same xdg configure. `set_size` does not help, and there is now a line to point at
+  rather than an observation: winit's Wayland backend takes the compositor's configure
+  verbatim and turns its own constraining off with it, and `i-slint-backend-winit`'s
+  `resize_event` writes that size over whatever `set_size` optimistically reported, which is
+  exactly "it reports the new size and then goes back". **An earlier version of this entry
+  blamed the layout inside the window, and that was wrong**: the compiler *replaces* the
+  child layout's preferred and minimum widths with the `Window`'s own, so 1200 does win
+  inside Slint and is then thrown away outside it.
+- **The overlap was real, and it was nothing to do with the window's size.** It happens at
+  any width where the row is short of space. `Grp` is a `GridLayout`, and one short of space
+  takes the shortfall out of the cells that can give it: the two `Seg`s and the `Btn` in the
+  Video section's first row — the only row in the panel with four cells — have minimums equal
+  to their own text, so all of the shortfall lands on the encoder field, which had no minimum
+  at all. At 948 that leaves the field 51px wide holding a 152px placeholder, and a
+  `Rectangle` in Slint does not clip its children, so `c2.android.avc.encoder` was painted
+  112px past its own border: 71 inked pixels filling all sixteen columns of the gutter, under
+  a button drawn after it. The placeholder was the one `Text` in `ui/components.slint` left
+  free to be as wide as it liked — the `TextInput` four lines below it, the field label above
+  it and the dropdown beside it were all bounded already. It elides now, and
+  `the_encoder_field_keeps_its_placeholder_to_itself` measures the gutter rather than
+  describing it — at the size the compositor gave the window, the size the panel asks for,
+  and the smallest it says it supports. 16px of clear page at all three; against the tree
+  before the fix it fails by name: *at 948x1028 the encoder field's placeholder is drawn
+  outside it: its border is at x=616 and x=617 is inked as well.*
+- **And the form spread itself over whatever height it was given.** The same picture showed
+  it and it took a moment to see: at 1028 tall, "Bit rate · --video-bit-rate" sat 92px above
+  the box it names, because the slack between the form's natural height and the window's went
+  into the `GridLayout`'s rows and then into each `Fld` between its label and its control. A
+  section is a stack of rows at their own height rather than something to spread over a
+  window, so the configuration body is `alignment: start` now and the slack stays at the
+  bottom where it belongs. Nothing moves at 1200x800, where the form fills the height already.
+- **What is still true is that the form does not fit, and only the overlap was ever a bug.**
+  At 948 the encoder field is 51px wide, which is about three characters of a codec name, and
+  section 05's two longest checkbox labels elide by a few pixels. At 900 — the width the panel
+  itself declares as the least it supports — the third column of every row is a ten-pixel
+  sliver, and the section body has grown a scrollbar. Nothing is drawn on top of anything
+  else at any of them, which is the part that was fixed. `min-width: 900px` is a promise the
+  content cannot keep, and in Slint it replaces the layout's own minimum rather than raising
+  it, so it is the only minimum the panel ever states.
+- **Neither font the theme names is on this machine, so nothing in these pictures is the
+  design's type.** `ui/theme.slint` asks for `Archivo`, and for the monospace surfaces —
+  placeholders, serials, the command bar — it asks for `monospace`. `fc-list` has no Archivo
+  at all, and `monospace` is a fontconfig alias rather than a family name: Slint hands the
+  name to fontique to look up as a family, so that one does not resolve either. Both fall
+  back to Noto Sans. Measured rather than assumed: `c2.android.avc.encoder` in the encoder
+  field is 152px of ink, and that string sets to 153.0px in Noto Sans against 184.9 in Noto
+  Sans Mono. The overlap above was as small as it was for the same reason.
 - **The server version is pinned exactly.** The server refuses to start unless the client
   announces its own version, so `SCRCPY_SERVER_VERSION` in `src/main.rs` must match the
   `scrcpy-server` you run. It is currently `4.1`, and 3.x servers are not merely rejected —
@@ -1375,15 +1423,24 @@ REC=/path/to/a-recording.mp4 \
 
 # The window: what a frame costs between the decoder and the screen.
 WGPU=1 ./target/release/examples/frame_cost 1080x2400 400
+
+# The panel, at a width of one's own choosing. A real window is whatever size
+# the compositor decides, so this draws the real PanelWindow offscreen with the
+# software renderer instead, in English, and measures the picture. PANEL_SHOT
+# writes each size out beside the others — /tmp/panel-948x1028.ppm and its
+# fellows — which `ffmpeg -i panel-948x1028.ppm x.png` turns into a picture.
+PANEL_SHOT=/tmp/panel \
+  cargo test --release -- --ignored --nocapture --test-threads=1 picture
 ```
 
 **Tests that read the source are a pattern here, not a curiosity.** Several of the guards in
 this tree work by scanning the repository itself, because that is where the fault lives:
 `every_value_the_panel_offers_is_one_the_binary_takes` pushes every value in the `.slint`
 pickers through the real argument parser, `nothing_in_the_panel_speaks_turkish_through_format`
-uses the `.po` as a dictionary to find sentences that never asked to be translated, and
-`nothing_rewrites_the_form_and_leaves_the_serial_behind` checks an invariant at its call sites
-because there is no window in a unit test. If a class of bug has bitten twice, a guard that
+uses the `.po` as a dictionary to find sentences that never asked to be translated,
+`nothing_in_the_interface_speaks_turkish_without_a_translation` points the same dictionary at
+the `@tr` strings in `ui/`, and `nothing_rewrites_the_form_and_leaves_the_serial_behind`
+checks an invariant at its call sites because there is no window in a unit test. If a class of bug has bitten twice, a guard that
 reads the source is often the honest way to stop the third.
 
 **`#[ignore]`d tests run the real external tool.** Half of a device-bound layer can be checked
@@ -1405,9 +1462,16 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 212 tests, 10 ignored
-cargo clippy --all-targets  # the tree is warning-free
+cargo test --release        # 213 tests, 11 ignored
+cargo clippy --all-targets  # clean bar one lint the toolchain brought with it
 ```
+
+**That one lint arrived with the compiler rather than with the code.**
+`clippy::chunks_exact_to_as_chunks` is new in 1.98 and fires seven times over four lines —
+`src/ui/mod.rs:151`, `src/display/v4l2_sink.rs:104` and two in `examples/frame_cost.rs`. All
+four are pixel loops, and a pixel loop is not rewritten here without a measurement behind it,
+so they are written down rather than swapped for `as_chunks` on a lint's say-so. Nothing else
+warns; a patch that adds a warning still needs to say why.
 
 If a change touches the panel's form, add the flag to `SUPPORTED` in
 `src/panel/command/flags.rs` as well, or the panel will build a command line the binary

@@ -866,3 +866,225 @@ mod stop_tests {
         assert_eq!(status.signal(), Some(libc::SIGKILL));
     }
 }
+
+#[cfg(test)]
+mod picture_tests {
+    //! Photographing the panel, and measuring what is in the picture.
+    //!
+    //! The window's width is not the panel's to choose. COSMIC's auto-tiler is
+    //! on here, so a `--panel` run is given whatever the tile is — 948x1028
+    //! with two windows on a display, 468x492 with four — and neither
+    //! `min-width` nor `set_size` moves it: winit takes the compositor's
+    //! configure verbatim and writes it over whatever was asked for. Looking at
+    //! the panel at a width of one's own choosing therefore means taking the
+    //! compositor out of the loop altogether. A `MinimalSoftwareWindow` is a
+    //! window adapter whose size is whatever it is told, and the software
+    //! renderer draws the real `PanelWindow` into a buffer of that size, with
+    //! no display server involved at all.
+    //!
+    //! `set_platform` takes effect once in a process and the interface language
+    //! is process-wide, so this runs on its own:
+    //!
+    //!     cargo test --release -- --ignored --test-threads=1 picture
+    //!
+    //! `PANEL_SHOT=<path>` also writes the picture out as a P6 PPM, three bytes
+    //! a pixel and no new dependency; `ffmpeg -i shot.ppm shot.png` turns it
+    //! into something that can be looked at.
+
+    use super::*;
+    use slint::platform::software_renderer::{
+        MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType,
+    };
+
+    /// `Theme.bg`, the colour of the page behind everything.
+    const PAGE: (u8, u8, u8) = (0xf3, 0xf2, 0xf2);
+    /// `Theme.surface`, which is the fill of an `Inp` and of nothing else in a
+    /// configuration row.
+    const SURFACE: (u8, u8, u8) = (0xea, 0xe9, 0xe9);
+    /// Where the section body starts: the section list is 216px and its divider
+    /// is the two before that.
+    const BODY: u32 = 217;
+
+    struct Picture {
+        width: u32,
+        height: u32,
+        pixels: Vec<PremultipliedRgbaColor>,
+    }
+
+    impl Picture {
+        fn at(&self, x: u32, y: u32) -> (u8, u8, u8) {
+            let p = self.pixels[(y * self.width + x) as usize];
+            (p.red, p.green, p.blue)
+        }
+
+        /// Is anything at all drawn in this column, between these rows?
+        ///
+        /// The page is one flat colour and the renderer writes it exactly, so
+        /// a pixel that is not it is a pixel something painted.
+        fn drawn(&self, x: u32, rows: std::ops::Range<u32>) -> bool {
+            rows.into_iter().any(|y| self.at(x, y) != PAGE)
+        }
+
+        fn write_ppm(&self, path: &str) {
+            let mut out = Vec::with_capacity((self.width * self.height * 3) as usize + 32);
+            out.extend_from_slice(format!("P6\n{} {}\n255\n", self.width, self.height).as_bytes());
+            for p in &self.pixels {
+                out.extend_from_slice(&[p.red, p.green, p.blue]);
+            }
+            std::fs::write(path, out).expect("writing the picture");
+        }
+    }
+
+    /// The panel, opened once and drawn at whatever size is asked for.
+    ///
+    /// Once, because `set_platform` takes effect once in a process: the window
+    /// is created against the offscreen adapter and then resized, which is what
+    /// a compositor does to it anyway.
+    struct Panel {
+        adapter: Rc<MinimalSoftwareWindow>,
+        _window: PanelWindow,
+    }
+
+    impl Panel {
+        fn open(tab: &str, section: &str) -> Self {
+            struct Offscreen(Rc<MinimalSoftwareWindow>);
+            impl slint::platform::Platform for Offscreen {
+                fn create_window_adapter(
+                    &self,
+                ) -> std::result::Result<
+                    Rc<dyn slint::platform::WindowAdapter>,
+                    slint::PlatformError,
+                > {
+                    Ok(self.0.clone())
+                }
+            }
+
+            let adapter = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+            slint::platform::set_platform(Box::new(Offscreen(adapter.clone())))
+                .expect("the platform is set once, by the first of these tests to run");
+
+            let window = PanelWindow::new().expect("the panel window");
+            // Both halves, the way `run()` does it: the interface has two
+            // languages, and setting only Slint's leaves the panel's own
+            // messages — the adb line in the corner is one — in Turkish.
+            window.global::<Settings>().set_language("en".into());
+            apply_language(&window);
+            // The one thing `run()` puts in the chrome that is not a constant,
+            // so that a picture taken here is a picture of the program.
+            window.global::<App>().set_adb_status(adb_status().into());
+            window.global::<App>().set_tab(tab.into());
+            window.global::<App>().set_section(section.into());
+            window.show().expect("showing the window");
+
+            Self { adapter, _window: window }
+        }
+
+        fn shot(&self, width: u32, height: u32) -> Picture {
+            self.adapter.set_size(slint::PhysicalSize::new(width, height));
+
+            let mut pixels =
+                vec![PremultipliedRgbaColor::default(); (width as usize) * (height as usize)];
+            // The first pass lays out and the second draws what the layout
+            // produced; two more in case a binding settles late.
+            for _ in 0..4 {
+                slint::platform::update_timers_and_animations();
+                self.adapter.request_redraw();
+                self.adapter.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, width as usize);
+                });
+            }
+            Picture { width, height, pixels }
+        }
+    }
+
+    /// The gutter between the encoder field and the cell beside it, in pixels
+    /// of untouched page, and where the field's own border was found.
+    fn gutter(picture: &Picture) -> (u32, u32) {
+        // The first `Inp` of the topmost row that has one, found by its fill:
+        // `Theme.surface` is an exact colour and nothing else in a row is
+        // filled with it. The first rather than the widest, because at 900 the
+        // encoder field is a ten-pixel sliver and that is exactly the case
+        // worth checking — an elided placeholder still has to stay inside it.
+        let mut found = None;
+        'rows: for y in 0..picture.height {
+            let mut start = None;
+            for x in BODY..picture.width {
+                if picture.at(x, y) == SURFACE {
+                    start.get_or_insert(x);
+                } else if let Some(from) = start.take() {
+                    if x - from >= 6 {
+                        found = Some((y, x - 1));
+                        break 'rows;
+                    }
+                }
+            }
+        }
+        let (top, right) = found.expect("an input box in the section body");
+
+        // The row band that box occupies.
+        let mut bottom = top;
+        while bottom + 1 < picture.height && picture.at(right, bottom + 1) == SURFACE {
+            bottom += 1;
+        }
+        let band = top..bottom + 1;
+
+        // Past the fill comes the box's own 1px border, and after that should
+        // come Theme.s4 of clear page before whatever is in the next cell.
+        let border = right + 1;
+        let mut clear = border + 1;
+        while clear < picture.width && !picture.drawn(clear, band.clone()) {
+            clear += 1;
+        }
+        (clear - (border + 1), border)
+    }
+
+    /// The configuration form's first row is the only one in the panel with
+    /// four cells in it, and at a width the panel is given rather than asks
+    /// for, the encoder field used to be drawn across the gutter beside it.
+    ///
+    /// `Grp` is a `GridLayout`, and a `GridLayout` short of space takes it from
+    /// the cells that can give: both `Seg`s and the `Btn` have a minimum equal
+    /// to their own text, so the whole shortfall lands on the encoder field,
+    /// which has no minimum at all. At 948 that leaves it 51px wide holding a
+    /// 152px placeholder — and a `Rectangle` in Slint does not clip its
+    /// children, so `c2.android.avc.encoder` was painted 112px past its own
+    /// border, over the gutter and under the button drawn after it. Measured
+    /// on this picture before the fix: 71 inked pixels in the 16px gutter,
+    /// filling all sixteen columns of it.
+    ///
+    /// Both halves of the row are still worth having — the field is cramped at
+    /// 948 and this does not widen it — but nothing is drawn on top of
+    /// anything else.
+    #[test]
+    #[ignore = "renders the whole panel and fixes the platform for the process"]
+    fn the_encoder_field_keeps_its_placeholder_to_itself() {
+        let panel = Panel::open("config", "video");
+
+        // The size the compositor handed the window when the README's pictures
+        // were taken, the size the panel actually asks for, and the smallest
+        // it says it supports — where the form is taller than the window and
+        // the section body has to scroll rather than squeeze.
+        for (width, height) in [(948, 1028), (1200, 800), (900, 600)] {
+            let picture = panel.shot(width, height);
+            if let Ok(prefix) = std::env::var("PANEL_SHOT") {
+                picture.write_ppm(&format!("{prefix}-{width}x{height}.ppm"));
+            }
+            let (gutter, border) = gutter(&picture);
+            assert!(
+                gutter > 0,
+                "at {width}x{height} the encoder field's placeholder is drawn outside it: \
+                 its border is at x={border} and x={} is inked as well",
+                border + 1
+            );
+            assert!(
+                gutter >= 12,
+                "at {width}x{height} only {gutter}px of page between the encoder field and \
+                 the cell beside it; the layout leaves 16"
+            );
+            println!(
+                "{width}x{height}: the encoder field's border is at x={border}, \
+                 then {gutter}px of page before the next cell"
+            );
+        }
+    }
+}

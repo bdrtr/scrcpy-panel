@@ -225,6 +225,12 @@ export component PanelWindow inherits Window {
                     horizontal-stretch: 1;
                     VerticalLayout {
                         padding: Theme.s6;
+                        // A section is a stack of rows at their own height, not
+                        // a thing to spread over whatever height it is given.
+                        // Without this the slack in a window taller than the
+                        // form goes into the grid rows, and a field drifts 90px
+                        // below the label that names it.
+                        alignment: start;
 
                         if App.section == "video": SectionVideo {}
                         if App.section == "audio": SectionAudio {}
