@@ -35,9 +35,10 @@ pub fn run_list_query(opts: &Options) -> Result<bool> {
         return Ok(false);
     };
 
-    connect_tcpip_if_requested(opts)?;
+    // Same as a session: the address --tcpip connected is the device meant.
+    let connected = connect_tcpip_if_requested(opts)?;
     let serial = adb::commands::select_device_filtered(
-        opts.serial.as_deref(),
+        opts.serial.as_deref().or(connected.as_deref()),
         adb::commands::DeviceFilter::from_flags(opts.select_usb, opts.select_tcpip),
     )
     .context("Device selection failed")?;
@@ -76,9 +77,19 @@ pub fn run_list_query(opts: &Options) -> Result<bool> {
     Ok(true)
 }
 
-pub(super) fn connect_tcpip_if_requested(opts: &Options) -> Result<()> {
+/// Connect the address `--tcpip` names, and say which one it was.
+///
+/// Saying so is the point. The address used to be built, connected and thrown
+/// away, and `adb tcpip` does not take the USB transport down — so the very
+/// step that makes a wireless device appear left two of them in `adb devices`,
+/// and the device selection immediately after refused with "2 devices
+/// connected. Use --serial to select one". `--tcpip` on a phone that was
+/// plugged in could not start a session at all without also being told
+/// `--serial` or `--select-tcpip`. scrcpy names the connected address as the
+/// serial for exactly this reason.
+pub(super) fn connect_tcpip_if_requested(opts: &Options) -> Result<Option<String>> {
     let Some(ref tcpip) = opts.tcpip else {
-        return Ok(());
+        return Ok(None);
     };
     let addr = if tcpip.contains(':') {
         tcpip.clone()
@@ -100,7 +111,7 @@ pub(super) fn connect_tcpip_if_requested(opts: &Options) -> Result<()> {
     if !status.success() {
         log::warn!("adb connect may have failed (exit {})", status);
     }
-    Ok(())
+    Ok(Some(addr))
 }
 
 /// Find the scrcpy-server file.

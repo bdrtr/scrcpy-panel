@@ -105,8 +105,15 @@ pub fn build_server_args(opts: &Options, scid: u32, tunnel_forward: bool) -> Vec
         args.push(format!("audio_encoder={}", enc));
     }
 
-    if let Some(ref src) = opts.audio_source {
-        args.push(format!("audio_source={}", src));
+    // `--audio-dup` implies the source, the way scrcpy implies it: it exists
+    // on the server's playback capture path and nowhere else, and the source
+    // that is used when none is given is a direct one, so `--audio-dup` on its
+    // own reached a server that ignored it. Session::start refuses the pairs
+    // this cannot fix.
+    match (opts.audio_source.as_deref(), opts.audio_dup) {
+        (Some(source), _) => args.push(format!("audio_source={source}")),
+        (None, true) => args.push("audio_source=playback".to_string()),
+        (None, false) => {}
     }
 
     // Camera mirroring params
@@ -268,6 +275,29 @@ mod tests {
     fn no_cleanup_reaches_the_server() {
         assert!(args_for(&["--no-cleanup"]).contains(&"cleanup=false".to_string()));
         assert!(!args_for(&[]).iter().any(|a| a.starts_with("cleanup")));
+    }
+
+    /// `--audio-dup` is read on the server's playback capture path and on no
+    /// other, and the source used when none is given is a direct one — so the
+    /// flag on its own reached a server that ignored it, while `output`
+    /// capture silenced the device the checkbox promises to keep playing on.
+    /// scrcpy implies the source; so does this.
+    #[test]
+    fn audio_dup_implies_the_source_it_needs() {
+        let args = args_for(&["--audio-dup"]);
+        assert!(args.contains(&"audio_dup=true".to_string()), "{args:?}");
+        assert!(args.contains(&"audio_source=playback".to_string()), "{args:?}");
+
+        // Given one, it is the user's and is passed through.
+        let args = args_for(&["--audio-dup", "--audio-source", "playback"]);
+        assert_eq!(
+            args.iter().filter(|a| a.starts_with("audio_source")).count(),
+            1,
+            "{args:?}"
+        );
+
+        // And without it nothing is sent, so the server picks.
+        assert!(!args_for(&[]).iter().any(|a| a.starts_with("audio_source")));
     }
 
     /// The torch and the zoom are the server's to apply — the camera is opened

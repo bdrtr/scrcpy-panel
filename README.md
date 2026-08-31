@@ -803,6 +803,26 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **`--audio-dup` was a silent no-op that muted the device it promises to keep playing on.**
+  On the server the flag is read on the playback capture path and nowhere else, and the
+  source used when none is given is a direct one — `output`, which is the capture that takes
+  the whole audio output and silences the device. So `--audio-dup` alone sent
+  `audio_dup=true` with no source, the server ignored it, and the checkbox that reads
+  "Cihazda da çal" did the opposite. scrcpy never lets that pair exist: it switches the
+  source to `playback` when `--audio-dup` is given with none, refuses `--audio-dup` with
+  audio off, and refuses `--audio-dup` with any other source — "--audio-dup is specific to
+  --audio-source=playback". All three are here now, the implication where the server
+  parameters are built and the two refusals beside the `--require-audio` one they are
+  modelled on.
+- **`--tcpip` connected an address and threw it away, so the session could not start at
+  all.** `adb tcpip` does not take the USB transport down, so the step that makes a wireless
+  device appear leaves two entries in `adb devices` — and the device selection immediately
+  after was given `opts.serial`, which is `None`. It bailed with "2 devices connected. Use
+  --serial to select one". A phone that was plugged in could not be switched to wireless by
+  the flag whose whole job is switching it, unless the user also said `--serial` or
+  `--select-tcpip`. The connected address is what the session selects now, unless the command
+  line named one outright — which is what scrcpy does, and for this reason. The one-shot
+  `--list-…` path had the same line and the same fault, and got the same fix.
 - **A stopped session kept its control thread, its socket and its mouse.** `wire_input` is
   the only writer of `Mirror.on_pointer_down/up/moved/scroll`, and Slint's setters replace a
   handler rather than clear one. The four were registered inside `if let Some(controller)`,
@@ -1759,7 +1779,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 221 tests, 15 ignored
+cargo test --release        # 222 tests, 15 ignored
 cargo clippy --all-targets  # the tree is warning-free
 ```
 

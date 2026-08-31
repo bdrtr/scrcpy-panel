@@ -170,10 +170,32 @@ impl Session {
             anyhow::bail!("--require-audio and --no-audio contradict each other");
         }
 
-        connect_tcpip_if_requested(opts)?;
+        // The same two refusals scrcpy makes, and for the same reason: on the
+        // server, audio_dup only exists on the playback capture path, so with
+        // any other source it is read by nobody. Asking for it alone used to
+        // be worse than nothing — the default source is `output`, which is the
+        // one that takes the whole audio output and silences the device, so a
+        // flag whose checkbox reads "Cihazda da çal" muted the device it
+        // promised to keep playing on. The source is implied in
+        // `build_server_args` the way scrcpy implies it; these two are the
+        // pairs that cannot be implied away.
+        if opts.audio_dup {
+            if !opts.audio_enabled() {
+                anyhow::bail!("--audio-dup and --no-audio contradict each other");
+            }
+            if opts.audio_source.as_deref().is_some_and(|source| source != "playback") {
+                anyhow::bail!(
+                    "--audio-dup is specific to --audio-source=playback;                      the server reads it on no other capture path"
+                );
+            }
+        }
+
+        // The address `--tcpip` connected is the device meant, unless the
+        // command line named one outright.
+        let connected = connect_tcpip_if_requested(opts)?;
 
         let serial = adb::commands::select_device_filtered(
-            opts.serial.as_deref(),
+            opts.serial.as_deref().or(connected.as_deref()),
             adb::commands::DeviceFilter::from_flags(opts.select_usb, opts.select_tcpip),
         )
         .context("Device selection failed")?;
