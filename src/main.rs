@@ -286,6 +286,12 @@ fn warn_about_the_flags(opts: &Options) {
              set SLINT_BACKEND to pick a Slint backend instead"
         );
     }
+    if opts.no_mipmaps {
+        log::warn!(
+            "--no-mipmaps applied to the old SDL renderer and is ignored; there is no \
+             mipmapping here to turn off"
+        );
+    }
     if opts.flex_display && opts.v4l2_sink.is_some() {
         log::warn!(
             "--v4l2-sink is told its size once and cannot follow --flex-display; \

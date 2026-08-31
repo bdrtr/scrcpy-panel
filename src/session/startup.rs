@@ -63,6 +63,16 @@ pub fn run_list_query(opts: &Options) -> Result<bool> {
             println!("{}", line);
         }
     }
+
+    // The lines above are printed first, because they are the reason. What was
+    // missing is this: the query used to end `Ok(true)` whatever the server
+    // did, so `--list-encoders` against a device that refused it printed the
+    // refusal and exited 0. A script could not tell a list from a failure, and
+    // the panel's own "Kodlayıcıları listele" button showed the error as
+    // ordinary output. Same fault the adb wrapper had, in the same shape.
+    if !output.status.success() {
+        anyhow::bail!("The device refused the {list_what} query ({})", output.status);
+    }
     Ok(true)
 }
 

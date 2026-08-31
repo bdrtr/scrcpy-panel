@@ -90,7 +90,6 @@ const SUPPORTED: &[&str] = &[
     "--show-touches",
     "--disable-screensaver",
     "--power-off-on-close",
-    "--no-mipmaps",
     "--serial",
     "--tcpip",
     "--force-adb-forward",
@@ -763,12 +762,17 @@ mod tests {
         // A list of one today. It is a loop, and not an assertion on a
         // single name, so the next flag added without an implementation is
         // one line rather than a rewrite.
-        #[allow(clippy::single_element_loop)]
         for flag in [
             // Implemented, but not as something the panel can host: OTG is a
             // session with no session in it — no adb, no server, no picture —
             // and the panel's model is a mirror in a tab.
             "--otg",
+            // Parsed and read by nobody. There is no mipmapping here to turn
+            // off: the SDL renderer it belonged to is gone and Slint draws the
+            // frame. It sat in SUPPORTED, so the panel passed it on and warned
+            // about nothing, which is the exact thing SUPPORTED's own comment
+            // says not to do.
+            "--no-mipmaps",
         ] {
             assert!(
                 !SUPPORTED.contains(&flag),

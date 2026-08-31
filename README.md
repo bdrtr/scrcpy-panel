@@ -803,6 +803,25 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **A flag nothing reads, an edit that ended itself, and a query that failed successfully.**
+  `--no-mipmaps` was in `SUPPORTED`, the list whose own comment says "Parsing a flag is not
+  enough to be in here: several were accepted by the argument parser and then read by nobody,
+  which is worse than rejecting them, because the panel had nothing to warn about." Nothing
+  reads `opts.no_mipmaps` — there is no mipmapping here to turn off, the SDL renderer it
+  belonged to is gone — so the checkbox was ticked, the flag was passed, and nothing said a
+  word. It is out of `SUPPORTED`, which is what makes the panel name it as dropped, and it
+  has a line in `warn_about_the_flags` beside `--render-driver`, which is the same kind of
+  leftover. The guard that exists to catch this listed one flag; it lists two.
+  "Düzenle" says a profile will be overwritten when you save, and it was — once.
+  `editing_profile.take()` reads *and clears*, so the second Kaydet fell through to the arm
+  below and pushed a brand-new "Profil N" carrying the whole form: the near-identical copy
+  the comment on that very match says it was written to stop. Nothing in the interface shows
+  the editing state, so there was no way to see it had flipped. It is `get()` now, and the
+  edit ends where it is ended on purpose.
+  And a one-shot `--list-encoders` that the device refused printed the refusal and exited 0,
+  so a script could not tell a list from a failure and the panel's own button showed the
+  error as ordinary output. The exit status is looked at now — after the lines are printed,
+  because they are the reason.
 - **A session that was dropped rather than shut down left its recording without a trailer,
   and two `?` in `run()` could do exactly that.** `Session`'s own doc said "Dropping it is not
   enough — call `Session::shutdown`", and there was no `Drop` impl to make dropping enough.

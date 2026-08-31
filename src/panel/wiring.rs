@@ -427,7 +427,16 @@ pub(super) fn wire_the_profiles(window: &PanelWindow, panel: &Rc<Panel>) {
                 let description =
                     tr!("{} bayrak · {}", config.flag_count(), config.video_codec);
 
-                let message = match panel.editing_profile.take() {
+                // `get`, not `take`. Taking it ended the edit after one save:
+                // "Düzenle" says the profile will be overwritten when you save,
+                // the first Kaydet did that, and the second fell through to the
+                // arm below and forked the near-identical copy this match was
+                // written to stop. Nothing in the interface shows the state, so
+                // there was no way to see it had flipped. The edit ends where
+                // it is ended on purpose — Düzenle on another card, Sil,
+                // Varsayılanlara dön, applying a profile — and here only when
+                // the index has gone stale.
+                let message = match panel.editing_profile.get() {
                     // Saving while editing writes back to the profile the form
                     // came from; it used to leave a near-identical copy behind.
                     Some(index) if index < panel.profiles.borrow().len() => {
@@ -438,6 +447,10 @@ pub(super) fn wire_the_profiles(window: &PanelWindow, panel: &Rc<Panel>) {
                         tr!("Profil güncellendi: {}", profile.name)
                     }
                     _ => {
+                        // Either nothing was being edited, or the profile it
+                        // pointed at has gone; a new card either way, and the
+                        // stale index goes with it.
+                        panel.editing_profile.set(None);
                         let name = tr!("Profil {}", panel.profiles.borrow().len() + 1);
                         panel.profiles.borrow_mut().push(Profile {
                             name: name.clone(),
