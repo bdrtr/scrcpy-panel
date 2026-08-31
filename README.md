@@ -752,6 +752,11 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   section is a stack of rows at their own height rather than something to spread over a
   window, so the configuration body is `alignment: start` now and the slack stays at the
   bottom where it belongs. Nothing moves at 1200x800, where the form fills the height already.
+  The Settings tab had the same fault and took the same line, found later by the same sweep:
+  its three groups are layouts too, and at 1028 tall "adb executable" sat 170px above the box
+  it names. The other five scroll bodies were checked rather than assumed and do not need it
+  — the log's lines and the shortcut table render pixel for pixel the same with the property
+  and without it, so they have not been given it.
 - **And the row that overlapped was a four-cell row in a three-column grid.** Bounding the
   placeholder stopped anything being drawn over anything else; it did not give the encoder
   field any room. At 948 that field was 51px wide, 49 of it fill — `Grp` is a `GridLayout`,

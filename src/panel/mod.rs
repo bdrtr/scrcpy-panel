@@ -1022,6 +1022,12 @@ mod picture_tests {
                 .set_devices(ModelRc::from(Rc::new(VecModel::from(rows))));
         }
 
+        fn log(&self, rows: Vec<LogRow>) {
+            self.window
+                .global::<App>()
+                .set_log(ModelRc::from(Rc::new(VecModel::from(rows))));
+        }
+
         fn profiles(&self, cards: Vec<ProfileCard>) {
             self.window
                 .global::<App>()
@@ -1151,7 +1157,22 @@ mod picture_tests {
                 })
                 .collect(),
         );
-        for tab in ["devices", "profiles"] {
+        panel.log(
+            [
+                ("11:04:21", "INFO", "Panel ready."),
+                ("11:04:21", "INFO", "Interface language: en"),
+                ("11:04:22", "WARN", "No session is running."),
+                ("11:04:25", "ERROR", "adb could not be run: No such file or directory"),
+            ]
+            .iter()
+            .map(|(time, level, message)| LogRow {
+                time: (*time).into(),
+                level: (*level).into(),
+                message: (*message).into(),
+            })
+            .collect(),
+        );
+        for tab in ["devices", "profiles", "log"] {
             panel.tab(tab);
             panel
                 .shot(948, 1028)

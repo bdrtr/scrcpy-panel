@@ -20,6 +20,11 @@ export component TabSettings inherits VerticalLayout {
     ScrollView {
         VerticalLayout {
             spacing: Theme.s4;
+            // The groups below are layouts, and a layout takes what vertical
+            // space it is given: without this the slack between the form's own
+            // height and the window's goes into the grid rows, and a field
+            // drifts a couple of hundred pixels below the label naming it.
+            alignment: start;
 
             SectionHead {
                 kicker: @tr("Uygulama");
