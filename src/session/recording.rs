@@ -84,6 +84,8 @@ impl Session {
         }
         let video_codec = self
             .video_codec
+            .read()
+            .expect("video codec lock")
             .clone()
             .context("Cannot record without a video stream")?;
 

@@ -96,6 +96,7 @@ pub(super) fn run_demuxer(
     sender: Sender<DemuxPacket>,
     recorder: Arc<RwLock<Option<Recorder>>>,
     config_seen: Arc<Mutex<Option<Vec<u8>>>>,
+    geometry: Arc<RwLock<Option<crate::media::recorder::VideoCodecInfo>>>,
 ) {
     let mut reader = BufReader::with_capacity(256 * 1024, socket);
 
@@ -133,6 +134,18 @@ pub(super) fn run_demuxer(
                         ""
                     }
                 );
+                // And kept, not only said. The size used to go into that line
+                // and nowhere else, while `Session::video_codec` held the one
+                // the stream opened with — so a recording started after the
+                // device had turned declared the pre-rotation width and height
+                // in the container, against a fresh SPS in the bitstream, and
+                // players had the two disagree at them. A recording already
+                // running keeps the geometry it wrote into its header, because
+                // that is the one thing about it that cannot be changed.
+                if let Some(info) = geometry.write().expect("video codec lock").as_mut() {
+                    info.width = session.width as i32;
+                    info.height = session.height as i32;
+                }
             }
             Ok(None) => {
                 log::info!("End of video stream");

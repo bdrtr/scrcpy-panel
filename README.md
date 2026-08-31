@@ -803,6 +803,30 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   elide by a few pixels. `min-width: 900px` is a promise the content can now keep, but in
   Slint it replaces the layout's own minimum rather than raising it, so it is the only
   minimum the panel ever states.
+- **A rotation was logged and thrown away, so a recording started afterwards declared the
+  old geometry.** `run_demuxer` hears the stream resize — the device turned, the mirrored app
+  resized, the virtual display changed — and put the new width and height into a log line and
+  nowhere else. `Session::video_codec` was filled once from the opening header and never
+  again, and `start_recording` clones it for the new recorder, which writes those numbers
+  straight into the track's codec parameters. The extradata is the *fresh* SPS, because
+  starting a recording asks the device for a new config packet, so the container and the
+  bitstream disagreed and players had to pick. The geometry is shared with the demuxer thread
+  now and kept up to date; a recording already running keeps what it wrote into its header,
+  which is the one thing about it that cannot be changed.
+- **In forward mode the socket that waits never asked whether the server had died.** The
+  other two connect paths take a `server_gone` callback for exactly that — "A server that
+  died on its parameters never opens a socket, and this used to poll a dead listener for the
+  whole thirty seconds and then blame the socket" — and the one that does the waiting when
+  the server is failing to start had none. A bad `--video-encoder` under
+  `--force-adb-forward` burned all hundred attempts and then said "Could not connect to
+  server on host:port", pointing at the tunnel, while the same session in reverse mode
+  reported the server's own last line. It asks now.
+- **`audio_playback()` did not read either flag it is named for.** It sits under
+  `video_playback()`, which folds in `--no-video-playback` and `--no-window`, and returned
+  `audio_enabled()` — true under `--no-audio-playback` and true under `-N`. Nothing called
+  it, which is the only reason it had not gone wrong, and also why it was worth correcting
+  rather than deleting: a `pub` method beside the right one, named for the flags it ignores,
+  is what the next caller reaches for.
 - **The command preview could not be pasted, and for two devices it was not what runs.**
   The module header says the preview is canonical scrcpy flags "so it can be copied into a
   terminal or pasted into an issue", and there is a button whose only job is putting it on
@@ -1799,7 +1823,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 225 tests, 15 ignored
+cargo test --release        # 226 tests, 15 ignored
 cargo clippy --all-targets  # the tree is warning-free
 ```
 

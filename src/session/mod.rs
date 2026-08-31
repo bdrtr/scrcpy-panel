@@ -102,7 +102,11 @@ pub struct Session {
     /// packet, and this handle used to be thrown away.
     recorder_thread: Arc<Mutex<Option<JoinHandle<Result<()>>>>>,
     /// What a recorder started later needs to know about the streams.
-    video_codec: Option<VideoCodecInfo>,
+    /// The geometry a recording started later has to declare, which is not
+    /// the geometry the stream opened with once the device has turned. Shared
+    /// with the demuxer thread, which is the only thing that hears about a
+    /// resize.
+    video_codec: Arc<RwLock<Option<VideoCodecInfo>>>,
     audio_codec_id: Option<u32>,
     /// The codec config packets, kept from the start of the stream.
     ///
@@ -315,7 +319,7 @@ impl Session {
             decoder_thread: None,
             recorder: recorder.clone(),
             recorder_thread: Arc::new(Mutex::new(None)),
-            video_codec: None,
+            video_codec: Arc::new(RwLock::new(None)),
             audio_codec_id,
             video_config: video_config.clone(),
             audio_config: audio_config.clone(),
@@ -375,7 +379,7 @@ impl Session {
                 width: info.width as i32,
                 height: info.height as i32,
             };
-            self.video_codec = Some(video_codec.clone());
+            *self.video_codec.write().expect("video codec lock") = Some(video_codec.clone());
 
             if let Some(rec) = self.recorder.read().expect("recorder lock").as_ref() {
                 rec.set_video_codec(video_codec);
@@ -384,11 +388,14 @@ impl Session {
 
         self.video_socket = header_socket.try_clone().ok();
 
+        let geometry = self.video_codec.clone();
         let recorder_clone = self.recorder.clone();
         self.demuxer_thread = Some(
             thread::Builder::new()
                 .name("scrcpy-demuxer".into())
-                .spawn(move || run_demuxer(header_socket, packet_tx, recorder_clone, video_config))
+                .spawn(move || {
+                    run_demuxer(header_socket, packet_tx, recorder_clone, video_config, geometry)
+                })
                 .context("Failed to start demuxer thread")?,
         );
 

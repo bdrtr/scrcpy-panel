@@ -94,7 +94,20 @@ pub fn connect_to_server_at(
 /// so reading that byte is what actually tells us the connection landed. Only
 /// the first socket does this — once it answers, the server is up and the
 /// remaining sockets can connect straight away.
-fn connect_and_read_dummy_byte(host: &str, port: u16, attempts: u32) -> Result<TcpStream> {
+///
+/// It asks whether the server is still there, as the other two connect paths
+/// do, and it is the one that most needs to: this is the socket that waits
+/// while the server is failing to start. Without it a server that died on a
+/// bad `--video-encoder` or an absent `--display-id` burned all hundred
+/// attempts and then blamed the tunnel — "Could not connect to server on
+/// host:port" — while the same session in reverse mode reported the server's
+/// own last line.
+fn connect_and_read_dummy_byte(
+    host: &str,
+    port: u16,
+    attempts: u32,
+    server_gone: &dyn Fn() -> bool,
+) -> Result<TcpStream> {
     let addr = format!("{}:{}", host, port);
     for i in 0..attempts {
         log::debug!("Connecting to server attempt {}/{}...", i + 1, attempts);
@@ -113,6 +126,12 @@ fn connect_and_read_dummy_byte(host: &str, port: u16, attempts: u32) -> Result<T
                 // yet. Anything else is the same story with a different error.
                 _ => drop(stream),
             }
+        }
+        if server_gone() {
+            bail!(
+                "The server exited before it opened a socket; \
+                 its own last line says why"
+            );
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -170,7 +189,7 @@ pub fn connect_sockets(
         for i in 0..socket_count {
             log::debug!("Connecting socket {}/{}...", i + 1, socket_count);
             let stream = if i == 0 {
-                connect_and_read_dummy_byte(host, port, 100)?
+                connect_and_read_dummy_byte(host, port, 100, server_gone)?
             } else {
                 connect_to_server_at(host, port, 100, server_gone)?
             };

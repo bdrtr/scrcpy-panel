@@ -66,7 +66,18 @@ impl Options {
     pub fn video_playback(&self) -> bool {
         self.video_enabled() && !self.no_video_playback && !self.no_window
     }
-    pub fn audio_playback(&self) -> bool { self.audio_enabled() }
+    /// Audio is captured (for recording) but playback is suppressed.
+    ///
+    /// The twin of `video_playback` above, and it did not consult either of the
+    /// two flags it is named for: it returned true under `--no-audio-playback`
+    /// and under `-N`. Nothing called it — the real answer is open-coded in
+    /// `pipeline.rs` — which is the only reason it had not gone wrong yet, and
+    /// also the reason it was worth fixing rather than deleting: a `pub` method
+    /// beside the correct one, named for the flags it ignores, is what the next
+    /// caller reaches for.
+    pub fn audio_playback(&self) -> bool {
+        self.audio_enabled() && !self.no_audio_playback && !self.no_playback
+    }
 
     /// `--port`, which scrcpy spells either `27183` or `27183:27199`.
     ///
@@ -110,6 +121,16 @@ impl Options {
 
 #[cfg(test)]
 mod tests {
+    /// `audio_playback` is the twin of `video_playback` and used to consult
+    /// neither of the two flags it is named for.
+    #[test]
+    fn audio_playback_reads_the_flags_that_turn_it_off() {
+        assert!(super::super::parse(&[]).audio_playback());
+        assert!(!super::super::parse(&["--no-audio"]).audio_playback());
+        assert!(!super::super::parse(&["--no-audio-playback"]).audio_playback());
+        assert!(!super::super::parse(&["--no-playback"]).audio_playback());
+    }
+
     use super::*;
     use crate::options::parse;
     use clap::Parser;
