@@ -901,6 +901,12 @@ mod picture_tests {
     /// `Theme.surface`, which is the fill of an `Inp` and of nothing else in a
     /// configuration row.
     const SURFACE: (u8, u8, u8) = (0xea, 0xe9, 0xe9);
+    /// The colour a `ScrollView` draws its thumb in, which nothing else in
+    /// this panel lays 400 pixels of down in a single row. Sampled from the
+    /// middle of the bar rather than its end: the rounded ends are two pixels
+    /// of something lighter, and taking the colour from there finds a run of
+    /// one.
+    const THUMB: (u8, u8, u8) = (0x85, 0x84, 0x84);
     /// Where the section body starts: the section list is 216px and its divider
     /// is the two before that.
     const BODY: u32 = 217;
@@ -925,6 +931,17 @@ mod picture_tests {
             rows.into_iter().any(|y| self.at(x, y) != PAGE)
         }
 
+        /// Is a horizontal scrollbar drawn anywhere in it?
+        fn has_a_horizontal_scrollbar(&self) -> bool {
+            (0..self.height).any(|y| {
+                let mut run = 0;
+                (0..self.width).any(|x| {
+                    run = if self.at(x, y) == THUMB { run + 1 } else { 0 };
+                    run >= 400
+                })
+            })
+        }
+
         fn write_ppm(&self, path: &str) {
             let mut out = Vec::with_capacity((self.width * self.height * 3) as usize + 32);
             out.extend_from_slice(format!("P6\n{} {}\n255\n", self.width, self.height).as_bytes());
@@ -942,7 +959,7 @@ mod picture_tests {
     /// a compositor does to it anyway.
     struct Panel {
         adapter: Rc<MinimalSoftwareWindow>,
-        _window: PanelWindow,
+        window: PanelWindow,
     }
 
     impl Panel {
@@ -976,7 +993,15 @@ mod picture_tests {
             window.global::<App>().set_section(section.into());
             window.show().expect("showing the window");
 
-            Self { adapter, _window: window }
+            Self { adapter, window }
+        }
+
+        /// Two devices in the list, so the table has rows to lay out. The
+        /// panel's own device scan needs a phone; this needs the widths.
+        fn devices(&self, rows: Vec<DeviceRow>) {
+            self.window
+                .global::<App>()
+                .set_devices(ModelRc::from(Rc::new(VecModel::from(rows))));
         }
 
         fn shot(&self, width: u32, height: u32) -> Picture {
@@ -1055,6 +1080,61 @@ mod picture_tests {
     /// Both halves of the row are still worth having — the field is cramped at
     /// 948 and this does not widen it — but nothing is drawn on top of
     /// anything else.
+    /// The Devices tab's table is eight columns wide and seven of them are a
+    /// fixed number of pixels, so there is a width below which it cannot be
+    /// laid out at all. This renders it with rows in it — the panel's own scan
+    /// needs a phone, and the widths do not — and says where they land.
+    #[test]
+    #[ignore = "renders the whole panel and fixes the platform for the thread"]
+    fn the_device_table_fits_the_width_the_panel_is_given() {
+        let panel = Panel::open("devices", "video");
+        panel.devices(vec![
+            DeviceRow {
+                name: "Redmi Note 11".into(),
+                serial: "a1683d6b0013".into(),
+                conn: "USB".into(),
+                android: "13".into(),
+                screen: "1080x2400".into(),
+                state: "device".into(),
+                selected: false,
+            },
+            DeviceRow {
+                name: "Galaxy Tab S9 FE".into(),
+                serial: "192.168.1.42:5555".into(),
+                conn: "TCP/IP".into(),
+                android: "16".into(),
+                screen: "1440x2304".into(),
+                state: "device".into(),
+                selected: true,
+            },
+        ]);
+
+        for (width, height) in [(1200, 800), (948, 1028), (900, 600)] {
+            let picture = panel.shot(width, height);
+            if let Ok(prefix) = std::env::var("PANEL_SHOT") {
+                picture.write_ppm(&format!("{prefix}-devices-{width}x{height}.ppm"));
+            }
+
+            // `Table.total` in ui/tabs/devices.slint: 804px of columns, seven
+            // 16px gaps and 8px of padding either side. The tab is the window
+            // less Theme.s6 either side, so the table fits at 1200 and at
+            // nothing this panel is likely to be given.
+            let fits = width - 48 >= 932;
+            assert_eq!(
+                picture.has_a_horizontal_scrollbar(),
+                !fits,
+                "at {width}x{height} the table {} the tab and the scrollbar {}",
+                if fits { "fits" } else { "does not fit" },
+                if fits { "is drawn anyway" } else { "is missing" }
+            );
+            println!(
+                "{width}x{height}: {}px for a table that needs 932, {}",
+                width - 48,
+                if fits { "no scrollbar" } else { "scrollbar drawn" }
+            );
+        }
+    }
+
     #[test]
     #[ignore = "renders the whole panel and fixes the platform for the process"]
     fn the_encoder_field_keeps_its_placeholder_to_itself() {

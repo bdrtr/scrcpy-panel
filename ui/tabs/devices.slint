@@ -19,6 +19,34 @@ import { Theme } from "../theme.slint";
 import { App, Cfg } from "../state.slint";
 import { Kicker, SectionHead, Hr, Fld, Inp, Chk, Btn, Tag, Mono } from "../components.slint";
 
+// The table's measurements, in one place.
+//
+// The eight column widths were written out twice, in the header and in the row,
+// under a comment saying the two copies must stay in step — and their sum is a
+// third thing that has to agree with them, because it is the width the table
+// has to be able to scroll to. The two heights are the same story: the scroller
+// around the table has to be told how tall the table is.
+global Table {
+    out property <length> check: 34px;
+    out property <length> name: 150px;  // the stretchy column's floor
+    out property <length> serial: 170px;
+    out property <length> conn: 90px;
+    out property <length> android: 80px;
+    out property <length> screen: 100px;
+    out property <length> state: 90px;
+    out property <length> action: 90px;
+
+    out property <length> head: 34px;
+    out property <length> row: 42px;
+    /// What a ScrollView's own horizontal bar takes off the bottom.
+    out property <length> bar: 14px;
+
+    // Eight cells, seven gaps and the padding either side.
+    out property <length> total:
+        Table.check + Table.name + Table.serial + Table.conn + Table.android
+        + Table.screen + Table.state + Table.action + 7 * Theme.s4 + 2 * Theme.s2;
+}
+
 // `.table th` — 11px, uppercase, 0.08em tracking, over a 2px rule.
 component Th inherits Text {
     font-family: Theme.font;
@@ -52,7 +80,8 @@ export component TabDevices inherits VerticalLayout {
     ScrollView {
         vertical-stretch: 1;
         // Long serials and error output must wrap rather than push a
-        // horizontal scrollbar under the table.
+        // horizontal scrollbar under the tab. The table is the one thing here
+        // that cannot wrap, and it has a scroller of its own below.
         viewport-width: self.visible-width;
 
         VerticalLayout {
@@ -60,114 +89,131 @@ export component TabDevices inherits VerticalLayout {
             alignment: start;
 
             // ── Liste ────────────────────────────────────────────────
-            if App.devices.length > 0: VerticalLayout {
-                spacing: 0;
+            //
+            // The table gets a scroller of its own rather than widening the
+            // tab. Seven of its eight columns are a fixed number of pixels, so
+            // below Table.total there is no layout for it and the last column —
+            // the one with the button that starts a mirror — is sheared off the
+            // edge with no way to reach it. Widening the whole tab instead was
+            // tried and is worse: it takes the wireless panels beside it, which
+            // wrap perfectly well, off the edge too.
+            //
+            // The height is the table's own, since a ScrollView would otherwise
+            // take whatever it is given, plus room for the bar on the widths
+            // where there is one.
+            if App.devices.length > 0: ScrollView {
+                height: Table.head + App.devices.length * Table.row
+                    + (self.visible-width < Table.total ? Table.bar : 0px);
+                viewport-width: max(self.visible-width, Table.total);
+                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
 
-                // Column widths are repeated in the header and in the row
-                // below; the two must stay in step or the table shears.
-                Rectangle {
-                    height: 34px;
-
-                    HorizontalLayout {
-                        padding-left: Theme.s2;
-                        padding-right: Theme.s2;
-                        spacing: Theme.s4;
-
-                        Rectangle { width: 34px; }
-                        Th {
-                            text: @tr("CİHAZ");
-                            horizontal-stretch: 1;
-                            min-width: 150px;
-                        }
-                        Th { text: @tr("SERİ NO"); width: 170px; }
-                        Th { text: @tr("BAĞLANTI"); width: 90px; }
-                        Th { text: @tr("ANDROID"); width: 80px; }
-                        Th { text: @tr("EKRAN"); width: 100px; }
-                        Th { text: @tr("DURUM"); width: 90px; }
-                        Th {
-                            text: @tr("İŞLEM");
-                            width: 90px;
-                            horizontal-alignment: right;
-                        }
-                    }
+                VerticalLayout {
+                    spacing: 0;
 
                     Rectangle {
-                        y: parent.height - 2px;
-                        height: 2px;
-                        background: Theme.divider;
-                    }
-                }
+                        height: Table.head;
 
-                for d[i] in App.devices: Rectangle {
-                    height: 42px;
-                    background: row-touch.has-hover ? Theme.wash-4 : transparent;
+                        HorizontalLayout {
+                            padding-left: Theme.s2;
+                            padding-right: Theme.s2;
+                            spacing: Theme.s4;
 
-                    row-touch := TouchArea {}
-
-                    HorizontalLayout {
-                        padding-left: Theme.s2;
-                        padding-right: Theme.s2;
-                        spacing: Theme.s4;
+                            Rectangle { width: Table.check; }
+                            Th {
+                                text: @tr("CİHAZ");
+                                horizontal-stretch: 1;
+                                min-width: Table.name;
+                            }
+                            Th { text: @tr("SERİ NO"); width: Table.serial; }
+                            Th { text: @tr("BAĞLANTI"); width: Table.conn; }
+                            Th { text: @tr("ANDROID"); width: Table.android; }
+                            Th { text: @tr("EKRAN"); width: Table.screen; }
+                            Th { text: @tr("DURUM"); width: Table.state; }
+                            Th {
+                                text: @tr("İŞLEM");
+                                width: Table.action;
+                                horizontal-alignment: right;
+                            }
+                        }
 
                         Rectangle {
-                            width: 34px;
-                            // Rust owns the selection: it toggles the row in
-                            // App.devices and pushes the model back, so the box
-                            // shows what is actually selected.
-                            Chk {
-                                y: (parent.height - self.height) / 2;
-                                checked: d.selected;
-                                toggled => {
-                                    App.select-device(d.serial);
-                                    self.checked = d.selected;
+                            y: parent.height - 2px;
+                            height: 2px;
+                            background: Theme.divider;
+                        }
+                    }
+
+                    for d[i] in App.devices: Rectangle {
+                        height: Table.row;
+                        background: row-touch.has-hover ? Theme.wash-4 : transparent;
+
+                        row-touch := TouchArea {}
+
+                        HorizontalLayout {
+                            padding-left: Theme.s2;
+                            padding-right: Theme.s2;
+                            spacing: Theme.s4;
+
+                            Rectangle {
+                                width: Table.check;
+                                // Rust owns the selection: it toggles the row in
+                                // App.devices and pushes the model back, so the box
+                                // shows what is actually selected.
+                                Chk {
+                                    y: (parent.height - self.height) / 2;
+                                    checked: d.selected;
+                                    toggled => {
+                                        App.select-device(d.serial);
+                                        self.checked = d.selected;
+                                    }
+                                }
+                            }
+                            Td {
+                                text: d.name;
+                                font-weight: 600;
+                                horizontal-stretch: 1;
+                                min-width: Table.name;
+                            }
+                            Mono {
+                                text: d.serial;
+                                width: Table.serial;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            Td { text: d.conn; width: Table.conn; }
+                            Td { text: d.android; width: Table.android; }
+                            Mono {
+                                text: d.screen;
+                                width: Table.screen;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            Rectangle {
+                                width: Table.state;
+                                Tag {
+                                    y: (parent.height - self.height) / 2;
+                                    text: d.state;
+                                    kind: "neutral";
+                                }
+                            }
+                            Rectangle {
+                                width: Table.action;
+                                Btn {
+                                    x: parent.width - self.width;
+                                    y: (parent.height - self.height) / 2;
+                                    width: self.min-width;
+                                    text: @tr("Aynala");
+                                    kind: "ghost";
+                                    clicked => { App.mirror-device(d.serial); }
                                 }
                             }
                         }
-                        Td {
-                            text: d.name;
-                            font-weight: 600;
-                            horizontal-stretch: 1;
-                            min-width: 150px;
-                        }
-                        Mono {
-                            text: d.serial;
-                            width: 170px;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                        Td { text: d.conn; width: 90px; }
-                        Td { text: d.android; width: 80px; }
-                        Mono {
-                            text: d.screen;
-                            width: 100px;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                        Rectangle {
-                            width: 90px;
-                            Tag {
-                                y: (parent.height - self.height) / 2;
-                                text: d.state;
-                                kind: "neutral";
-                            }
-                        }
-                        Rectangle {
-                            width: 90px;
-                            Btn {
-                                x: parent.width - self.width;
-                                y: (parent.height - self.height) / 2;
-                                width: self.min-width;
-                                text: @tr("Aynala");
-                                kind: "ghost";
-                                clicked => { App.mirror-device(d.serial); }
-                            }
-                        }
-                    }
 
-                    Rectangle {
-                        y: parent.height - 1px;
-                        height: 1px;
-                        background: Theme.divider;
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            background: Theme.divider;
+                        }
                     }
                 }
             }

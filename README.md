@@ -760,6 +760,28 @@ in parallel and a third read it. They take turns now — 60 runs, none failed.
   else at any of them, which is the part that was fixed. `min-width: 900px` is a promise the
   content cannot keep, and in Slint it replaces the layout's own minimum rather than raising
   it, so it is the only minimum the panel ever states.
+- **The Devices table was wider than the window it is given, and sheared rather than
+  scrolled.** Seven of its eight columns are a fixed number of pixels — 34 for the tick box,
+  170 for the serial, then 90, 80, 100, 90 and 90 — and with the eighth column's floor of
+  150, seven 16px gaps and 8px of padding either side they come to 932. The tab is the window
+  less 24 either side, so the table fits at 1200 and at nothing narrower: 900px of room at
+  948, 852 at the 900 the panel calls its minimum. What that looked like is the header's last
+  column reading "ACT" and every row's button reading "Mirr", cut off at the window's edge —
+  and that button is the one thing on the row that starts a session, so it could not be
+  reached. The `ScrollView` around it pinned `viewport-width: self.visible-width` deliberately,
+  so that long serials and error output wrap rather than push a scrollbar under the tab. That
+  reason holds for the prose and not for the table: seven fixed columns have no narrower
+  layout to fall back to. The table has a scroller of its own now and the tab keeps its
+  width. Widening the whole tab was tried first and is worse — it takes the wireless panels
+  beside it, which wrap perfectly well, off the edge as well. The eight widths were written
+  out twice, under a comment saying the two copies must stay in step; they are one `Table`
+  global now, with the header and row heights beside them, and that is where the 932 comes
+  from rather than a third copy.
+  `the_device_table_fits_the_width_the_panel_is_given` renders the tab with two rows in it —
+  the panel's own scan needs a phone and the widths do not — and asserts that the scrollbar
+  is drawn at 948 and 900 and absent at 1200. This is the one entry here that was raised from
+  arithmetic before it was ever seen: `docs/screenshots/devices.png` is the empty state, so no
+  row had been photographed on this machine at all.
 - **Neither font the theme names is on this machine, so nothing in these pictures is the
   design's type.** `ui/theme.slint` asks for `Archivo`, and for the monospace surfaces —
   placeholders, serials, the command bar — it asks for `monospace`. `fc-list` has no Archivo
@@ -1462,7 +1484,7 @@ writing one. They are written in English; the interface and its `.po` are in Tur
 **Before opening a pull request:**
 
 ```bash
-cargo test --release        # 213 tests, 11 ignored
+cargo test --release        # 213 tests, 12 ignored
 cargo clippy --all-targets  # clean bar one lint the toolchain brought with it
 ```
 
