@@ -598,7 +598,14 @@ fn run_windowless(opts: &Options, video: session::VideoStream) -> Result<()> {
                 fps.add_frame();
                 let _ = recycle.try_send(frame);
             }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                // The sink's own delay queue is drained by the clock as well
+                // as by an arriving frame; see `flush_due`.
+                if let Some(ref sink) = sink {
+                    sink.flush_due();
+                }
+                continue;
+            }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                 break "the end of the video stream";
             }

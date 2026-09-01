@@ -74,6 +74,20 @@ mod linux {
             format.raw[..bytes.len()].copy_from_slice(bytes);
             format
         }
+
+        /// The pixel format as it stands, which after the ioctl is the one the
+        /// driver accepted rather than the one it was handed.
+        fn pix(&self) -> PixFormat {
+            let mut pix = PixFormat::default();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    self.raw.as_ptr(),
+                    &mut pix as *mut PixFormat as *mut u8,
+                    std::mem::size_of::<PixFormat>(),
+                );
+            }
+            pix
+        }
     }
 
     /// `VIDIOC_S_FMT` = `_IOWR('V', 5, struct v4l2_format)`.
@@ -137,7 +151,18 @@ mod linux {
         /// whatever else the log had to say. Now the first is a warning and the
         /// rest are counted, with one more line when it starts working again.
         failed_writes: std::cell::Cell<u64>,
+        /// How many delayed frames may be held; see `write_frame`.
+        max_queued: usize,
+        /// Whether the "we are dropping frames" line has been said once.
+        warned_about_dropping: std::cell::Cell<bool>,
     }
+
+    /// The fewest delayed frames the sink will hold whatever the buffer.
+    const MIN_QUEUED: usize = 16;
+
+    /// The frame rate the queue cap is sized against, for the same reason the
+    /// delay buffer next door has one: only the bound depends on it.
+    const ASSUMED_FPS: u32 = 60;
 
     impl V4l2Sink {
         /// Open a loopback device and negotiate RGB24 at this size.
@@ -174,6 +199,38 @@ mod linux {
                 bail!("VIDIOC_S_FMT on {device} failed: {error}");
             }
 
+            // VIDIOC_S_FMT is _IOWR — this file builds it that way itself —
+            // because the driver writes back the format it actually accepted,
+            // and it returns 0 whether or not that is the one it was asked for.
+            // The returned struct was never looked at, so a device that
+            // adjusted the size, the stride or the pixel format left the sink
+            // writing its own numbers at its own stride for the rest of the
+            // session, while the log announced the size that had been asked
+            // for.
+            let accepted = format.pix();
+            if accepted.width != width
+                || accepted.height != height
+                || accepted.pixelformat != PIX_FMT_RGB24
+            {
+                let error = format!(
+                    "{device} accepted {}x{} fourcc {:#010x} rather than {width}x{height} RGB24",
+                    accepted.width, accepted.height, accepted.pixelformat
+                );
+                unsafe { libc::close(fd) };
+                bail!("VIDIOC_S_FMT on {error}");
+            }
+            // The stride and the frame size are the driver's to choose even
+            // when the geometry is the one asked for, so they are taken from
+            // its answer rather than recomputed.
+            let sizeimage = if accepted.sizeimage > 0 { accepted.sizeimage } else { sizeimage };
+            if accepted.bytesperline != bytesperline {
+                log::warn!(
+                    "V4L2 {device} wants {} bytes a line rather than {bytesperline}; \
+                     the picture may shear",
+                    accepted.bytesperline
+                );
+            }
+
             if buffer_ms > 0 {
                 log::info!("V4L2 sink: {device} at {width}x{height} RGB24, {buffer_ms} ms buffer");
             } else {
@@ -189,6 +246,8 @@ mod linux {
                 queue: std::cell::RefCell::new(std::collections::VecDeque::new()),
                 packed: std::cell::RefCell::new(Vec::new()),
                 failed_writes: std::cell::Cell::new(0),
+                max_queued: MIN_QUEUED.max((buffer_ms * ASSUMED_FPS / 1000) as usize),
+                warned_about_dropping: std::cell::Cell::new(false),
             })
         }
 
@@ -245,12 +304,40 @@ mod linux {
 
             // A frame is several megabytes, so the queue is capped by frame
             // count as well as by time: a stalled consumer must not grow it
-            // without bound.
-            const MAX_QUEUED: usize = 16;
-            while queue.len() > MAX_QUEUED {
-                queue.pop_front();
+            // without bound. The cap has to be at least what the delay itself
+            // holds, though, and it used to be a flat sixteen: a delay of D ms
+            // at F fps needs D*F/1000 frames in flight, so from about 267 ms at
+            // 60 fps every frame was discarded sixteen arrivals after it was
+            // queued and none ever came due. `--v4l2-buffer=300` published
+            // nothing at all for the whole session while the log said the sink
+            // was open, and both callers drop the `false` this returns.
+            while queue.len() > self.max_queued {
+                let dropped = queue.pop_front();
+                if dropped.is_some() && !self.warned_about_dropping.replace(true) {
+                    log::warn!(
+                        "V4L2 sink {} is more than {} frames behind; frames are being \
+                         dropped before they come due",
+                        self.device,
+                        self.max_queued
+                    );
+                }
             }
 
+            self.flush_due()
+        }
+
+        /// Write out whatever has come due, and say whether anything went.
+        ///
+        /// Called on every tick rather than only on the ticks that carry a
+        /// frame. The queue used to be drained only by an arriving frame, and
+        /// the device sends nothing while its screen is still — this crate says
+        /// so itself in `fps_counter.rs`, which is why the counter had to be
+        /// taught to decay. So the last frames of every change stayed in the
+        /// queue until the next change, and the last frames of a session were
+        /// dropped with the sink. A delay is meant to shift frames in time, not
+        /// to swallow the tail.
+        pub fn flush_due(&self) -> bool {
+            let mut queue = self.queue.borrow_mut();
             let now = std::time::Instant::now();
             let mut wrote = false;
             while queue.front().is_some_and(|frame| frame.due <= now) {
@@ -268,16 +355,35 @@ mod linux {
                     self.frame_bytes,
                 )
             };
-            if written < 0 {
+            // A short write is a failed one. `write(2)` says plainly that "a
+            // successful write() may transfer fewer than count bytes", and
+            // v4l2loopback is one of the callers that does it: its write
+            // handler copies `min(count, dev->buffer_size)`, marks the buffer
+            // used at that length and returns it as a success. Counting that
+            // as a published frame meant a truncated or wrongly strided
+            // picture went out for the whole session with nothing logged, and
+            // it reset the failure counter on the way past.
+            if written < 0 || written as usize != self.frame_bytes {
                 let failures = self.failed_writes.get() + 1;
                 self.failed_writes.set(failures);
                 if failures == 1 {
-                    log::warn!(
-                        "V4L2 write to {} failed: {} — further failures will be counted \
-                         rather than repeated",
-                        self.device,
-                        std::io::Error::last_os_error()
-                    );
+                    if written < 0 {
+                        log::warn!(
+                            "V4L2 write to {} failed: {} — further failures will be counted \
+                             rather than repeated",
+                            self.device,
+                            std::io::Error::last_os_error()
+                        );
+                    } else {
+                        log::warn!(
+                            "V4L2 write to {} took {} bytes of {} — the device negotiated a \
+                             smaller buffer than the frame; further short writes will be \
+                             counted rather than repeated",
+                            self.device,
+                            written,
+                            self.frame_bytes
+                        );
+                    }
                 }
                 return false;
             }

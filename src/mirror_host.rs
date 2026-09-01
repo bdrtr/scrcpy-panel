@@ -403,7 +403,17 @@ fn start_pump(
 
         let mut latest = match frames.try_recv() {
             Ok(frame) => frame,
-            Err(crossbeam_channel::TryRecvError::Empty) => return,
+            Err(crossbeam_channel::TryRecvError::Empty) => {
+                // Nothing new, but `--v4l2-buffer` may still owe the sink a
+                // frame that has come due. The device sends nothing while its
+                // screen is still, so a queue drained only by an arriving
+                // frame holds the last of every change until the next one and
+                // loses the last of the session altogether.
+                if let Some(ref sink) = v4l2 {
+                    sink.flush_due();
+                }
+                return;
+            }
             Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 ended.set(true);
                 on_end();
@@ -444,8 +454,16 @@ fn start_pump(
         // decoded and recycled — it is simply never turned into an image or
         // drawn. A paused mirror that stopped taking frames would stall the
         // decoder and the recording behind it.
-        fps.borrow_mut().add_frame();
+        //
+        // Which is why the counter is inside the branch and not above it. It
+        // counts rendered frames — `fps_counter.rs` says so twice, and MOD+i
+        // is documented as the frame rate of the rendering it is attached to —
+        // and counting them here meant a paused mirror went on reporting the
+        // full rate in the panel's "Kare hızı" row and under --print-fps, and
+        // a --no-video-playback session reported one for a picture that was
+        // never drawn at all. Nothing stalls: the other arm still recycles.
         if playback && !paused.get() {
+            fps.borrow_mut().add_frame();
             apply(MirrorUpdate::Frame(frame_to_image(&latest, flip.get())));
             if !live.get() {
                 live.set(true);

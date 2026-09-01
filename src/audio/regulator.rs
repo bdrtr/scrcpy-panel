@@ -196,8 +196,17 @@ pub struct AudioRegulator {
     played: Arc<AtomicBool>,
     /// Cumulative underflow samples (set by consumer, read by producer)
     underflow: Arc<AtomicU32>,
-    /// Whether we've received any audio yet
-    received: bool,
+    /// The underflow taken off that counter and not yet reported.
+    ///
+    /// The counter is emptied on every push and read once a second, and the
+    /// two periods are not the same: Opus, the default codec, sends 20 ms
+    /// packets, so `samples_since_resync` needs fifty pushes to come round and
+    /// forty-nine counts were swapped to zero and dropped. The one number that
+    /// says the sound card is starving described the last 20 ms of the second
+    /// it claimed to cover, and printed 0 through a continuous dropout unless
+    /// the starved callback happened to be the last one. It accumulates here
+    /// between reports instead.
+    pending_underflow: u32,
 }
 
 impl AudioRegulator {
@@ -229,7 +238,7 @@ impl AudioRegulator {
             samples_since_resync: 0,
             played: Arc::new(AtomicBool::new(false)),
             underflow: Arc::new(AtomicU32::new(0)),
-            received: false,
+            pending_underflow: 0,
         }
     }
 
@@ -286,13 +295,14 @@ impl AudioRegulator {
             }
         }
 
-        self.received = true;
         if !played {
             return;
         }
 
         // Update average buffering
-        let underflow = self.underflow.swap(0, Ordering::Relaxed);
+        self.pending_underflow = self
+            .pending_underflow
+            .saturating_add(self.underflow.swap(0, Ordering::Relaxed));
         let can_read = buf.can_read();
         drop(buf); // release lock before smoothing
 
@@ -310,9 +320,12 @@ impl AudioRegulator {
                 // More than 4ms off: log it
                 log::debug!(
                     "[Audio] Buffering: target={} avg={:.0} cur={} underflow={}",
-                    self.target_buffering, avg, can_read, underflow
+                    self.target_buffering, avg, can_read, self.pending_underflow
                 );
             }
+            // Cleared with the report rather than with every push, which is
+            // what makes the number cover the second it is printed beside.
+            self.pending_underflow = 0;
         }
     }
 }

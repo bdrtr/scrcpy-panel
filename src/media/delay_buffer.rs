@@ -61,6 +61,18 @@ struct DelayBufferInner {
     /// Device time against this machine's, updated by the producer on every
     /// push and read by the consumer on every wake.
     clock: Clock,
+    /// Whether the one frame that does not wait has gone.
+    ///
+    /// This used to be asked of the clock — `!clock.is_set()` — and the clock
+    /// is only ever set by a frame that carries a timestamp. A stream whose
+    /// frames carry none therefore left it unset for ever, so *every* push
+    /// looked like the first, and since the worker keeps the queue empty
+    /// almost all of the time, every frame took the straight-through path.
+    /// `--video-buffer` became a complete no-op for exactly the stream the
+    /// comments here promise to handle — and the test that covers it pushes
+    /// one frame into an empty queue, which is the bypass, so it passed
+    /// without ever reaching the code it names.
+    first_frame_sent: bool,
 }
 
 /// Delay buffer that holds frames for a configurable duration
@@ -68,8 +80,23 @@ pub struct DelayBuffer {
     inner: Arc<(Mutex<DelayBufferInner>, Condvar)>,
     /// A second handle on the way out, for the one frame that does not wait.
     output: Sender<DecodedFrame>,
+    /// How many frames the queue may hold; see `push`.
+    capacity: usize,
     _thread: Option<thread::JoinHandle<()>>,
 }
+
+/// The fewest frames the queue will hold whatever the delay.
+///
+/// A delay of a few milliseconds still wants room for the frames in flight,
+/// and this is the same figure the V4L2 sink's own queue uses.
+const MIN_QUEUED: usize = 16;
+
+/// The frame rate the bound is sized against.
+///
+/// Only the cap depends on it, and only when the delay is long: at 60 fps a
+/// 200 ms buffer holds twelve frames, so the bound sits above what the buffer
+/// is meant to do and below what a stalled consumer would otherwise retain.
+const ASSUMED_FPS: u32 = 60;
 
 impl DelayBuffer {
     /// Create a new delay buffer.
@@ -83,6 +110,7 @@ impl DelayBuffer {
                 queue: VecDeque::new(),
                 stopped: false,
                 clock: Clock::new(),
+                first_frame_sent: false,
             }),
             Condvar::new(),
         ));
@@ -101,6 +129,7 @@ impl DelayBuffer {
         Self {
             inner,
             output: straight_through,
+            capacity: MIN_QUEUED.max((delay_ms * ASSUMED_FPS / 1000) as usize),
             _thread: Some(thread),
         }
     }
@@ -113,7 +142,7 @@ impl DelayBuffer {
         let (lock, cvar) = &*self.inner;
         let mut state = lock.lock().unwrap();
 
-        let first = !state.clock.is_set();
+        let first = !state.first_frame_sent;
         if let Some(pts) = frame.pts {
             state.clock.update(micros_now(), pts);
         }
@@ -129,9 +158,29 @@ impl DelayBuffer {
         // it is: a frame that arrived without a timestamp is already queued
         // behind nothing, and this one must not overtake it.
         if first && state.queue.is_empty() {
+            state.first_frame_sent = true;
             drop(state);
             let _ = self.output.send(frame);
             return;
+        }
+        state.first_frame_sent = true;
+
+        // The queue is bounded from here on. Every other stage of the video
+        // path is — packets 8, frames 4, the pool 6, the V4L2 delay 16 — and
+        // this one was not, while the decoder allocates a fresh full-size
+        // buffer whenever the recycle channel is empty. The consumer is a
+        // timer on the event-loop thread, and the panel runs blocking work
+        // there: `on_screenshot` shells out to `adb exec-out screencap -p`
+        // synchronously, which is the better part of a second. At 60 fps and
+        // 1080x2400 RGBA that is about 600 MB of frames retained in one
+        // burst, none of which anyone will look at.
+        //
+        // The bound is what the delay can actually hold — a frame older than
+        // the delay is a frame the consumer will release the moment it wakes —
+        // with a floor for the small-delay case. The oldest goes, because the
+        // newest is the one worth drawing when a stall ends.
+        while state.queue.len() >= self.capacity {
+            state.queue.pop_front();
         }
 
         let pts = frame.pts;
@@ -402,6 +451,72 @@ mod tests {
             rx.recv_timeout(Duration::from_secs(2)).is_ok(),
             "a frame with no pts never came out"
         );
+    }
+
+    /// And a stream of them is still buffered, which is the half the test
+    /// above could not see. "First frame" used to be asked of the clock, and
+    /// only a stamped frame ever sets the clock — so for an unstamped stream
+    /// every push looked like the first, and since the worker keeps the queue
+    /// empty almost always, every frame took the straight-through path.
+    /// `--video-buffer` was a complete no-op for the one case this file
+    /// promises twice to handle, and the test above passes either way because
+    /// one frame into an empty queue *is* the bypass.
+    #[test]
+    fn a_stream_with_no_timestamps_is_still_buffered() {
+        let (tx, rx) = bounded(8);
+        let buffer = DelayBuffer::new(200, tx);
+
+        buffer.push(DecodedFrame::empty());
+        assert!(
+            rx.recv_timeout(Duration::from_millis(80)).is_ok(),
+            "the first frame does not wait, whether or not it is stamped"
+        );
+
+        let pushed = Instant::now();
+        buffer.push(DecodedFrame::empty());
+        assert!(
+            rx.recv_timeout(Duration::from_millis(80)).is_err(),
+            "the second went straight through: the buffer is doing nothing"
+        );
+        assert!(
+            rx.recv_timeout(Duration::from_millis(500)).is_ok(),
+            "and then it never came out at all"
+        );
+        assert!(
+            pushed.elapsed() >= Duration::from_millis(150),
+            "it came out after {:?}, which is not the 200 ms that was asked for",
+            pushed.elapsed()
+        );
+    }
+
+    /// The queue is bounded. Every other stage of the video path is, and the
+    /// consumer here is a timer on the event-loop thread — which the panel
+    /// blocks for the better part of a second whenever the screenshot button
+    /// shells out to `adb exec-out screencap`. At 60 fps and 1080x2400 RGBA
+    /// that stall used to retain some 600 MB of frames nobody will ever look
+    /// at, because nothing in this path could push back.
+    #[test]
+    fn a_consumer_that_stopped_does_not_grow_the_queue_for_ever() {
+        // A channel of one, and nobody reading it: the worker takes a frame,
+        // blocks on the send, and the producer goes on pushing.
+        let (tx, rx) = bounded(1);
+        let buffer = DelayBuffer::new(1_000, tx);
+        for i in 0..2_000 {
+            buffer.push(a_frame_at(i * 16_000));
+        }
+        let held = buffer.inner.0.lock().unwrap().queue.len();
+        assert!(
+            held <= buffer.capacity,
+            "two thousand frames pushed into a stalled consumer left {held} held, \
+             over a cap of {}",
+            buffer.capacity
+        );
+
+        // Let the worker out before the buffer's own Drop joins it: it is
+        // blocked in `send` on a channel of one that nobody is reading, and
+        // `stop` does not interrupt a blocked send. Letting go of the receiver
+        // does.
+        drop(rx);
     }
 
     /// Being told to stop ends the thread now, not when the delay it was
