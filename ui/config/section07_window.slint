@@ -37,7 +37,16 @@ export component SectionWindow inherits VerticalLayout {
                     labels: ["0°", "90°", "180°", "270°"];
                     values: ["0", "90", "180", "270"];
                     value <=> Cfg.orientation;
-                    changed => { Cfg.changed(); }
+                    // scrcpy defines --orientation as the shorthand for setting
+                    // the display and the recording together, so the two
+                    // pickers that show them move with it. They used to be left
+                    // reading 0° while this read 90°, and since both of them
+                    // override it, the picture did not turn either.
+                    changed => {
+                        Cfg.display-orientation = Cfg.orientation;
+                        Cfg.record-orientation = Cfg.orientation;
+                        Cfg.changed();
+                    }
                 }
             }
         }

@@ -127,6 +127,30 @@ fn expand_bit_rate(value: &str) -> String {
     }
 }
 
+/// The flags this fork has and scrcpy does not.
+///
+/// One, at the time of writing, and its own help says so: "Not a scrcpy
+/// option. scrcpy syncs both ways or not at all; this narrows it without
+/// turning it off."
+const FORK_ONLY: [&str; 1] = ["--clipboard-direction"];
+
+/// Which binary the line at the bottom should name.
+///
+/// The bar's contract is that it is canonical scrcpy — copyable into a
+/// terminal, pastable into an issue — and a fork-only flag makes that untrue:
+/// `scrcpy --clipboard-direction=to-device` dies on the first token with
+/// "unrecognized option". Naming this binary instead keeps the line true about
+/// what runs it. `--forward-all-clicks` used to be the other one and is now
+/// emitted as the `--mouse-bind=++++` it is defined to equal.
+fn binary_for(flags: &[String]) -> &'static str {
+    let fork_only = flags.iter().any(|flag| {
+        FORK_ONLY
+            .iter()
+            .any(|name| flag == name || flag.starts_with(&format!("{name}=")))
+    });
+    if fork_only { "scrcpy-panel" } else { "scrcpy" }
+}
+
 impl PanelConfig {
     /// The command shown in the bar at the bottom, as canonical scrcpy flags.
     pub fn to_flags(&self) -> Vec<String> {
@@ -151,15 +175,27 @@ impl PanelConfig {
         opt("--crop", &self.crop, &d.crop);
         opt("--display-id", &self.display_id, &d.display_id);
         opt("--video-buffer", &self.video_buffer, &d.video_buffer);
-        // Not through `opt`. "0" is a value the user can pick here and not
-        // only the value the form starts at, because --display-orientation
-        // overrides --orientation for the window and --record-orientation does
-        // the same for the file. `opt` suppresses anything equal to the
-        // default, so an explicit 0 vanished, `display_rotation()` fell back to
-        // --orientation, and the picture turned while the control that governs
-        // it read 0. Sent whenever it differs from the flag it overrides, which
-        // is the only case where saying it changes anything.
-        opt("--display-orientation", &self.display_orientation, &self.orientation);
+        // Against its own default, and `--orientation` is not emitted at all.
+        //
+        // The three pickers were three independent flags, compared against each
+        // other: the two overrides were emitted whenever they *differed from*
+        // `--orientation`, so setting only section 07's Döndürme to 90 put
+        // `--display-orientation=0 --record-orientation=0` on the line beside
+        // it — and both of those override it, so the picker rotated nothing.
+        // Pasted into the real binary it went wrong the other way, since scrcpy
+        // parses left to right and the last write wins, so the `--orientation=90`
+        // emitted later silently overrode the two zeroes. One line, two
+        // opposite results.
+        //
+        // scrcpy defines `--orientation` as the shorthand for setting the two
+        // specific ones together, so the shorthand is resolved in the form
+        // rather than passed on: section 07's picker moves the other two with
+        // it (`section07_window.slint`), and what is emitted is only ever what
+        // the two specific controls read. That also settles what the comment
+        // this replaces was about — an explicit upright against a rotated
+        // shorthand — because with no `--orientation` on the line, 0 is 0 and
+        // needs no saying.
+        opt("--display-orientation", &self.display_orientation, &d.display_orientation);
 
         // 02 · Ses
         opt("--audio-codec", &self.audio_codec, &d.audio_codec);
@@ -175,7 +211,7 @@ impl PanelConfig {
 
         // 03 · Kayıt
         opt("--time-limit", &self.time_limit, &d.time_limit);
-        opt("--record-orientation", &self.record_orientation, &self.orientation);
+        opt("--record-orientation", &self.record_orientation, &d.record_orientation);
 
         // 04 · Kontrol ve giriş
         opt("--keyboard", &self.keyboard, &d.keyboard);
@@ -188,16 +224,32 @@ impl PanelConfig {
 
         // 06 · Kamera — only meaningful when the camera is the video source
         if self.video_source == "camera" {
-            opt("--camera-facing", &self.camera_facing, &d.camera_facing);
-            opt("--camera-id", &self.camera_id, &d.camera_id);
-            opt("--camera-size", &self.camera_size, &d.camera_size);
-            opt("--camera-ar", &self.camera_ar, &d.camera_ar);
+            // scrcpy names the camera by exactly one of id or facing, and sizes
+            // it by exactly one of size or aspect ratio — "Cannot specify both
+            // --camera-id and --camera-facing", "Cannot specify both
+            // --camera-size and --camera-ar" — and section 06 offers all four
+            // as independent controls with nothing pairing them off. Both
+            // contradictions were being emitted, so the line was refused
+            // before it did anything, and the panel's own launch sent both
+            // halves to the server, which drops one of them on the device
+            // without saying which. The more specific of each pair wins.
+            if self.camera_id.is_empty() {
+                opt("--camera-facing", &self.camera_facing, &d.camera_facing);
+            } else {
+                opt("--camera-id", &self.camera_id, &d.camera_id);
+            }
+            if self.camera_size.is_empty() {
+                opt("--camera-ar", &self.camera_ar, &d.camera_ar);
+            } else {
+                opt("--camera-size", &self.camera_size, &d.camera_size);
+            }
             opt("--camera-fps", &self.camera_fps, &d.camera_fps);
         }
 
         // 07 · Pencere ve ekran
         opt("--window-title", &self.window_title, &d.window_title);
-        opt("--orientation", &self.orientation, &d.orientation);
+        // `--orientation` is the shorthand and is resolved into the two
+        // specific flags above; see the note there.
         opt("--window-x", &self.window_x, &d.window_x);
         opt("--window-y", &self.window_y, &d.window_y);
         opt("--window-width", &self.window_width, &d.window_width);
@@ -235,14 +287,27 @@ impl PanelConfig {
         flag(self.otg, "--otg");
         flag(self.no_control, "--no-control");
         flag(self.no_clipboard_autosync, "--no-clipboard-autosync");
-        flag(self.forward_all_clicks, "--forward-all-clicks");
+        // Emitted as what it is defined to be — this client's own help for the
+        // flag says "same as --mouse-bind=++++", and `mirror_host.rs` turns it
+        // into exactly that — because `--forward-all-clicks` is not a flag
+        // scrcpy has: it went when --mouse-bind replaced it, and the line the
+        // copy button puts on the clipboard died on it.
+        flag(self.forward_all_clicks, "--mouse-bind=++++");
         flag(self.legacy_paste, "--legacy-paste");
         flag(self.prefer_text, "--prefer-text");
         flag(self.raw_key_events, "--raw-key-events");
         flag(self.no_vd_destroy_content, "--no-vd-destroy-content");
         flag(self.no_vd_system_decorations, "--no-vd-system-decorations");
+        // "--camera-high-speed requires an explicit --camera-fps value" is
+        // scrcpy's own refusal, and the switch could be ticked with the FPS box
+        // empty: the copied line died on it, and the panel's own launch sent
+        // `camera_high_speed=true` with no range for the server to open a
+        // CameraConstrainedHighSpeedCaptureSession with, which comes back to
+        // the user as a connection timeout.
         flag(
-            self.camera_high_speed && self.video_source == "camera",
+            self.camera_high_speed
+                && self.video_source == "camera"
+                && !self.camera_fps.is_empty(),
             "--camera-high-speed",
         );
         flag(self.fullscreen, "--fullscreen");
@@ -256,8 +321,19 @@ impl PanelConfig {
         flag(self.no_power_on, "--no-power-on");
         flag(self.no_mipmaps, "--no-mipmaps");
         flag(self.force_adb_forward, "--force-adb-forward");
-        flag(self.select_usb, "--select-usb");
-        flag(self.select_tcpip, "--select-tcpip");
+        // At most one device selector, which is scrcpy's rule: "At most one
+        // device selector option may be passed, among --serial (-s),
+        // --select-usb (-d), --select-tcpip (-e)". Ticking a device fills
+        // `--serial`, and section 08 offers the two switches beside it, so the
+        // form could put two, three or four selectors on one line — a line
+        // scrcpy refuses before it does anything. Inside this client they do
+        // not error, they quietly do nothing: `select_device_filtered` returns
+        // the serial before the filter is consulted, and both switches
+        // together mean no filter at all. The narrower selector wins.
+        let has_serial = !self.serial.is_empty()
+            || (self.tcpip_enabled && !self.tcpip_addr.is_empty());
+        flag(!has_serial && self.select_usb && !self.select_tcpip, "--select-usb");
+        flag(!has_serial && self.select_tcpip && !self.select_usb, "--select-tcpip");
         flag(self.kill_adb_on_close, "--kill-adb-on-close");
         flag(self.no_cleanup, "--no-cleanup");
         // Switches that carry a value only when they are on.
@@ -321,11 +397,13 @@ impl PanelConfig {
     /// user can paste into a terminal unchanged.
     pub fn to_command_line_for(&self, serials: &[String]) -> String {
         if serials.len() < 2 {
-            let flags: Vec<String> = self.to_flags().iter().map(|f| shell_quoted(f)).collect();
+            let raw = self.to_flags();
+            let binary = binary_for(&raw);
+            let flags: Vec<String> = raw.iter().map(|f| shell_quoted(f)).collect();
             return if flags.is_empty() {
-                "scrcpy".to_string()
+                binary.to_string()
             } else {
-                format!("scrcpy {}", flags.join(" "))
+                format!("{} {}", binary, flags.join(" "))
             };
         }
 
@@ -335,16 +413,23 @@ impl PanelConfig {
         // ruined the other's; session_run.rs retags it per serial when it
         // launches, and this line has to say so or it is not the line that
         // runs. Pasting it used to reproduce the bug that was fixed.
-        let flags: Vec<String> = self
+        let raw: Vec<String> = self
             .to_flags()
             .into_iter()
-            .filter(|flag| !flag.starts_with("--serial="))
+            // `--serial=$s` is written below, and scrcpy takes at most one
+            // device selector, so the two switches cannot travel with it.
+            .filter(|flag| {
+                !flag.starts_with("--serial=")
+                    && flag != "--select-usb"
+                    && flag != "--select-tcpip"
+            })
             .map(|flag| match flag.strip_prefix("--record=") {
                 Some(path) => format!("--record={}", tag_file_name(path, "$s")),
                 None => flag,
             })
-            .map(|flag| shell_quoted(&flag))
             .collect();
+        let binary = binary_for(&raw);
+        let flags: Vec<String> = raw.iter().map(|flag| shell_quoted(flag)).collect();
 
         let joined = if flags.is_empty() {
             String::new()
@@ -352,8 +437,9 @@ impl PanelConfig {
             format!(" {}", flags.join(" "))
         };
         format!(
-            "for s in {}; do scrcpy --serial=$s{} & done",
+            "for s in {}; do {} --serial=$s{} & done",
             serials.join(" "),
+            binary,
             joined
         )
     }
@@ -498,26 +584,143 @@ mod tests {
         assert!(!line.contains("oturum.mp4"), "the shared path survived: {line}");
     }
 
-    /// `0` is a value the user can choose here, not only the one the form
-    /// starts at: --display-orientation overrides --orientation for the window
-    /// and --record-orientation does the same for the file. Suppressing it
-    /// because it equalled its own default let the picture turn while the
-    /// control that governs it read 0.
+    /// The three orientation pickers are two flags, and only the two specific
+    /// ones are ever emitted.
+    ///
+    /// They used to be compared against each other rather than against their
+    /// own defaults, so turning only section 07's Döndürme to 90 emitted
+    /// `--display-orientation=0 --record-orientation=0` beside it — and both
+    /// override it, so the picker rotated nothing. Pasted into the real binary
+    /// it went wrong the *other* way, because scrcpy's last write wins and
+    /// `--orientation=90` came later on the line. Section 07 moves the other
+    /// two pickers with it now, so what is emitted is what the controls read.
     #[test]
-    fn an_explicit_upright_survives_a_rotated_orientation() {
+    fn the_orientation_flags_are_the_ones_the_controls_read() {
+        // What the UI produces when Döndürme is set to 90: all three move.
         let config = PanelConfig {
             orientation: "90".to_string(),
-            display_orientation: "0".to_string(),
-            record_orientation: "0".to_string(),
+            display_orientation: "90".to_string(),
+            record_orientation: "90".to_string(),
             ..PanelConfig::default()
         };
         let flags = config.to_flags();
-        assert!(flags.contains(&"--display-orientation=0".to_string()), "{flags:?}");
-        assert!(flags.contains(&"--record-orientation=0".to_string()), "{flags:?}");
+        assert!(flags.contains(&"--display-orientation=90".to_string()), "{flags:?}");
+        assert!(flags.contains(&"--record-orientation=90".to_string()), "{flags:?}");
+        assert!(
+            !flags.iter().any(|f| f.starts_with("--orientation")),
+            "the shorthand is resolved, not passed on: {flags:?}"
+        );
 
-        // And an untouched form still produces nothing.
+        // And an upright window with a rotated recording, which is the case
+        // the two specific pickers exist for.
+        let config = PanelConfig {
+            orientation: "90".to_string(),
+            display_orientation: "0".to_string(),
+            record_orientation: "90".to_string(),
+            ..PanelConfig::default()
+        };
+        let flags = config.to_flags();
+        assert!(
+            !flags.iter().any(|f| f.starts_with("--display-orientation")),
+            "0 is scrcpy's own default and needs no saying: {flags:?}"
+        );
+        assert!(flags.contains(&"--record-orientation=90".to_string()), "{flags:?}");
+
+        // An untouched form still produces nothing.
         let flags = PanelConfig::default().to_flags();
         assert!(!flags.iter().any(|f| f.contains("orientation")), "{flags:?}");
+    }
+
+    /// Every combination scrcpy refuses outright, and the panel could put all
+    /// of them on one line.
+    #[test]
+    fn the_form_cannot_write_a_line_scrcpy_refuses() {
+        // "At most one device selector option may be passed."
+        let config = PanelConfig {
+            serial: "a1683d6b0013".to_string(),
+            select_usb: true,
+            select_tcpip: true,
+            ..PanelConfig::default()
+        };
+        let flags = config.to_flags();
+        assert!(flags.contains(&"--serial=a1683d6b0013".to_string()), "{flags:?}");
+        assert!(!flags.iter().any(|f| f.starts_with("--select-")), "{flags:?}");
+        // Both switches and no device is no filter at all rather than two.
+        let config = PanelConfig { select_usb: true, select_tcpip: true, ..PanelConfig::default() };
+        assert!(
+            !config.to_flags().iter().any(|f| f.starts_with("--select-")),
+            "{:?}",
+            config.to_flags()
+        );
+        // One on its own still travels.
+        let config = PanelConfig { select_usb: true, ..PanelConfig::default() };
+        assert!(config.to_flags().contains(&"--select-usb".to_string()));
+
+        // "Cannot specify both --camera-id and --camera-facing", and the same
+        // for --camera-size against --camera-ar.
+        let config = PanelConfig {
+            video_source: "camera".to_string(),
+            camera_id: "0".to_string(),
+            camera_facing: "front".to_string(),
+            camera_size: "1920x1080".to_string(),
+            camera_ar: "4:3".to_string(),
+            ..PanelConfig::default()
+        };
+        let flags = config.to_flags();
+        assert!(flags.contains(&"--camera-id=0".to_string()), "{flags:?}");
+        assert!(!flags.iter().any(|f| f.starts_with("--camera-facing")), "{flags:?}");
+        assert!(flags.contains(&"--camera-size=1920x1080".to_string()), "{flags:?}");
+        assert!(!flags.iter().any(|f| f.starts_with("--camera-ar")), "{flags:?}");
+
+        // "--camera-high-speed requires an explicit --camera-fps value."
+        let config = PanelConfig {
+            video_source: "camera".to_string(),
+            camera_high_speed: true,
+            ..PanelConfig::default()
+        };
+        assert!(
+            !config.to_flags().contains(&"--camera-high-speed".to_string()),
+            "{:?}",
+            config.to_flags()
+        );
+        let config = PanelConfig {
+            video_source: "camera".to_string(),
+            camera_high_speed: true,
+            camera_fps: "240".to_string(),
+            ..PanelConfig::default()
+        };
+        assert!(config.to_flags().contains(&"--camera-high-speed".to_string()));
+    }
+
+    /// The bar's contract is that the line is canonical scrcpy. Two flags in it
+    /// were not: `--forward-all-clicks` went upstream when `--mouse-bind`
+    /// replaced it, and `--clipboard-direction` is this fork's own.
+    #[test]
+    fn the_line_is_true_about_the_binary_that_runs_it() {
+        let config = PanelConfig { forward_all_clicks: true, ..PanelConfig::default() };
+        let line = config.to_command_line();
+        assert!(
+            line.contains("--mouse-bind=++++"),
+            "this client's own help says the flag means exactly that: {line}"
+        );
+        assert!(!line.contains("--forward-all-clicks"), "{line}");
+        assert!(line.starts_with("scrcpy "), "and it is still scrcpy's line: {line}");
+
+        // The one that has no scrcpy spelling names the binary that has it.
+        let config = PanelConfig {
+            clipboard_direction: "toDevice".to_string(),
+            ..PanelConfig::default()
+        };
+        let line = config.to_command_line();
+        assert!(line.contains("--clipboard-direction=to-device"), "{line}");
+        assert!(
+            line.starts_with("scrcpy-panel "),
+            "a fork-only flag makes `scrcpy` untrue: {line}"
+        );
+
+        // And the several-device loop says the same thing.
+        let line = config.to_command_line_for(&["a".to_string(), "b".to_string()]);
+        assert!(line.contains("do scrcpy-panel --serial=$s"), "{line}");
     }
 
     use super::*;
@@ -708,6 +911,10 @@ mod tests {
         let mut cfg = PanelConfig {
             camera_id: "1".into(),
             camera_high_speed: true,
+            // The switch on its own is a line scrcpy refuses, so the FPS it
+            // requires is part of what a camera session looks like here; see
+            // `the_form_cannot_write_a_line_scrcpy_refuses`.
+            camera_fps: "240".into(),
             ..Default::default()
         };
         assert!(cfg.to_flags().is_empty(), "camera settings are inert while mirroring the display");
@@ -715,6 +922,7 @@ mod tests {
         cfg.video_source = "camera".into();
         let flags = cfg.to_flags();
         assert!(flags.contains(&"--camera-id=1".to_string()));
+        assert!(flags.contains(&"--camera-fps=240".to_string()));
         assert!(flags.contains(&"--camera-high-speed".to_string()));
     }
 

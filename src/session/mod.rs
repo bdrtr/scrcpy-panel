@@ -194,6 +194,28 @@ impl Session {
             }
         }
 
+        // "At most one device selector option may be passed, among --serial
+        // (-s), --select-usb (-d), --select-tcpip (-e)" — scrcpy's own words
+        // and its own refusal. Here the same combinations did not error, they
+        // quietly did nothing: `select_device_filtered` returns the serial
+        // before the filter is ever consulted, and both switches together
+        // folded into `Any`, which is no filter at all rather than a
+        // contradiction. Silently ignoring one of two things the user asked
+        // for leaves them guessing which won.
+        let selectors = [
+            opts.serial.is_some().then_some("--serial"),
+            opts.tcpip.is_some().then_some("--tcpip"),
+            opts.select_usb.then_some("--select-usb"),
+            opts.select_tcpip.then_some("--select-tcpip"),
+        ];
+        let named: Vec<&str> = selectors.into_iter().flatten().collect();
+        if named.len() > 1 {
+            anyhow::bail!(
+                "At most one device selector may be passed, and these were: {}",
+                named.join(", ")
+            );
+        }
+
         // The address `--tcpip` connected is the device meant, unless the
         // command line named one outright.
         let connected = connect_tcpip_if_requested(opts)?;

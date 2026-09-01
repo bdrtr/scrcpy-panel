@@ -45,7 +45,12 @@ use crate::ui::{
 
 
 /// A saved set of flags.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+///
+/// `#[serde(default)]` for the same reason as `StoredSettings`, and it costs
+/// more here: one entry missing one key made the whole file unreadable, so the
+/// user's entire profile list was renamed away.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 struct Profile {
     name: String,
     description: String,
@@ -767,7 +772,18 @@ fn autostart_if_wanted(panel: &Rc<Panel>, window: &PanelWindow, ready: Option<&s
 
 
 
+/// `#[serde(default)]` on the container, not for tidiness.
+///
+/// Without it a *missing* key is a parse error rather than a defaulted field,
+/// and the loader treats a parse error as corruption: it renames the file to
+/// `settings.json.broken` and starts again with nothing. So a settings file
+/// written by any earlier build — one field fewer, which is how this file has
+/// grown — lost every preference at once, adb path and port and language and
+/// both folders, behind a `log::warn!` at startup that nobody is watching. The
+/// forward direction was already fine: an *unknown* key is ignored. It was
+/// only backwards compatibility that was fatal, which is the wrong way round.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(default)]
 struct StoredSettings {
     adb_path: String,
     adb_port: String,
