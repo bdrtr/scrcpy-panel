@@ -712,6 +712,210 @@ Two tests were also racing each other rather than testing anything: `cargo test 
 adb::settings` failed 5 runs in 60, because two tests wrote the same process-wide setting
 in parallel and a third read it. They take turns now — 60 runs, none failed.
 
+### The eight corners the earlier hunts had gone round
+
+A later sweep took the eight clusters no round had read: the HID report bytes, the Slint
+input translation, the control protocol's serialisation, the adb layer's four command
+files, the timing and buffering, the recorder and its muxer, the window and V4L2 side, and
+the panel's own command building. Thirty-four things came back and every one of them held
+up against something outside this repository — a spec, a header, the shipped
+`scrcpy-server`'s bytecode, or the real binary run with nothing plugged in. **No device
+was attached for any of it**, which is worth saying plainly: what follows is argued from
+authorities and from code extracted into `/tmp` and run, not from a phone.
+
+- **Every scroll was sixteen times too far, and had exactly one speed.**
+  `INJECT_SCROLL_EVENT` carries its two axes as 16-bit fixed point, and this client wrote
+  the notch count straight into them. The field does not hold notches; it holds notches
+  over sixteen. The shipped server says so in its own bytecode: unzip
+  `/usr/share/scrcpy/scrcpy-server`, and at 0x49efc in `classes.dex` the sequence is
+  `readShort` → `Binary.i16FixedPointToFloat` → `const/high16 0x4180` (16.0f) → `mul-float`,
+  once for each of the two values — and `0x4180` occurs exactly once in the whole 2.3 MB
+  dex. scrcpy's own client divides by the same sixteen on the way out. So one click of the
+  wheel jumped sixteen notches, and because the fixed point saturates at 1.0, a gentle
+  click and a hard flick put identical bytes on the wire. The test that covered it asserted
+  `i16::MAX` for one notch and pinned the defect in place; it asserts 2048 now.
+- **And the client was not measuring the scroll either.** Slint reports it in pixels and its
+  winit backend turns one detent into sixty of them (`event_loop.rs`: `LineDelta(lx, ly) =>
+  (lx * 60., ly * 60.)`); `pointer_scroll` took the *sign* of that, so a touchpad frame of
+  half a pixel scrolled as far as a detent and anything under half a pixel scrolled not at
+  all and was not carried over.
+- **The horizontal axis is inverted in both input paths, and this one is not measured.**
+  The port is from an SDL client, and the two toolkits count that axis opposite ways: SDL's
+  x is "positive to the right", winit's is "positive values indicate that the content being
+  scrolled should move right" — which is the user scrolling *left*. winit's own X11 backend
+  settles which is which rather than the prose: X button 6 is scroll-left and arrives as
+  `LineDelta(1.0, 0.0)`. Android's `AXIS_HSCROLL` runs -1.0 left to 1.0 right, and the HID
+  descriptor's AC Pan byte the same way. It needs a wheel that tilts pointed at the client's
+  own window to try, which this workspace cannot do, so it is argued and labelled rather
+  than claimed.
+- **The mouse had five buttons in its descriptor and three in its code.** The report
+  descriptor is scrcpy's, copied byte for byte, and a HID item walker over the exact array
+  in `hid_mouse.rs` reads back `page=0x09 umin=1 umax=5 count=5` — five buttons, 40 input
+  bits, five bytes. `on_button` dropped the fourth and fifth on the strength of a comment
+  saying it declared three, so BTN_SIDE — the Back gesture, most of what a mouse on a phone
+  is for — did nothing on the very road (`aoa`) chosen because it works where injection
+  does not. On the SDK side the same two buttons had no Android bit at all, so the default
+  `--mouse-bind`, which binds both to *Forward*, sent a press with `actionButton` 0 and
+  `buttons` 0: a nameless tap. They are `BUTTON_BACK` 0x8 and `BUTTON_FORWARD` 0x10 in
+  android-36's own stubs.
+- **Two ways the pointer was never given back.** Handing it over with LAlt left any held
+  button down on the device for good — the press went while the capture was held,
+  `pointing()` is false the instant it is given away, so the physical release cleared the
+  mask and sent nothing, which also put it out of reach of the focus-loss sweep. Worse,
+  `detach` sets `captured` false and cannot apply it, having no window, and the one place
+  that applies a pending capture sat *behind* "is anything still attached" — which `detach`
+  has just made false. Stopping a session in the panel therefore left the window holding
+  the pointer for the rest of its life: locked with the cursor hidden under Wayland, an
+  active `grab_pointer` confined to the window under X11, with the LAlt toggle that would
+  rescue it behind the same guard.
+- **The repeat flag is always false under this backend, so three things that read it did
+  nothing.** `i-slint-backend-winit` builds the keyboard event as `KeyEvent::default()` and
+  never reads winit's `event.repeat`; grep the crate and the only hit is
+  `wasm_input_helper.rs`. The only native writers of that field in `i-slint-core` are the C
+  FFI and `WindowEvent::KeyPressRepeated`, and the winit backend calls `process_key_input`
+  directly and uses neither. So `--no-key-repeat` dropped nothing, the device was told
+  `repeat: 0` for every one of a run of repeats, and the guard that stops a held shortcut
+  from firing again could not fire: holding MOD+f strobed fullscreen at the keyboard's
+  repeat rate, MOD+r asked the device to rotate over and over, and Ctrl+V re-injected the
+  clipboard on every repeat. It is derived from what is held now, with scrcpy's own
+  climbing counter.
+- **A key-up for a press that never happened, and a press whose release was swallowed.**
+  The release path tested "is the shortcut modifier held", which answers a different
+  question twice over: a plain Ctrl+V pastes the host clipboard as text and sends no key at
+  all, so its release reached the device as an ACTION_UP with no ACTION_DOWN under it —
+  while a key pressed *before* MOD went down is one the device really is holding, and its
+  release was swallowed for as long as MOD stayed down.
+- **`--raw-key-events` could not type a digit.** That mode injects key events and ignores
+  text events, by scrcpy's own description, so a character with no keycode has no second
+  road — and the mapping covered only the ASCII letters and space. Every digit, comma, full
+  stop, hyphen, bracket and slash was dropped on the floor, in the mode scrcpy documents
+  for games, and the keycodes for all of them were already declared in `keymap.rs` and
+  called by nobody.
+- **The UHID keyboard leaked MOD into every shortcut.** A HID report's byte 0 says which
+  modifiers are down whether or not any usage id is in the key array, so it can introduce a
+  keystroke on its own. The press of MOD is correctly withheld — and then the f-release,
+  which is deliberately let through so the device does not keep holding the f, went out
+  carrying the modifier byte with MOD's bit still in it. The device saw a clean Left-Alt tap
+  around every MOD+f.
+- **A reverse tunnel the device refused was reported as opened.** `reverse:forward:` is not
+  the daemon's to grant: the daemon answers first to say it opened the service, and adbd on
+  the phone answers after it — and that second status was read into `let _` on a comment
+  calling it an optional OKAY. A device refusing to bind sends `OKAY OKAY FAIL cannot bind
+  listener: Address already in use`, which adb's own CLI exits 1 on. The client returned
+  Ok, logged "Listening on port 27183 (reverse)", started the server with
+  `tunnel_forward=false`, and then waited out the accept and blamed the socket — and the
+  documented fallback to a forward tunnel could never fire for the one refusal it exists
+  for.
+- **`adb connect` has a refusal with none of the words the predicate looked for.**
+  `adb connect 1.2.3.4:abc` prints `bad port number 'abc' in '1.2.3.4:abc'` on **stdout**
+  and exits **0** — measured here — and that matches none of "failed", "failure", "error:"
+  or "adb: ". So the panel showed adb's refusal as an ordinary info line and refreshed the
+  device list underneath it, which is verbatim the fault that function's own doc comment
+  describes as already fixed. An ordinary typo reaches it. It is a whitelist now: adb's
+  three success phrasings, all of them in the binary's own strings, and everything else is
+  a refusal.
+- **A device with no udev permission was listed with the state "no".** adb writes the line
+  as `%-22s %s` with whatever `connection_state_name()` returns, and for `kCsNoPerm` it
+  *composes* that name — `no permissions; see [http://developer.android.com/tools/device.html]`
+  — so splitting on whitespace took the first word. The DURUM column showed a device that
+  cannot be mirrored and offered "no" as the reason, where adb's own CLI names the cause and
+  links the fix.
+- **"No device connected. Plug in your phone and enable USB debugging." was shown to people
+  whose phone was connected with USB debugging on.** The state is on the wire —
+  `host:devices` answers `127.0.0.1:5602\toffline\n` — and was thrown away one function too
+  early, so "nothing attached" and "attached but not ready" were the same empty vector. A
+  phone showing the "Allow USB debugging?" dialog is exactly that case, and the sentence
+  sent its owner to a setting that is already on.
+- **`--record-orientation=90` turned the recording the other way.** libavutil's header:
+  "Initialize a transformation matrix describing a pure **clockwise** rotation by the
+  specified angle"; scrcpy's help for the flag: "the number represents the clockwise
+  rotation in degrees". The angle was negated on a comment claiming the opposite, so 90 and
+  270 produced each other's result — and 0 and 180 did not, which is why it survived a look.
+  Settled with the library rather than the prose: `av_display_rotation_set(m, 90)` then
+  `av_display_rotation_get(m)` gives -90, and `set(-90)` gives +90, which is the matrix for
+  270.
+- **One duplicate timestamp ended the recording.** The non-monotonic-PTS guard compared,
+  bumped by one and stored in microseconds, and the rescale to the stream's base happened
+  *after* it — but libavformat's contract is that packet timestamps are in the stream's
+  base, which the muxer chooses in `avformat_write_header` and does change: mp4 hands the
+  audio track back at 1/48000, where one tick is 20.8 µs. A one-microsecond bump therefore
+  rounded straight back onto the timestamp it was meant to clear, the muxer refused the
+  packet with EINVAL, and the packet loop stops on the first refusal. In matroska, base
+  1/1000 and `AVFMT_TS_NONSTRICT`, the same collision was accepted in silence and two
+  frames shared a timestamp.
+- **`--record=out.opus` created the file and then died.** The format selector's `_ => "mp4"`
+  was doing two jobs it should not have been. `.opus`, `.flac` and `.wav` got as far as
+  `avio_open`, which creates and truncates, and then died in the header write — "[opus]
+  Unsupported codec id in stream 0" — leaving a zero-byte file; `.m4a` and `.mka` quietly
+  took the video track scrcpy refuses; `--record-format=webm` wrote an MP4 and the log said
+  "out.webm (mp4)". The real binary refuses all of them here: *Audio container does not
+  support video stream*, *Unsupported record format: webm (expected mp4, mkv, m4a, mka,
+  opus, aac, flac or wav)*. Both refusals are made now, before the file is created, and
+  `aac` maps to the ADTS muxer rather than to mp4.
+- **A recorder that died went on being fed.** `stopped` was set in exactly one place,
+  `stop()`, so every other way out of the recorder thread — a container that will not take
+  the stream, an `avio_open` that could not make the file, a header that would not write, a
+  packet the muxer refused — left it installed, dead and still accepting. The demuxers push
+  into it for every packet and drop the `false` they were not being given, so both queues
+  grew at the video bit rate, 8 Mb/s by default, for the rest of the session.
+- **`--video-buffer` was a complete no-op for a stream with no timestamps**, which is the
+  one case the file promises twice to handle. "Is this the first frame" was asked of the
+  clock, and only a stamped frame ever sets the clock, so an unstamped stream left it unset
+  for ever and every push looked like the first — and the worker keeps the queue empty
+  almost always, so almost every frame took the straight-through path. The test that covered
+  it pushes one frame into an empty queue, which *is* the bypass.
+- **`--v4l2-buffer` over about 250 ms published nothing at all.** The queue's cap was a flat
+  sixteen frames applied *before* the due check, and a delay of D ms at F fps needs D·F/1000
+  frames in flight — so from 267 ms at 60 fps, or 133 at 120, every frame was discarded
+  sixteen arrivals after it was queued and none ever came due. The sink logged that it was
+  open and then wrote nothing for the whole session; both callers drop the `false` it
+  returns. Its queue was also drained only by an arriving frame, and the device sends
+  nothing while its screen is still — this file says so itself in `fps_counter.rs` — so the
+  last frames of every change waited for the next one and the last frames of a session were
+  dropped with the sink.
+- **A short write to the loopback counted as a published frame.** `write(2)`: "a successful
+  write() may transfer fewer than count bytes", and v4l2loopback is one of the callers that
+  does it — its write handler copies `min(count, dev->buffer_size)`, marks the buffer used
+  at that length and returns it as a success. In the same place, `VIDIOC_S_FMT` is `_IOWR`
+  precisely because the driver writes back the format it accepted, and the returned struct
+  was never looked at.
+- **The fps counter counted frames that were never drawn.** `add_frame` sat above the branch
+  that decides whether anything is drawn, so MOD+z froze the picture while the panel's
+  "Kare hızı" row and `--print-fps` went on reporting the full rate, and a
+  `--no-video-playback` session reported one for a picture that is never drawn at all.
+  `fps_counter.rs` says "counts rendered frames" twice.
+- **Section 07's "Döndürme · --orientation" rotated nothing.** The three orientation pickers
+  were emitted as three independent flags compared against *each other*, so setting only
+  that one to 90 put `--display-orientation=0 --record-orientation=0` on the line beside it
+  — and both of those override it. Pasted into the real binary the same line did the
+  opposite, because scrcpy parses left to right and the last write wins. One line, two
+  results, neither of them what any control read. The shorthand is resolved in the form now.
+- **And four more lines the form could write that scrcpy refuses outright**, all four
+  measured against the installed binary: `--serial` beside `--select-usb` ("At most one
+  device selector option may be passed"), `--camera-id` beside `--camera-facing` ("Cannot
+  specify both"), `--camera-size` beside `--camera-ar`, and `--camera-high-speed` with no
+  `--camera-fps` ("requires an explicit --camera-fps value"). The panel builds its command
+  line and its own launch from the same function, so each was wrong twice over. Two flags in
+  that line were not scrcpy's at all: `--forward-all-clicks`, which went upstream when
+  `--mouse-bind` replaced it and is emitted as the `--mouse-bind=++++` this client's own
+  help says it equals, and `--clipboard-direction`, which has no scrcpy spelling — a line
+  carrying it names `scrcpy-panel` rather than `scrcpy`.
+- **settings.json and profiles.json were thrown away whole when one key was missing.**
+  Neither struct had `#[serde(default)]`, so a missing field is a parse error rather than a
+  defaulted one, and the loader treats a parse error as corruption: rename to `.broken`,
+  start again with nothing, one `log::warn!` at startup nobody is watching. The *forward*
+  direction was already fine — an unknown key is ignored — so it was only backwards
+  compatibility that was fatal, which is the wrong way round for a file this program keeps
+  growing fields in.
+
+Two smaller things went with them: the audio underflow counter was reset on every push and
+read once a second, so with Opus's 20 ms packets forty-nine of every fifty counts were
+dropped and the one number that reports starvation described the last 20 ms of the second it
+was printed beside; and `--video-buffer`'s queue was the only stage of the video path with
+no bound at all — packets 8, frames 4, the pool 6, the sink's own 16 — while its consumer is
+a timer on the event-loop thread that the panel blocks for the better part of a second every
+time the screenshot button shells out to `adb exec-out screencap -p`.
+
 
 ## Known issues
 

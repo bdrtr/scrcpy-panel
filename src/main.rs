@@ -673,9 +673,12 @@ fn run(opts: Options) -> Result<()> {
     }
 
     // Why the loop ended, so the shutdown line does not have to be read by
-    // elimination. Every path out of the loop names itself; a run that names
-    // none of them was closed by the user or the compositor. The signal handler
-    // is the exception — it logs "Interrupted" of its own accord.
+    // elimination. Every path out of the loop names itself, the interrupt
+    // included — `watch_for_interrupt` sets "an interrupt" — and a run that
+    // names none of them was closed by the user or the compositor. (The
+    // sentence that used to stand here said the signal handler was an
+    // exception because it logs "Interrupted" of its own accord. That line is
+    // the panel's, in `panel/mod.rs`; nothing on this path writes it.)
     let reason = Rc::new(Cell::new("the window closing"));
 
     // The window's own rotation, not the session's. `--display-orientation`
