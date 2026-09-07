@@ -162,7 +162,7 @@ fn with_panel(f: impl FnOnce(&Rc<Panel>)) {
 ///
 /// `say` runs back on the event loop with the panel, so it can write to the
 /// models the way any callback does.
-pub(super) fn off_the_event_loop<T: Send + 'static>(
+fn off_the_event_loop<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
     say: impl FnOnce(&Rc<Panel>, T) + Send + 'static,
 ) {
@@ -392,9 +392,16 @@ fn path_with_adb_first(adb_path: &str) -> Option<std::ffi::OsString> {
 /// variable, the executable by putting its directory first on PATH.
 fn client_command(exe: &std::path::Path) -> Command {
     let mut command = Command::new(exe);
-    // 5037 is adb's own default; setting it changes nothing and only makes the
-    // environment of every child noisier.
-    if let Some(port) = crate::adb::settings::port().filter(|port| *port != 5037) {
+    // The port asked for goes on the child even when it is 5037. This used to
+    // read "adb's own default; setting it changes nothing and only makes the
+    // environment of every child noisier", which is true only when the variable
+    // is absent from this process's environment — and it is inherited.
+    // `adb::settings::command` was corrected for exactly this and carries the
+    // argument in full; this second spawner kept the old reasoning. So a panel
+    // started from a shell exporting ANDROID_ADB_SERVER_PORT=5038, with its own
+    // field reading 5037 as it does out of the box, listed devices from the
+    // daemon it was told about and launched every mirror against the other one.
+    if let Some(port) = crate::adb::settings::port() {
         command.env("ANDROID_ADB_SERVER_PORT", port.to_string());
     }
     if let Some(dirs) = path_with_adb_first(&crate::adb::settings::program()) {
@@ -777,15 +784,25 @@ fn autostart_if_wanted(panel: &Rc<Panel>, window: &PanelWindow, ready: Option<&s
         return;
     };
 
+    // The tail of this goes through the selection rather than around it. It
+    // used to write three of the four things `apply_selection` owns —
+    // `Cfg.serial`, the label, the command bar — and leave `panel.selected`
+    // alone, which is the fourth and the one the rest of the panel reads. So
+    // the row was never ticked, "0 cihaz seçili" stayed under a device that was
+    // starting, and the next scan called `apply_selection` and put all three
+    // back the way the untouched selection said. Worse, `start_session` takes
+    // its serials from the selection and not from `Cfg.serial`: with two
+    // devices on the bus, autostart named the usable one and then launched a
+    // client with no `--serial` at all, which adb refuses with "2 devices
+    // connected".
     write_config(window, &config);
     // Rewriting the form is not editing the profile it came from. Every other
     // path that replaces these fields clears this; without it, a "Düzenle"
     // started before a device was plugged in stayed pointing at its profile,
     // and the next "Kaydet" wrote profile one's flags over profile three.
     panel.editing_profile.set(None);
-    window.global::<Cfg>().set_serial(serial.into());
-    window.global::<App>().set_selection_label(serial.into());
-    refresh_command(window);
+    *panel.selected.lock().expect("selection lock") = vec![serial.to_string()];
+    apply_selection(window, panel);
     panel.info(&tr!("{} bağlı: \"{}\" profili otomatik başlatılıyor.", serial, name));
     start_session(window, panel);
 }
@@ -1631,5 +1648,48 @@ mod picture_tests {
                 field.right + 1
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod client_command_tests {
+    use super::client_command;
+
+    /// The panel has two spawners and they have to name the same daemon.
+    ///
+    /// `adb::settings::command` carries an explicit 5037 onto the child so that
+    /// it can overrule an `ANDROID_ADB_SERVER_PORT` inherited from the shell,
+    /// and has a test of its own saying so. This one — which starts the mirror
+    /// windows and the `--list-…` queries — kept the reasoning that was
+    /// corrected there and dropped the port whenever it was adb's own default.
+    /// A panel started from a shell exporting 5038, with 5037 in its own field,
+    /// then listed devices from 5037 and mirrored against 5038.
+    #[test]
+    fn an_explicit_default_port_reaches_the_client_too() {
+        let _turn = crate::adb::settings::TESTS_TAKE_TURNS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::adb::settings::set("", "5037");
+        let command = client_command(std::path::Path::new("/nowhere/scrcpy-panel"));
+        let carried = command
+            .get_envs()
+            .find(|(key, _)| key.to_string_lossy() == "ANDROID_ADB_SERVER_PORT")
+            .map(|(_, value)| value.map(|v| v.to_string_lossy().to_string()));
+        assert_eq!(
+            carried,
+            Some(Some("5037".to_string())),
+            "the port the panel was told is the port its children must use"
+        );
+
+        // And nothing asked for still puts nothing on the child, which is what
+        // lets a shell that has its own arrangement keep it.
+        crate::adb::settings::set("", "");
+        let command = client_command(std::path::Path::new("/nowhere/scrcpy-panel"));
+        assert!(
+            !command
+                .get_envs()
+                .any(|(key, _)| key.to_string_lossy() == "ANDROID_ADB_SERVER_PORT"),
+            "no port asked for, no port on the child"
+        );
     }
 }

@@ -536,8 +536,11 @@ mod tests {
     /// There is no window in a unit test, so the invariant is checked where it
     /// lives — at the call sites. Each `write_config` has to be followed,
     /// within a few lines, by something that settles the serial: the helper for
-    /// the three that answer to a tick, or an explicit `set_serial` for
-    /// autostart, whose whole subject is the device that has just appeared.
+    /// the three that answer to a tick, or — for autostart, whose whole subject
+    /// is the device that has just appeared — `apply_selection`, which settles
+    /// the serial along with the tick, the label and the count. Autostart used
+    /// to do it with a bare `set_serial` and leave the other three saying
+    /// something else, so that spelling is no longer one this accepts.
     #[test]
     fn nothing_rewrites_the_form_and_leaves_the_serial_behind() {
         // This file is where `write_config` is defined and is the one place it
@@ -565,6 +568,7 @@ mod tests {
                 let window = lines[i..lines.len().min(i + 8)].join("\n");
                 assert!(
                     window.contains("restore_the_ticked_serial")
+                        || window.contains("apply_selection")
                         || window.contains("set_serial"),
                     "{name}:{} rewrites the form and never settles Cfg.serial:\n{window}",
                     i + 1

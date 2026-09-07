@@ -64,9 +64,13 @@ pub(super) fn spawn_device_scan(panel: &Rc<Panel>) {
     let selected = panel.selected.clone();
 
     std::thread::spawn(move || {
-        let (rows, error) = match crate::adb::device::list_detailed() {
-            Ok(rows) => (rows, String::new()),
-            Err(e) => (Vec::new(), format!("{e:#}")),
+        // Whether the list is a list at all, kept apart from the list itself.
+        // An empty `rows` means two different things — no device on the bus, or
+        // no answer from adb — and the pruning below is only entitled to one of
+        // them.
+        let (rows, error, listed) = match crate::adb::device::list_detailed() {
+            Ok(rows) => (rows, String::new(), true),
+            Err(e) => (Vec::new(), format!("{e:#}"), false),
         };
         let status = adb_status();
         // Autostart hangs off a device being *usable*; anything unauthorised or
@@ -81,9 +85,16 @@ pub(super) fn spawn_device_scan(panel: &Rc<Panel>) {
             let app = window.global::<App>();
 
             // A rescan must not silently clear the ticks, and must drop any
-            // device that has gone away.
+            // device that has gone away. A scan that *failed* has not seen a
+            // device go anywhere: it read nothing. Pruning against its empty
+            // list unticked everything the user had chosen, so an adb daemon
+            // that died for the length of one refresh — or an adb path typed
+            // wrong in Ayarlar, which fails every scan until it is fixed — took
+            // the selection with it and did not give it back when it returned.
             let mut chosen = selected.lock().expect("selection lock");
-            chosen.retain(|serial| rows.iter().any(|d| d.serial == *serial));
+            if listed {
+                chosen.retain(|serial| rows.iter().any(|d| d.serial == *serial));
+            }
             let chosen_now = chosen.clone();
             drop(chosen);
 
