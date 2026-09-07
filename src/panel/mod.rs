@@ -39,7 +39,7 @@ use crate::options::Options;
 use crate::session::Session;
 use crate::ui::{
     TrayIcon,
-    App, Cfg, DeviceRow, LogRow, PanelWindow, ProfileCard, Settings,
+    App, DeviceRow, LogRow, PanelWindow, ProfileCard, Settings,
     ShortcutRow,
 };
 
@@ -1146,7 +1146,7 @@ mod picture_tests {
         /// The command bar, filled the way the bar itself is filled: the form
         /// through `PanelConfig` and `flags.rs`, not a string written here.
         fn command_bar(&self) {
-            let cfg = self.window.global::<Cfg>();
+            let cfg = self.window.global::<crate::ui::Cfg>();
             cfg.set_max_size("1920".into());
             cfg.set_video_bit_rate("8M".into());
             cfg.set_no_audio(true);
