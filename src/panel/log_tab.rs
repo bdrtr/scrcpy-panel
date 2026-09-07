@@ -117,6 +117,10 @@ impl Panel {
         let mut slot = self.log_file.borrow_mut();
         if slot.is_none() {
             let Some(path) = log_path() else {
+                // Said once, for the same reason the failed open below says it:
+                // the checkbox goes on naming a file, and without a line here
+                // nothing anywhere tells the user why it never appears.
+                log::warn!("panel.log has nowhere to live: no configuration directory");
                 self.log_disk_failed.set(true);
                 return;
             };
@@ -146,7 +150,18 @@ impl Panel {
             }
         }
         if let Some(file) = slot.as_mut() {
-            let _ = writeln!(file, "{stamp} {level:<5} {message}");
+            // The verdict used to be thrown away. A disk that fills up, a quota
+            // that runs out, a config directory that goes read-only — the write
+            // fails, the handle stays open, and every line after it fails the
+            // same way in silence while "Günlüğü diske yaz" is still ticked and
+            // the path under it still names the file. Said once and latched,
+            // like a failed open: unticking and reticking is what asks again.
+            if let Err(e) = writeln!(file, "{stamp} {level:<5} {message}") {
+                // Not `self.warn`: that would come straight back into here.
+                log::warn!("Cannot write to the log file: {e}");
+                self.log_disk_failed.set(true);
+                slot.take();
+            }
         }
     }
 }
@@ -163,7 +178,15 @@ impl Panel {
 /// child's own `env_logger` timestamp, and stamping the column as well would
 /// date the line twice, a tick apart.
 pub(super) fn append_log(_window: &PanelWindow, line: &str) {
-    with_panel(|panel| panel.record("", level_of(line), line));
+    with_panel(|panel| {
+        // What the logger already holds goes down first. This line is stamped
+        // as it arrives, while a record waiting on the channel carries the time
+        // it happened — up to one drain interval earlier. Written in the order
+        // they were handed over, panel.log's stamps ran backwards across every
+        // such pair.
+        panel.drain_the_log(200);
+        panel.record("", level_of(line), line);
+    });
 }
 
 /// The level a child process announces in the text of its own line.

@@ -667,6 +667,13 @@ fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
 /// The language the strings in ui/ and src/ are written in.
 const SOURCE_LANGUAGE: &str = "tr";
 
+// The language the last "Arayüz dili" line named, so the next one is only
+// written when it would say something different.
+thread_local! {
+    static LAST_LANGUAGE_ANNOUNCED: std::cell::RefCell<String> =
+        const { std::cell::RefCell::new(String::new()) };
+}
+
 /// Switch the interface to the language the settings name.
 ///
 /// The strings are bundled into the binary at build time, so this is a call
@@ -681,9 +688,25 @@ fn apply_language(window: &PanelWindow) {
     // The source language has no .po of its own — the strings in the files are
     // already it — and Slint knows it as the empty name rather than as "tr".
     let bundled = if language == SOURCE_LANGUAGE { "" } else { language.as_str() };
+    // Announced only when it is news. `Settings.changed()` is one callback for
+    // every control in Ayarlar and it fires as a field is typed into, so this
+    // ran — and logged — once per keystroke in the adb path box. Twenty
+    // characters of a path put twenty copies of "Arayüz dili: tr" in the Log tab
+    // and twenty more in panel.log. The work itself still runs every time: the
+    // shortcut model belongs to the window, and a second window needs its own.
+    let announce = LAST_LANGUAGE_ANNOUNCED
+        .with(|last| last.replace(language.clone()) != language);
     match slint::select_bundled_translation(bundled) {
-        Ok(()) => log::info!("{}", tr!("Arayüz dili: {}", language)),
-        Err(e) => log::warn!("{}", tr!("Arayüz dili {} seçilemedi: {}", language, e)),
+        Ok(()) => {
+            if announce {
+                log::info!("{}", tr!("Arayüz dili: {}", language));
+            }
+        }
+        Err(e) => {
+            if announce {
+                log::warn!("{}", tr!("Arayüz dili {} seçilemedi: {}", language, e));
+            }
+        }
     }
 
     // Models built in Rust do not re-evaluate the way `@tr` bindings do, so the
@@ -728,14 +751,13 @@ fn report(weak: &slint::Weak<PanelWindow>, transfer: Transfer) {
     let weak = weak.clone();
     let _ = slint::invoke_from_event_loop(move || {
         let Some(window) = weak.upgrade() else { return };
-        append_log(
-            &window,
-            &if transfer.ok {
-                transfer.message.clone()
-            } else {
-                format!("ERROR {}", transfer.message)
-            },
-        );
+        // The line is already on its way to the Log tab and to panel.log: the
+        // `log::` call above goes through the one logger, whose second sink the
+        // panel drains. This used to *also* call `append_log`, which is the door
+        // for text a child process printed — so every transfer result landed
+        // twice, once at the level it was logged at and once at the level
+        // `append_log` guesses from the word ERROR being in it. Two rows, two
+        // levels, one event.
         let app = window.global::<App>();
         app.set_transfer_status(transfer.message.as_str().into());
         app.set_transfer_failed(!transfer.ok);

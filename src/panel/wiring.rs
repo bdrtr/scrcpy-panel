@@ -663,10 +663,33 @@ pub(super) fn wire_the_transfers(window: &PanelWindow, panel: &Rc<Panel>, opts: 
                     Transfer::done(tr!("{} dosya gönderiliyor…", paths.len())),
                 );
                 let mut pushed = false;
+                let mut refused = 0;
+                let count = paths.len();
                 for path in paths {
                     let transfer = transfer_file(&serial, &path, &push_target);
                     pushed |= transfer.ok && transfer.scanworthy;
+                    refused += usize::from(!transfer.ok);
                     report(&weak, transfer);
+                }
+                // The box under the button holds one line and each file
+                // overwrote the last one's, so a batch whose first file was
+                // refused and whose second went through ended saying the second
+                // went through, with the refusal visible only in the log — and
+                // the box's red cleared along with it. The summary is the last
+                // thing reported when there was more than one file.
+                if count > 1 {
+                    report(
+                        &weak,
+                        if refused == 0 {
+                            Transfer::done(tr!("{} dosyanın tümü gönderildi.", count))
+                        } else {
+                            Transfer::failed(tr!(
+                                "{} dosyadan {} tanesi gönderilemedi.",
+                                count,
+                                refused
+                            ))
+                        },
+                    );
                 }
                 // One scan for the batch: scrcpy hands the device the target
                 // directory rather than the file, so asking twice would be

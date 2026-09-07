@@ -87,8 +87,10 @@ impl log::Log for Fanout {
     fn log(&self, record: &log::Record) {
         // The filter is the terminal's, so the two sinks show the same session
         // rather than two different ones. `matches` is what env_logger's own
-        // `log` consults, and it reads the per-module directives that `enabled`
-        // alone does not.
+        // `log` consults, and it is the whole of the filter: `enabled` answers
+        // for the level and the module directives, and `matches` answers for
+        // those *and* the message regex `RUST_LOG=warn/pattern` sets, which
+        // `enabled` cannot see because it is given no message to look at.
         if !self.terminal.matches(record) {
             return;
         }
@@ -146,7 +148,16 @@ pub fn init(verbosity: &str, a_window_may_want_these: bool) {
     ANYONE_MIGHT_LISTEN.store(a_window_may_want_these, std::sync::atomic::Ordering::Relaxed);
     // Slint drags in zbus for accessibility and portals, and it logs its D-Bus
     // handshake at info level. Quiet it unless the user asks for it.
-    let filter = format!("{},zbus=warn,tracing=warn", client_level(verbosity));
+    //
+    // Clamped, because a per-module directive is a level and not a cap: at
+    // `--verbosity=error` the filter read "error,zbus=warn,tracing=warn", which
+    // let zbus's warnings through a session that had asked to be told about
+    // nothing but errors — and stopped the client's own warnings while doing it.
+    // A quieting directive that makes a module louder than the program is the
+    // opposite of what it is for.
+    let level = client_level(verbosity);
+    let quieted = if level == "error" { "error" } else { "warn" };
+    let filter = format!("{level},zbus={quieted},tracing={quieted}");
     let terminal = env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or(filter),
     )
@@ -267,6 +278,13 @@ mod tests {
     /// not see a line the session had written.
     #[test]
     fn a_record_comes_out_of_the_second_sink() {
+        // `RUST_LOG` wins over the flag by design — `from_env` reads it first —
+        // so a developer who has one exported is not running the filter this
+        // asks for, and the info line below would reach the sink through no
+        // fault of the code. The half that matters either way is the two error
+        // lines and their order.
+        let filter_is_ours = std::env::var_os("RUST_LOG").is_none();
+
         // `true`, because this test is the listener: with `false` the backlog
         // is skipped and the held line — the half this checks — never exists.
         init("error", true);
@@ -285,12 +303,14 @@ mod tests {
         // Other tests share the process and may be logging too; the lines are
         // looked for rather than assumed to be the only ones.
         for line in received.try_iter() {
-            assert_ne!(
-                line.level,
-                log::Level::Info,
-                "an info record passed a filter set to error: {}",
-                line.message
-            );
+            if filter_is_ours {
+                assert_ne!(
+                    line.level,
+                    log::Level::Info,
+                    "an info record passed a filter set to error: {}",
+                    line.message
+                );
+            }
             if line.message.contains("S0METHING-DISTINCTIVE") {
                 ours.push(line);
             }

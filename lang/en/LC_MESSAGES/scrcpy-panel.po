@@ -1076,6 +1076,13 @@ msgstr "Connecting to {}…"
 msgid "{} ile eşleştiriliyor…"
 msgstr "Pairing with {}…"
 
+# The summary line under the file picker, for a batch of more than one.
+msgid "{} dosyanın tümü gönderildi."
+msgstr "All {} files were sent."
+
+msgid "{} dosyadan {} tanesi gönderilemedi."
+msgstr "{} of {} files could not be sent."
+
 msgid "{} bağlı: \"{}\" profili otomatik başlatılıyor."
 msgstr "{} connected: starting the \"{}\" profile automatically."
 
