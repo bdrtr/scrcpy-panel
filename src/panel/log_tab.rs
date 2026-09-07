@@ -163,14 +163,25 @@ impl Panel {
 /// child's own `env_logger` timestamp, and stamping the column as well would
 /// date the line twice, a tick apart.
 pub(super) fn append_log(_window: &PanelWindow, line: &str) {
-    let level = if line.contains("ERROR") {
+    with_panel(|panel| panel.record("", level_of(line), line));
+}
+
+/// The level a child process announces in the text of its own line.
+///
+/// `env_logger` writes it there — `[2026-09-07T20:00:39.213Z ERROR …]` — and
+/// it is the only level such a line has, since it reaches this process as text
+/// rather than as a record. Shared with the `--list-…` queries, whose standard
+/// error is the same child logger: they used to record every line at INFO, so
+/// a refusal the child had already marked ERROR was filtered as ordinary
+/// output by the Log tab's own level filter.
+pub(super) fn level_of(line: &str) -> &'static str {
+    if line.contains("ERROR") {
         "ERROR"
     } else if line.contains("WARN") {
         "WARN"
     } else {
         "INFO"
-    };
-    with_panel(|panel| panel.record("", level, line));
+    }
 }
 
 /// Drain the logger's second sink into the window, once every tenth of a second.

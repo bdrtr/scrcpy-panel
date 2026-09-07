@@ -31,7 +31,7 @@ use std::time::Duration;
 
 mod failure;
 mod log_tab;
-use log_tab::{append_log, start_the_log_drain};
+use log_tab::{append_log, level_of, start_the_log_drain};
 
 use crate::tr;
 use crate::mirror_host::Attachment;
@@ -147,6 +147,31 @@ fn with_panel(f: impl FnOnce(&Rc<Panel>)) {
     if let Some(panel) = panel {
         f(&panel);
     }
+}
+
+/// Do something that talks to a device on a worker thread, and say how it went
+/// on the event loop.
+///
+/// Everything the panel does to a device blocks, and some of it blocks for a
+/// long time: `adb connect` to an address nothing answers to waits out the
+/// TCP timeout, and a `--list-…` query pushes the server jar and runs it. On
+/// the event loop that is the whole window frozen — no repaint, no log line,
+/// nothing to tell it apart from a crash — while the device scan beside it has
+/// been on its own thread since it was written. This is that arrangement for
+/// the buttons.
+///
+/// `say` runs back on the event loop with the panel, so it can write to the
+/// models the way any callback does.
+pub(super) fn off_the_event_loop<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+    say: impl FnOnce(&Rc<Panel>, T) + Send + 'static,
+) {
+    std::thread::spawn(move || {
+        let outcome = work();
+        // Through `with_panel` rather than a captured handle: `Rc<Panel>` is
+        // not `Send`, and by the time this arrives the window may have gone.
+        let _ = slint::invoke_from_event_loop(move || with_panel(|panel| say(panel, outcome)));
+    });
 }
 
 /// Open the panel and run until its window closes.
@@ -593,13 +618,16 @@ fn run_remedy(window: &PanelWindow, panel: &Rc<Panel>) {
         failure::Remedy::None => {}
         failure::Remedy::RestartAdb => {
             panel.info(&tr!("adb sunucusu yeniden başlatılıyor…"));
-            match crate::adb::device::restart_server() {
+            // `kill-server` waits for the daemon to go and `start-server` for
+            // the new one to answer; on the event loop that is the panel
+            // stopped for as long as adb takes.
+            off_the_event_loop(crate::adb::device::restart_server, |panel, done| match done {
                 Ok(()) => {
                     panel.info(&tr!("adb sunucusu yeniden başlatıldı."));
                     spawn_device_scan(panel);
                 }
                 Err(e) => panel.warn(&tr!("adb sunucusu yeniden başlatılamadı: {}", e)),
-            }
+            });
         }
         failure::Remedy::PickAdbPath => {
             // The dialog blocks, and the panel is what it would block.

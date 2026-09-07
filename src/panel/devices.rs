@@ -149,6 +149,24 @@ pub(super) fn adb_status() -> String {
         }
     }
 }
+/// Run one `--list-…` query in a second copy of this binary and show what it
+/// says.
+///
+/// Off the event loop, because the child pushes `scrcpy-server.jar` and runs
+/// `app_process` on the device before it can answer: seconds over USB and
+/// unbounded over a wireless one. It used to be a plain `cmd.output()` in the
+/// Slint callback, so pressing "Kodlayıcıları listele" with the phone asleep
+/// froze the panel until adb gave up.
+///
+/// The two halves of the child's output are not the same thing and are no
+/// longer treated as one. Standard output is the answer — the list itself,
+/// `println!`ed by `session::startup::run_list_query` with no timestamp on it.
+/// Standard error is the child's own logger, whose lines carry their level in
+/// their text, so they go through the same door every other child line does.
+/// And the exit status is read: `run_list_query` was changed to `bail!` when
+/// the device refuses a query, precisely so a caller could tell a list from a
+/// refusal, and this caller was still throwing that away and reporting the
+/// refusal as ordinary output.
 pub(super) fn query_device(weak: &slint::Weak<PanelWindow>, panel: &Rc<Panel>, flag: &str) {
     let serial = weak
         .upgrade()
@@ -161,24 +179,40 @@ pub(super) fn query_device(weak: &slint::Weak<PanelWindow>, panel: &Rc<Panel>, f
             return;
         }
     };
-    let mut cmd = client_command(&exe);
-    cmd.arg(flag);
-    if !serial.is_empty() {
-        cmd.args(["--serial", &serial]);
-    }
-    match cmd.output() {
-        Ok(out) => {
-            for line in String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .chain(String::from_utf8_lossy(&out.stderr).lines())
-            {
-                if !line.trim().is_empty() {
-                    panel.info(line);
+    // Said before the wait rather than after it: the answer is seconds away at
+    // best, and a button that does nothing visible is a button pressed twice.
+    panel.info(&tr!("{} çalıştırılıyor…", flag));
+
+    let asked = flag.to_string();
+    let named = asked.clone();
+    off_the_event_loop(
+        move || {
+            let mut cmd = client_command(&exe);
+            cmd.arg(&asked);
+            if !serial.is_empty() {
+                cmd.args(["--serial", &serial]);
+            }
+            cmd.output()
+        },
+        move |panel, out| match out {
+            Ok(out) => {
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    if !line.trim().is_empty() {
+                        panel.info(line);
+                    }
+                }
+                for line in String::from_utf8_lossy(&out.stderr).lines() {
+                    if !line.trim().is_empty() {
+                        panel.record("", level_of(line), line);
+                    }
+                }
+                if !out.status.success() {
+                    panel.warn(&tr!("{} başarısız: {}", named, out.status));
                 }
             }
-        }
-        Err(e) => panel.warn(&tr!("{} çalıştırılamadı: {}", flag, e)),
-    }
+            Err(e) => panel.warn(&tr!("{} çalıştırılamadı: {}", named, e)),
+        },
+    );
 }
 /// Install an APK, or push anything else to the device.
 ///

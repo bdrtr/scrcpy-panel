@@ -190,25 +190,39 @@ pub(super) fn wire_the_devices(window: &PanelWindow, panel: &Rc<Panel>) {
                 // The caption under this button promises `adb tcpip 5555` runs
                 // first so a USB device can switch over; it never did.
                 let usb_serial = window.global::<Cfg>().get_serial().to_string();
-                // Only a USB device needs switching over; one already reached
-                // by address is on the network already.
-                if !usb_serial.contains(':') {
-                    // Said rather than swallowed. It carries on either way: a
-                    // device switched over on some earlier day is reachable at
-                    // the address whether or not this attempt worked, and the
-                    // connect below is the thing that decides.
-                    if let Err(e) = crate::adb::device::enable_tcpip(&usb_serial, 5555) {
-                        panel.warn(&tr!("adb tcpip başarısız: {}", e));
-                    }
-                }
-
-                match crate::adb::device::connect(&addr) {
-                    Ok(said) => {
-                        panel.info(&said);
-                        spawn_device_scan(&panel);
-                    }
-                    Err(e) => panel.warn(&tr!("adb connect başarısız: {}", e)),
-                }
+                // Both halves off the event loop. `adb connect` to an address
+                // nothing answers to does not fail quickly — it waits out the
+                // TCP connect, which on a typed-wrong address on this desk is
+                // over two minutes — and this ran in the callback, so the
+                // whole panel was frozen for it. A mistyped address is the
+                // ordinary way to use this button wrongly.
+                panel.info(&tr!("{} adresine bağlanılıyor…", addr));
+                off_the_event_loop(
+                    move || {
+                        // Only a USB device needs switching over; one already
+                        // reached by address is on the network already.
+                        let switched = (!usb_serial.contains(':'))
+                            .then(|| crate::adb::device::enable_tcpip(&usb_serial, 5555).err())
+                            .flatten();
+                        (switched, crate::adb::device::connect(&addr))
+                    },
+                    move |panel, (tcpip_failed, connected)| {
+                        // Said rather than swallowed. It carries on either way:
+                        // a device switched over on some earlier day is
+                        // reachable at the address whether or not this attempt
+                        // worked, and the connect is the thing that decides.
+                        if let Some(e) = tcpip_failed {
+                            panel.warn(&tr!("adb tcpip başarısız: {}", e));
+                        }
+                        match connected {
+                            Ok(said) => {
+                                panel.info(&said);
+                                spawn_device_scan(panel);
+                            }
+                            Err(e) => panel.warn(&tr!("adb connect başarısız: {}", e)),
+                        }
+                    },
+                );
             }
         });
     }
@@ -225,13 +239,19 @@ pub(super) fn wire_the_devices(window: &PanelWindow, panel: &Rc<Panel>) {
                     panel.warn(&tr!("Eşleştirme için adres ve kod gerekli."));
                     return;
                 }
-                match crate::adb::device::pair(&addr, &code) {
-                    Ok(said) => {
-                        panel.info(&said);
-                        spawn_device_scan(&panel);
-                    }
-                    Err(e) => panel.warn(&tr!("adb pair başarısız: {}", e)),
-                }
+                // Same wait as the connect above, and for the same reason:
+                // pairing talks to an address that may not be there.
+                panel.info(&tr!("{} ile eşleştiriliyor…", addr));
+                off_the_event_loop(
+                    move || crate::adb::device::pair(&addr, &code),
+                    move |panel, paired| match paired {
+                        Ok(said) => {
+                            panel.info(&said);
+                            spawn_device_scan(panel);
+                        }
+                        Err(e) => panel.warn(&tr!("adb pair başarısız: {}", e)),
+                    },
+                );
             }
         });
     }
@@ -263,10 +283,16 @@ pub(super) fn wire_the_devices(window: &PanelWindow, panel: &Rc<Panel>) {
                 .upgrade()
                 .map(|w| w.global::<Cfg>().get_serial().to_string())
                 .unwrap_or_default();
-            match crate::adb::device::key_event(&serial, keycode) {
-                Ok(()) => panel.info(&tr!("{} gönderildi.", keycode)),
-                Err(e) => panel.warn(&tr!("{} gönderilemedi: {}", keycode, e)),
-            }
+            // `adb shell input keyevent` is quick on a device that is there
+            // and not quick at all on one that has gone to sleep on the
+            // network, and the row of device buttons is pressed repeatedly.
+            off_the_event_loop(
+                move || crate::adb::device::key_event(&serial, keycode),
+                move |panel, sent| match sent {
+                    Ok(()) => panel.info(&tr!("{} gönderildi.", keycode)),
+                    Err(e) => panel.warn(&tr!("{} gönderilemedi: {}", keycode, e)),
+                },
+            );
         });
     }
 

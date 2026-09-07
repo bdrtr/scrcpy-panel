@@ -1061,6 +1061,21 @@ msgstr "Sent: {} → {}"
 msgid "{} çalıştırılamadı: {}"
 msgstr "{} could not be run: {}"
 
+# The `--list-…` queries and the wireless buttons: all four now say what they
+# are waiting for, because all four wait off the event loop and a button that
+# does nothing visible is a button pressed twice.
+msgid "{} çalıştırılıyor…"
+msgstr "Running {}…"
+
+msgid "{} başarısız: {}"
+msgstr "{} failed: {}"
+
+msgid "{} adresine bağlanılıyor…"
+msgstr "Connecting to {}…"
+
+msgid "{} ile eşleştiriliyor…"
+msgstr "Pairing with {}…"
+
 msgid "{} bağlı: \"{}\" profili otomatik başlatılıyor."
 msgstr "{} connected: starting the \"{}\" profile automatically."
 
