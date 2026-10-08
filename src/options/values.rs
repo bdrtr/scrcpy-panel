@@ -26,7 +26,7 @@ pub const AUDIO_SOURCES: [&str; 11] = [
     "voice-performance",
 ];
 
-/// The log levels the v4.1 server's `Ln.Level` knows, loudest first.
+/// The log levels the v5.0 server's `Ln.Level` knows, loudest first.
 ///
 /// Read off the server rather than remembered: `strings` on the `classes.dex`
 /// inside `/usr/share/scrcpy/scrcpy-server` has exactly `VERBOSE`, `DEBUG`,

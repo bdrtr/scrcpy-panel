@@ -88,9 +88,12 @@ pub enum ControlMsg {
         action: u8,
     },
     ExpandNotificationPanel,
-    /// The protocol has it and scrcpy 4.1 no longer offers a shortcut for it,
-    /// so nothing here sends it — but a message list with a hole in it is a
-    /// message list whose numbering cannot be checked.
+    /// Nothing here sends it yet. This used to say scrcpy no longer offers a
+    /// shortcut for it, which was wrong for 4.1 and is wrong for 5.0: its
+    /// `input_manager.c` sends it for MOD+n pressed twice in a row and for a
+    /// double click on the button bound to the notification panel. Kept either
+    /// way, because a message list with a hole in it is a message list whose
+    /// numbering cannot be checked.
     #[allow(dead_code)]
     ExpandSettingsPanel,
     CollapsePanels,
@@ -369,7 +372,7 @@ mod tests {
     /// were wrong and the failure was invisible: the device did something
     /// plausible-looking for another message instead of what was asked.
     ///
-    /// The order is the whole of scrcpy 4.1's, including the four messages this
+    /// The order is the whole of scrcpy 5.0's, including the four messages this
     /// client does not send, because an id is a position in that list: leaving
     /// the camera controls out of the count is how a resize would have been
     /// numbered 18 and read as a torch.
@@ -526,7 +529,7 @@ mod tests {
             let index = scrcpy
                 .iter()
                 .position(|upstream| *upstream == name)
-                .unwrap_or_else(|| panic!("{name} is not a message scrcpy 4.1 has"));
+                .unwrap_or_else(|| panic!("{name} is not a message scrcpy 5.0 has"));
             assert_eq!(
                 id as usize, index,
                 "{name} must be {index}; scrcpy numbers them in this order"

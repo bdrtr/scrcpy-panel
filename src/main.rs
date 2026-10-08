@@ -37,7 +37,7 @@ use ui::{Mirror, MirrorWindow, Orientation};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The scrcpy server release this client speaks to. The server refuses to start
 /// if this does not match its own version exactly.
-pub const SCRCPY_SERVER_VERSION: &str = "4.1";
+pub const SCRCPY_SERVER_VERSION: &str = "5.0";
 
 /// Set by the signal handler; a timer polls it and stops the event loop.
 pub static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

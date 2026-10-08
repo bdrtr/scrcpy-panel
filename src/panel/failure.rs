@@ -291,7 +291,7 @@ mod tests {
             ),
             (
                 "scrcpy-server not found. Download from:\n\
-                 https://github.com/Genymobile/scrcpy/releases/download/v4.1/scrcpy-server-v4.1\n\
+                 https://github.com/Genymobile/scrcpy/releases/download/v5.0/scrcpy-server-v5.0\n\
                  and place it next to the executable.",
                 "scrcpy-server bulunamadı",
             ),
@@ -301,7 +301,7 @@ mod tests {
                 "Cihaz çevrimdışı",
             ),
             (
-                "ERROR: The server version (2.4) does not match the client (4.1)",
+                "ERROR: The server version (4.1) does not match the client (5.0)",
                 "scrcpy sürümü uyumsuz",
             ),
             (

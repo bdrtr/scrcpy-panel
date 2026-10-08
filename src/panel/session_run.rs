@@ -621,7 +621,7 @@ pub(super) fn check_server_version(panel: &Rc<Panel>, opts: &Options) {
     }
 }
 /// The version in a server filename, when it carries one — the releases are
-/// published as `scrcpy-server-v4.1`, which is what --server-path usually points
+/// published as `scrcpy-server-v5.0`, which is what --server-path usually points
 /// at.
 pub(super) fn server_version_from_path(path: &str) -> Option<String> {
     let name = std::path::Path::new(path).file_name()?.to_string_lossy().to_string();
