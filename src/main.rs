@@ -184,7 +184,14 @@ pub fn select_backend(opts: &Options, uhid_wanted: bool) -> Option<UhidInput> {
 /// have a screen worth mirroring, and on the lock screen, where injection is
 /// refused and a HID device is not.
 fn run_otg(opts: Options) -> Result<()> {
-    let serial = match opts.serial.clone() {
+    // `$ANDROID_SERIAL` before the bus is searched, as scrcpy 5.0 does in this
+    // mode — "No explicit selection, check $ANDROID_SERIAL".
+    let from_env = || {
+        let serial = adb::commands::android_serial()?;
+        log::info!("Using ANDROID_SERIAL: {serial}");
+        Some(serial)
+    };
+    let serial = match opts.serial.clone().or_else(from_env) {
         Some(serial) => serial,
         None => {
             let mut found = input::aoa_hid::accessory_devices();

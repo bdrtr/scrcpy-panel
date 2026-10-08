@@ -105,9 +105,44 @@ impl DeviceFilter {
     }
 }
 
+/// `$ANDROID_SERIAL`, when it names something.
+///
+/// scrcpy reads it when no selector was given — `-s`, `-d`, `-e` or
+/// `--tcpip` — and 5.0 reads it in OTG mode as well. This client read it in
+/// neither: adb's own command line honours it, but nothing here goes through
+/// the command line, it speaks to the daemon directly. So with two phones on
+/// the bus and the variable set, the session refused with "2 devices
+/// connected" where scrcpy would have started on the one it names.
+///
+/// Empty counts as unset. scrcpy would take an empty string as the serial and
+/// then find no device called that, which is a refusal with nothing to say.
+pub fn android_serial() -> Option<String> {
+    std::env::var("ANDROID_SERIAL").ok().filter(|serial| !serial.is_empty())
+}
+
+/// The serial to use without asking adb, if there is one: the one named on
+/// the command line, or else `$ANDROID_SERIAL` — but only when nothing else
+/// narrowed the choice, because `--select-usb` and `--select-tcpip` are a
+/// selector too and scrcpy lets them win over the variable.
+fn named_serial(
+    serial: Option<&str>,
+    filter: DeviceFilter,
+    from_env: Option<String>,
+) -> Option<String> {
+    if let Some(serial) = serial {
+        return Some(serial.to_string());
+    }
+    if filter != DeviceFilter::Any {
+        return None;
+    }
+    let serial = from_env?;
+    log::info!("Using ANDROID_SERIAL: {serial}");
+    Some(serial)
+}
+
 pub fn select_device_filtered(serial: Option<&str>, filter: DeviceFilter) -> Result<String> {
-    if let Some(s) = serial {
-        return Ok(s.to_string());
+    if let Some(serial) = named_serial(serial, filter, android_serial()) {
+        return Ok(serial);
     }
     let listed = protocol::list_devices()?;
     let all = ready_devices(&listed);
@@ -286,6 +321,41 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    /// `$ANDROID_SERIAL` is scrcpy's selector of last resort: below `--serial`,
+    /// below `--select-usb` and `--select-tcpip`, above asking adb. The
+    /// variable is passed in rather than set, because the environment is the
+    /// whole process's and the tests share it.
+    #[test]
+    fn android_serial_names_the_device_only_when_nothing_else_did() {
+        let env = || Some("R58M31XABCD".to_string());
+
+        assert_eq!(
+            named_serial(None, DeviceFilter::Any, env()).as_deref(),
+            Some("R58M31XABCD"),
+            "with no selector the variable is the device"
+        );
+        assert_eq!(
+            named_serial(Some("192.168.1.42:5555"), DeviceFilter::Any, env()).as_deref(),
+            Some("192.168.1.42:5555"),
+            "--serial outranks it"
+        );
+        assert_eq!(
+            named_serial(None, DeviceFilter::Usb, env()),
+            None,
+            "--select-usb is a selector too, and the variable gives way to it"
+        );
+        assert_eq!(
+            named_serial(None, DeviceFilter::TcpIp, env()),
+            None,
+            "and so is --select-tcpip"
+        );
+        assert_eq!(
+            named_serial(None, DeviceFilter::Any, None),
+            None,
+            "unset leaves it to adb, as before"
+        );
+    }
 
     /// A phone showing the "Allow USB debugging?" dialog is connected and has
     /// USB debugging on, and used to be told neither was true. The state is on

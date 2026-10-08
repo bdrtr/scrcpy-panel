@@ -36,6 +36,10 @@ pub struct Options {
     pub start: bool,
 
     /// Device serial number (from `adb devices`)
+    ///
+    /// Without it, and without --select-usb, --select-tcpip or --tcpip,
+    /// `$ANDROID_SERIAL` names the device if it is set — as it does for adb and
+    /// for scrcpy, in OTG mode too.
     #[arg(short, long)]
     pub serial: Option<String>,
 
