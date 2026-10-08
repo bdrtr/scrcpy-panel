@@ -222,9 +222,39 @@ under `adb shell input swipe`:
   the kernel from 7.2.8 to 7.2.9 and took the running kernel's module tree with it, and
   `nvidia-smi` could not talk to the driver — so this is the refusal, not CUDA tried.
 
-**Still waiting on something.** The picture itself: these runs count frames rather than
-look at them, and comparing one against `screencap` needs v4l2loopback loaded, which needs
-a password. AV1 from a phone: the Redmi has no AV1 encoder, so AV1 on VAAPI is proven with
+**And the picture, against the phone's own.** With no v4l2loopback to read from, the last
+frame of each headless session was written out by a probe that copied the buffer the
+window and the V4L2 sink are both handed — removed again before the commit — and set
+beside `adb exec-out screencap -p`, taken straight after, of a still Settings screen.
+RMSE of 65535, and the same frame with red and blue exchanged as the control:
+
+| Stream | Decoded by | RMSE | Swapped |
+|---|---|---|---|
+| H.264 1080x2400 | CPU | 516, 664 | 4200, 4206 |
+| H.264 | VAAPI | 518 | 4201 |
+| H.264, `--video-buffer=200` | CPU | 723 | 4215 |
+| H.265 | CPU | 548 | 4197 |
+| H.265 | VAAPI | 638 | 4198 |
+| VP8 | CPU | 1062 | 4254 |
+| VP8, `--hwdec=auto` | CPU, after VAAPI refused | 614 | 4207 |
+| VP9 640x1426 | CPU | 976 | 4045 |
+| VP9 640x1426 | VAAPI | 965 | 4050 |
+
+VP9 is compared against the screencap scaled to the stream's size. The figures move between
+runs as much as between codecs — the same H.264 run twice gave 516 and 664, and VP8 gave
+1062 one time and 614 the next — so the table says each picture is the right one, at an
+eighth to a quarter of the swapped control, rather than ranking anything. One combination
+did not decode at all, and was meant not to: `--video-codec=vp8 --hwdec=vaapi`. FFmpeg has VP8 on VAAPI,
+and this AMD card's driver does not — *"No support for codec vp8 profile -99"* — which
+FFmpeg finds at the first frame, not at open. Named outright, that is the refusal it should
+be. Under `auto` FFmpeg went on in software by itself, while the client's log still said
+"hardware accelerated"; it now says *"vaapi would not take this stream, so FFmpeg is
+decoding it on the CPU"* at the first frame that proves it.
+
+**Still waiting on something.** The V4L2 write itself, and the `--v4l2-buffer` cap with it:
+the running kernel had lost its module tree to the same update, so no v4l2loopback until a
+reboot. CUDA, for the same reason — the laptop's RTX 3050 has a driver that could not be
+reached. AV1 from a phone: the Redmi has no AV1 encoder, so AV1 on VAAPI is proven with
 the clips above and not with a device's stream. And the window and the panel: the
 backpressure was run headless, where the receiver is dropped before the session's
 shutdown, which is the order the window's teardown also keeps but was not run here.
@@ -275,8 +305,8 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | `--new-display` with `--no-vd-*` | accepted by the server |
 | scrcpy 4.1 server handshake | works, no unknown-option warnings |
 | scrcpy 5.0 server handshake | works — H.264 1080x2400 and Opus; the same server refuses a client announcing 4.1 |
-| `--hwdec=vaapi` | works — 112–115 fps decoded while scrolling a 120 Hz screen, the same as software |
-| `--video-codec=vp8` / `vp9` | work — 61 fps from the hardware VP8 encoder, 21 from the software VP9 one; neither had a picture before |
+| `--hwdec=vaapi` | works — 112–115 fps decoded while scrolling a 120 Hz screen, the same as software; the frame matches `screencap` at RMSE 518 of 65535 for H.264, 638 for H.265, 965 for VP9 |
+| `--video-codec=vp8` / `vp9` | work — 61 fps from the hardware VP8 encoder, 21 from the software VP9 one, frames matching `screencap` at RMSE 1062 and 976; neither had a picture before |
 | `--video-buffer=200` | 111–117 fps on a 120 Hz screen; it was 17 |
 | `$ANDROID_SERIAL` | works — starts on the device it names, gives way to `--select-usb` |
 | Ctrl-C / SIGTERM shutdown | works — pipeline unwinds, no crash |
