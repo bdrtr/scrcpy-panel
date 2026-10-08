@@ -302,6 +302,7 @@ mod tests {
             pts: Some(0),
             is_key_frame: true,
             is_config: false,
+            received_at: None,
         };
 
         let decoded = decoder
@@ -330,6 +331,7 @@ mod tests {
             pts: Some(0),
             is_key_frame: false,
             is_config: false,
+            received_at: None,
         };
         for _ in 0..REFUSALS_WORTH_A_WORD + 5 {
             assert!(
@@ -351,6 +353,7 @@ mod tests {
             pts: None,
             is_key_frame: false,
             is_config: true,
+            received_at: None,
         };
         for _ in 0..10 {
             assert!(decoder.decode(&config).expect("no error").is_none());

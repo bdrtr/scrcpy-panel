@@ -319,17 +319,41 @@ pub struct Options {
     #[arg(long)]
     pub camera_zoom: Option<String>,
 
-    /// Hardware decoding: off or auto
+    /// Hardware video decoding: disabled, auto, vaapi, cuda, d3d11va, dxva2,
+    /// videotoolbox
     ///
-    /// Off by default, which is a measurement rather than a preference. The
-    /// frames have to come back to system memory for swscale either way, and on
-    /// this machine that trip alone costs more than decoding on the CPU: over
-    /// 568 frames at 1080x2400, decoding on the GPU and fetching the result
-    /// took 4.31 ms a frame where the CPU decoded in 2.37, and both then paid
-    /// the same 0.59 to convert. `auto` is there for a machine where that comes
-    /// out the other way.
-    #[arg(long, default_value = "off", value_parser = ["auto", "off"])]
-    pub hwaccel: String,
+    /// scrcpy 5.0's flag and its values, plus the two this client's probe
+    /// already knew — cuda, and dxva2 on Windows. A decoder named outright that
+    /// will not open, or will not take the stream, is a refusal, as it is in
+    /// scrcpy; `auto` falls back to the CPU.
+    ///
+    /// Disabled by default where scrcpy's default is auto, and that is a
+    /// measurement rather than a preference. scrcpy 5.0 keeps the decoded
+    /// picture on the GPU and draws it from there. Slint takes pixel buffers,
+    /// so here the frame comes back to system memory for swscale either way,
+    /// and on this machine that trip alone costs more than decoding on the
+    /// CPU: over 568 frames at 1080x2400, decoding on the GPU and fetching the
+    /// result took 4.31 ms a frame where the CPU decoded in 2.37, and both then
+    /// paid the same 0.59 to convert.
+    ///
+    /// `--hwaccel` is what this was called before scrcpy named it, and still
+    /// works, `off` included.
+    #[arg(
+        long,
+        alias = "hwaccel",
+        default_value = "disabled",
+        value_parser = clap::builder::PossibleValuesParser::new([
+            clap::builder::PossibleValue::new("disabled"),
+            clap::builder::PossibleValue::new("auto"),
+            clap::builder::PossibleValue::new("vaapi"),
+            clap::builder::PossibleValue::new("cuda"),
+            clap::builder::PossibleValue::new("d3d11va"),
+            clap::builder::PossibleValue::new("dxva2"),
+            clap::builder::PossibleValue::new("videotoolbox"),
+            clap::builder::PossibleValue::new("off").hide(true),
+        ]),
+    )]
+    pub hwdec: String,
 
     /// Input only, over USB: no adb, no server, no picture
     ///

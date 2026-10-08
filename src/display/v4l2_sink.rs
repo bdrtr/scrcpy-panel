@@ -160,9 +160,19 @@ mod linux {
     /// The fewest delayed frames the sink will hold whatever the buffer.
     const MIN_QUEUED: usize = 16;
 
-    /// The frame rate the queue cap is sized against, for the same reason the
-    /// delay buffer next door has one: only the bound depends on it.
-    const ASSUMED_FPS: u32 = 60;
+    /// The frame rate the queue cap is sized against: only the bound depends on
+    /// it, and it has to be at least what the device sends.
+    ///
+    /// It was 60, and a 120 Hz phone sends twice that — the Redmi this was
+    /// found on decodes at 114 fps while scrolling. Every frame here waits the
+    /// same delay, so the one dropped to keep the cap is always the next one
+    /// due: once the delay outlasts the cap — sixteen frames, 133 ms at 120 fps
+    /// — every frame goes before its time and nothing is published, which is
+    /// the flat-sixteen failure below, one doubling later. The queue only grows
+    /// as fast as the stream does, because the loop that fills it is the loop
+    /// that drains it, so a generous rate costs nothing until a device really
+    /// sends that many.
+    const ASSUMED_FPS: u32 = 240;
 
     impl V4l2Sink {
         /// Open a loopback device and negotiate RGB24 at this size.

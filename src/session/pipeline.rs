@@ -167,16 +167,21 @@ pub(super) fn run_decoder(
     codec_type: demuxer::CodecType,
     width: u32,
     height: u32,
-    // --hwaccel: whether the GPU is asked to decode at all.
-    hardware: bool,
+    // --hwdec: whether the GPU is asked to decode, and through what.
+    hwdec: HwDec,
     packet_rx: Receiver<DemuxPacket>,
     frame_tx: Sender<DecodedFrame>,
     recycle_rx: Receiver<DecodedFrame>,
+    // Told once whether the decoder opened; the session waits on it.
+    opened: Sender<Result<()>>,
 ) {
-    let mut decoder = match VideoDecoder::new(codec_type, width, height, hardware) {
-        Ok(decoder) => decoder,
+    let mut decoder = match VideoDecoder::new(codec_type, width, height, hwdec) {
+        Ok(decoder) => {
+            let _ = opened.send(Ok(()));
+            decoder
+        }
         Err(e) => {
-            log::error!("Failed to create decoder: {}", e);
+            let _ = opened.send(Err(e));
             return;
         }
     };

@@ -25,7 +25,7 @@ use crate::adb;
 use crate::control::control_msg::ControlMsg;
 use crate::control::controller::Controller;
 use crate::media::audio_decoder::AudioDecoder;
-use crate::media::decoder::{DecodedFrame, VideoDecoder};
+use crate::media::decoder::{DecodedFrame, HwDec, VideoDecoder};
 use crate::media::demuxer::{self, DemuxPacket, VideoInfo};
 use crate::media::recorder::{RecPacket, Recorder, VideoCodecInfo};
 use crate::options::Options;
@@ -193,6 +193,11 @@ impl Session {
                 );
             }
         }
+
+        // Before anything reaches the device: an API this platform does not
+        // have — `--hwdec=videotoolbox` on Linux — is a mistake on the command
+        // line, and scrcpy refuses it while parsing.
+        HwDec::from_flag(&opts.hwdec)?;
 
         // "At most one device selector option may be passed, among --serial
         // (-s), --select-usb (-d), --select-tcpip (-e)" — scrcpy's own words
@@ -384,7 +389,11 @@ impl Session {
         for _ in 0..POOL_SIZE {
             let _ = recycle_tx.send(DecodedFrame::empty());
         }
-        let (packet_tx, packet_rx): (Sender<DemuxPacket>, Receiver<DemuxPacket>) = bounded(8);
+        // Room for the packets a held-back decoder has not got to yet — see
+        // `delay_buffer::IN_FLIGHT`. Eight without a buffer, as it always was.
+        let packets = crate::media::delay_buffer::packets_for_delay(opts.video_buffer);
+        let (packet_tx, packet_rx): (Sender<DemuxPacket>, Receiver<DemuxPacket>) =
+            bounded(packets);
 
         {
             use ffmpeg_sys_next as ffi;
@@ -444,13 +453,28 @@ impl Session {
 
         let codec = info.codec;
         let (width, height) = (info.width, info.height);
-        let hardware = opts.hwaccel != "off";
+        let hwdec = HwDec::from_flag(&opts.hwdec)?;
+        let (opened_tx, opened_rx) = bounded(1);
         self.decoder_thread = Some(
             thread::Builder::new()
                 .name("scrcpy-decoder".into())
-                .spawn(move || run_decoder(codec, width, height, hardware, packet_rx, frame_tx, recycle_rx))
+                .spawn(move || {
+                    run_decoder(
+                        codec, width, height, hwdec, packet_rx, frame_tx, recycle_rx, opened_tx,
+                    )
+                })
                 .context("Failed to start decoder thread")?,
         );
+        // Whether the decoder opened is waited for and is the session's
+        // answer. A decoder that would not open used to be a line in the log
+        // and a thread that returned — and since the demuxer stops the moment
+        // nobody takes its packets, the recording went with it, so what was
+        // left running was a session with no picture and nothing written,
+        // which said it had started. scrcpy fails here too.
+        opened_rx
+            .recv()
+            .context("The decoder thread ended without saying whether it opened")?
+            .context("Failed to create the video decoder")?;
 
         self.video = Some(VideoStream {
             info,

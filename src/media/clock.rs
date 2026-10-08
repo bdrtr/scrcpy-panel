@@ -16,6 +16,18 @@
 //! `sc_clock_update` in `app/src/clock.c`, unchanged since scrcpy 2.0 and
 //! renamed with the rest of the file to `sc_video_regulator` in 4.x.
 
+use std::sync::OnceLock;
+use std::time::Instant;
+
+/// This machine's monotonic clock in microseconds, on the same origin for
+/// every caller — which is all the clock needs, since it only ever takes
+/// differences. The demuxer stamps packets with it and the delay buffer reads
+/// it, so the two have to share it.
+pub fn micros_now() -> i64 {
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    ORIGIN.get_or_init(Instant::now).elapsed().as_micros() as i64
+}
+
 /// How many points the average is taken over, once it is up to speed.
 const RANGE: i64 = 32;
 

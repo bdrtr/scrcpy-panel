@@ -517,6 +517,7 @@ impl VideoDecoder {
 mod tests {
     use super::*;
     use crate::media::demuxer::CodecType;
+    use crate::media::decoder::HwDec;
     /// Whichever write `choose_write` settles on has to draw the same picture
     /// as converting the whole thing in one go into a buffer with room to spare
     /// — which is the answer this client cannot afford per frame, and is the
@@ -535,7 +536,7 @@ mod tests {
         // and the write itself are chosen again, and anything left over from
         // the size before would show up here as a wrong picture.
         let mut decoder =
-            VideoDecoder::new(CodecType::H264, 1080, 2400, false).expect("a decoder");
+            VideoDecoder::new(CodecType::H264, 1080, 2400, HwDec::Disabled).expect("a decoder");
 
         // Odd sizes as well as even ones, because the tail has to begin where a
         // 4:2:0 chroma row does and that is not `height - 2` when the height is
@@ -662,8 +663,8 @@ mod tests {
             (1090, 64),         // two, at a width a phone could really send
             (1079, 64),         // seven, the widest hole
         ] {
-            let mut decoder =
-                VideoDecoder::new(CodecType::H264, width, height, false).expect("a decoder");
+            let mut decoder = VideoDecoder::new(CodecType::H264, width, height, HwDec::Disabled)
+                .expect("a decoder");
             let mut source = ffmpeg_next::frame::Video::new(Pixel::YUV420P, width, height);
             for plane in 0..source.planes() {
                 for (i, byte) in source.data_mut(plane).iter_mut().enumerate() {
@@ -803,7 +804,7 @@ mod tests {
         assert_ne!(past(Pixel::RGBA, 4, 0xAA), 0);
 
         let mut decoder =
-            VideoDecoder::new(CodecType::H264, width, height, false).expect("a decoder");
+            VideoDecoder::new(CodecType::H264, width, height, HwDec::Disabled).expect("a decoder");
         let mut output = DecodedFrame::empty();
         decoder
             .convert_to_rgb(&source as *const _, &mut output)

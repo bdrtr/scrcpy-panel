@@ -29,6 +29,19 @@
 //!   a pool that can only shrink leaves the decoder allocating ten megabytes a
 //!   frame for the rest of the session.
 //!
+//! **Full is a reason to wait, not to throw away.** At most `IN_FLIGHT` decoded
+//! frames wait here; with that many queued, `push` blocks, which holds the
+//! decoder, and the packets it has not decoded yet wait in front of it —
+//! compressed, a few kilobytes each instead of ten megabytes. That is scrcpy
+//! 5.0's arrangement (394ca01c, with eight), and it replaced a bound that threw
+//! the oldest frame away: sized for 60 fps, it held sixteen, and a 120 Hz phone
+//! sends twenty-three in 200 ms, so the worker only ever got the frame sixteen
+//! from the end and waited out the rest of its deadline — 17 fps out of 114 on
+//! the Redmi, measured. It also only works because the clock is set by when a
+//! packet *arrived* (`DecodedFrame::received_at`): a frame held back in the
+//! decoder is pushed late by up to the whole delay, and a clock set by the push
+//! would have added that to every deadline.
+//!
 //! What this cannot fix is downstream: the window's pump polls on a 4 ms timer
 //! and draws the newest frame it finds, so releases are re-quantised to 4 ms
 //! whatever this does. Against a 16.7 ms frame period that is a fifth of a
@@ -41,7 +54,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::Sender;
-use crate::media::clock::Clock;
+use crate::media::clock::{Clock, micros_now};
 use crate::media::decoder::DecodedFrame;
 
 /// A frame and the device timestamp it is due on.
@@ -80,23 +93,26 @@ pub struct DelayBuffer {
     inner: Arc<(Mutex<DelayBufferInner>, Condvar)>,
     /// A second handle on the way out, for the one frame that does not wait.
     output: Sender<DecodedFrame>,
-    /// How many frames the queue may hold; see `push`.
-    capacity: usize,
     _thread: Option<thread::JoinHandle<()>>,
 }
 
-/// The fewest frames the queue will hold whatever the delay.
+/// How many decoded frames may wait here before `push` makes the decoder wait.
 ///
-/// A delay of a few milliseconds still wants room for the frames in flight,
-/// and this is the same figure the V4L2 sink's own queue uses.
-const MIN_QUEUED: usize = 16;
+/// scrcpy 5.0's `SC_BACKPRESSURE_THRESHOLD`. The delay itself is held upstream,
+/// as packets: the session sizes the packet channel for it with
+/// `packets_for_delay`.
+pub const IN_FLIGHT: usize = 8;
 
-/// The frame rate the bound is sized against.
+/// How many packets the channel in front of the decoder needs for a delay of
+/// `delay_ms`, at up to 240 frames a second.
 ///
-/// Only the cap depends on it, and only when the delay is long: at 60 fps a
-/// 200 ms buffer holds twelve frames, so the bound sits above what the buffer
-/// is meant to do and below what a stalled consumer would otherwise retain.
-const ASSUMED_FPS: u32 = 60;
+/// The decoder is held while this buffer is full, so the packets it has not
+/// got to have to wait somewhere; a channel too small for them would hold the
+/// demuxer in turn, and with it the socket, adb's stream, and the recording
+/// the demuxer feeds. Eight is what the channel holds without a buffer.
+pub fn packets_for_delay(delay_ms: u32) -> usize {
+    8 + (delay_ms as usize * 240).div_ceil(1000)
+}
 
 impl DelayBuffer {
     /// Create a new delay buffer.
@@ -129,7 +145,6 @@ impl DelayBuffer {
         Self {
             inner,
             output: straight_through,
-            capacity: MIN_QUEUED.max((delay_ms * ASSUMED_FPS / 1000) as usize),
             _thread: Some(thread),
         }
     }
@@ -143,8 +158,11 @@ impl DelayBuffer {
         let mut state = lock.lock().unwrap();
 
         let first = !state.first_frame_sent;
+        // Set by when the packet arrived, not by now: now is after the
+        // decoder, and its time varies with the frame. A frame nobody stamped
+        // falls back to now, which is what every frame used to get.
         if let Some(pts) = frame.pts {
-            state.clock.update(micros_now(), pts);
+            state.clock.update(frame.received_at.unwrap_or_else(micros_now), pts);
         }
 
         // The very first frame does not wait. There is nothing yet for it to be
@@ -165,22 +183,20 @@ impl DelayBuffer {
         }
         state.first_frame_sent = true;
 
-        // The queue is bounded from here on. Every other stage of the video
-        // path is — packets 8, frames 4, the pool 6, the V4L2 delay 16 — and
-        // this one was not, while the decoder allocates a fresh full-size
-        // buffer whenever the recycle channel is empty. The consumer is a
-        // timer on the event-loop thread, and the panel runs blocking work
-        // there: `on_screenshot` shells out to `adb exec-out screencap -p`
-        // synchronously, which is the better part of a second. At 60 fps and
-        // 1080x2400 RGBA that is about 600 MB of frames retained in one
-        // burst, none of which anyone will look at.
-        //
-        // The bound is what the delay can actually hold — a frame older than
-        // the delay is a frame the consumer will release the moment it wakes —
-        // with a floor for the small-delay case. The oldest goes, because the
-        // newest is the one worth drawing when a stall ends.
-        while state.queue.len() >= self.capacity {
-            state.queue.pop_front();
+        // The queue is bounded from here on, and a full one is waited out
+        // rather than emptied. Every other stage of the video path is bounded,
+        // and the decoder allocates a fresh full-size buffer whenever the
+        // recycle channel is empty, while the consumer is a timer on the
+        // event-loop thread that the panel blocks for the better part of a
+        // second taking a screenshot — at 1080x2400 RGBA an unbounded queue
+        // retained hundreds of megabytes in one such stall. The bound used to
+        // be kept by dropping the oldest frame, and it was sized for 60 fps;
+        // see the module comment for what that did at 120.
+        while !state.stopped && state.queue.len() >= IN_FLIGHT {
+            state = cvar.wait(state).unwrap();
+        }
+        if state.stopped {
+            return;
         }
 
         let pts = frame.pts;
@@ -200,8 +216,8 @@ impl DelayBuffer {
         let (lock, cvar) = &*self.inner;
         let mut state = lock.lock().unwrap();
         state.stopped = true;
-        // Both the consumer waiting for a frame and the one waiting out a
-        // deadline are on this condvar.
+        // The consumer waiting for a frame, the one waiting out a deadline and
+        // a producer waiting for room are all on this condvar.
         cvar.notify_all();
     }
 
@@ -234,6 +250,8 @@ impl DelayBuffer {
             }
 
             let delayed = state.queue.pop_front().expect("the queue is not empty");
+            // There is room now, for a producer that was waiting for some.
+            cvar.notify_all();
 
             // The ceiling is taken now, after the pop and not at push: however
             // wrong the clock's estimate turns out to be, and however far the
@@ -296,19 +314,16 @@ impl DelayBuffer {
             }
 
             if output.send(delayed.frame).is_err() {
-                return; // renderer disconnected
+                // Nobody is drawing any more. A producer waiting for room has
+                // to be told, or it waits for ever — and the decoder with it,
+                // and the demuxer behind that, which the session's shutdown
+                // then joins.
+                lock.lock().unwrap().stopped = true;
+                cvar.notify_all();
+                return;
             }
         }
     }
-}
-
-/// This machine's monotonic clock in microseconds, on the same origin for
-/// every caller — which is all the clock needs, since it only ever takes
-/// differences.
-fn micros_now() -> i64 {
-    use std::sync::OnceLock;
-    static ORIGIN: OnceLock<Instant> = OnceLock::new();
-    ORIGIN.get_or_init(Instant::now).elapsed().as_micros() as i64
 }
 
 impl Drop for DelayBuffer {
@@ -489,34 +504,96 @@ mod tests {
         );
     }
 
-    /// The queue is bounded. Every other stage of the video path is, and the
-    /// consumer here is a timer on the event-loop thread — which the panel
-    /// blocks for the better part of a second whenever the screenshot button
-    /// shells out to `adb exec-out screencap`. At 60 fps and 1080x2400 RGBA
-    /// that stall used to retain some 600 MB of frames nobody will ever look
-    /// at, because nothing in this path could push back.
+    /// The queue is bounded, and full means the producer waits. A consumer
+    /// that has stopped reading holds the decoder back rather than growing the
+    /// queue, and being told to stop lets the producer go.
     #[test]
-    fn a_consumer_that_stopped_does_not_grow_the_queue_for_ever() {
-        // A channel of one, and nobody reading it: the worker takes a frame,
-        // blocks on the send, and the producer goes on pushing.
-        let (tx, rx) = bounded(1);
-        let buffer = DelayBuffer::new(1_000, tx);
-        for i in 0..2_000 {
-            buffer.push(a_frame_at(i * 16_000));
-        }
-        let held = buffer.inner.0.lock().unwrap().queue.len();
-        assert!(
-            held <= buffer.capacity,
-            "two thousand frames pushed into a stalled consumer left {held} held, \
-             over a cap of {}",
-            buffer.capacity
-        );
+    fn a_full_buffer_holds_the_producer_back() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
-        // Let the worker out before the buffer's own Drop joins it: it is
-        // blocked in `send` on a channel of one that nobody is reading, and
-        // `stop` does not interrupt a blocked send. Letting go of the receiver
-        // does.
+        // A channel of one, and nobody reading it.
+        let (tx, rx) = bounded(1);
+        let buffer = Arc::new(DelayBuffer::new(1_000, tx));
+        let pushed = Arc::new(AtomicUsize::new(0));
+        let producer = {
+            let (buffer, pushed) = (buffer.clone(), pushed.clone());
+            thread::spawn(move || {
+                for i in 0..100 {
+                    buffer.push(a_frame_at(i * 8_000));
+                    pushed.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+        };
+        thread::sleep(Duration::from_millis(300));
+
+        let held = buffer.inner.0.lock().unwrap().queue.len();
+        assert!(held <= IN_FLIGHT, "{held} held, over a bound of {IN_FLIGHT}");
+        let through = pushed.load(Ordering::SeqCst);
+        assert!(through < 100, "all {through} pushes returned: nothing held the producer back");
+
+        buffer.stop();
+        producer.join().expect("the producer, let go by the stop");
+        // The worker may be blocked in `send` on a channel nobody reads, which
+        // `stop` does not interrupt; letting go of the receiver does.
         drop(rx);
+    }
+
+    /// Nothing is thrown away to keep the bound. It used to be kept by
+    /// dropping the oldest frame from a queue sized for 60 fps, and a 120 Hz
+    /// phone through `--video-buffer=200` came out at 17 fps of 114. Here
+    /// forty frames arrive faster than any phone sends them, and all forty
+    /// come out, in order.
+    #[test]
+    fn a_fast_stream_loses_no_frames() {
+        let (tx, rx) = bounded(4);
+        let buffer = Arc::new(DelayBuffer::new(100, tx));
+        let producer = {
+            let buffer = buffer.clone();
+            thread::spawn(move || {
+                for i in 0..40 {
+                    buffer.push(a_frame_at(i * 2_000));
+                }
+            })
+        };
+        let mut out = Vec::new();
+        while out.len() < 40 {
+            match rx.recv_timeout(Duration::from_secs(2)) {
+                Ok(frame) => out.push(frame.pts.expect("a timestamp")),
+                Err(_) => break,
+            }
+        }
+        producer.join().expect("the producer");
+        assert_eq!(out, (0..40).map(|i| i * 2_000).collect::<Vec<_>>());
+    }
+
+    /// The clock is set by when a packet arrived, not by when its frame was
+    /// pushed. A frame held back by a full buffer is pushed late, and a clock
+    /// set by the push would add the lateness to its deadline: here it would
+    /// have been held about 190 ms past due rather than let out at once.
+    #[test]
+    fn a_frame_pushed_late_is_due_by_when_it_arrived() {
+        let (tx, rx) = bounded(4);
+        let buffer = DelayBuffer::new(200, tx);
+        let arrived = crate::media::clock::micros_now();
+
+        let mut first = a_frame_at(0);
+        first.received_at = Some(arrived);
+        buffer.push(first);
+        rx.recv_timeout(Duration::from_millis(100)).expect("the first frame, at once");
+
+        // Arrived 100 ms after the first, as its timestamp says, and due 200
+        // ms after that — but pushed 300 ms after the first, when it is due.
+        thread::sleep(Duration::from_millis(300));
+        let mut late = a_frame_at(100_000);
+        late.received_at = Some(arrived + 100_000);
+        let pushed = Instant::now();
+        buffer.push(late);
+        rx.recv_timeout(Duration::from_millis(500)).expect("the late frame");
+        assert!(
+            pushed.elapsed() < Duration::from_millis(100),
+            "held {:?} after it was due",
+            pushed.elapsed()
+        );
     }
 
     /// Being told to stop ends the thread now, not when the delay it was

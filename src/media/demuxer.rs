@@ -87,6 +87,11 @@ pub struct DemuxPacket {
     pub pts: Option<i64>, // None for config packets
     pub is_key_frame: bool,
     pub is_config: bool,
+    /// When the last of the packet's bytes arrived, on `clock::micros_now`'s
+    /// clock — which is the moment scrcpy 5.0 stamps too, and what
+    /// `--video-buffer` sets its clock by. `None` for a packet that did not
+    /// come off a socket.
+    pub received_at: Option<i64>,
 }
 
 /// The frame size the video stream switches to from here on.
@@ -230,6 +235,7 @@ pub fn read_stream_item<R: Read>(reader: &mut R) -> Result<Option<StreamItem>> {
     let mut data = vec![0u8; len];
     reader.read_exact(&mut data)
         .context("Failed to read packet data")?;
+    let received_at = Some(crate::media::clock::micros_now());
 
     debug_assert_eq!(pts_flags & PACKET_FLAG_SESSION, 0);
     let is_config = (pts_flags & PACKET_FLAG_CONFIG) != 0;
@@ -245,6 +251,7 @@ pub fn read_stream_item<R: Read>(reader: &mut R) -> Result<Option<StreamItem>> {
         pts,
         is_key_frame,
         is_config,
+        received_at,
     })))
 }
 
