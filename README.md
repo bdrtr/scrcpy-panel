@@ -67,7 +67,7 @@ instead of scrcpy's SDL window plus command-line flags.
 This project started as a fork of
 [naaceer-del/ScrcpyRUST](https://github.com/naaceer-del/ScrcpyRUST) (Apache-2.0), a Rust
 reimplementation of the scrcpy client. It now lives on its own — the Slint interface, the
-4.1 protocol and the control panel are new — but the client skeleton came from there. The
+5.0 protocol and the control panel are new — but the client skeleton came from there. The
 fork it grew out of is kept at
 [bdrtr/scrcpy-slint](https://github.com/bdrtr/scrcpy-slint) as the provenance trail. Upstream is a
 single-commit repository that has not been touched since it was published, and it ships no
@@ -83,9 +83,10 @@ their claims with care: the upstream commit message says "100% feature parity", 
 The server is not part of this repository and is not built here: it is
 `/usr/share/scrcpy/scrcpy-server` from the distribution's own scrcpy package, unmodified.
 That makes several of this client's decisions assumptions about somebody else's code, so
-they were checked against the v4.1 server's source rather than left as beliefs:
+they were checked against the v4.1 server's source rather than left as beliefs, and still
+hold for v5.0, whose server differs from 4.1's in nothing on the wire (see below):
 
-| The client assumes | The server, in v4.1 |
+| The client assumes | The server, in v4.1 and v5.0 |
 |---|---|
 | Scroll goes on the wire as signed 16-bit fixed point, one notch being `i16::MAX` | `Binary.i16FixedPointToFloat` is `value / 2^15`, with `0x7fff` special-cased to exactly 1.0 — so a bare notch count of 1 arrives as 0.00003, which is what it used to send |
 | Injected text is capped at 300 bytes | `ControlMessageReader.INJECT_TEXT_MAX_LENGTH = 300` |
@@ -94,11 +95,145 @@ they were checked against the v4.1 server's source rather than left as beliefs:
 | An audio codec id of 0 means the device could not capture audio | `Streamer.writeDisableStream`: "code 0: it explicitly disables the stream (because it could not capture audio), scrcpy should continue mirroring video only" |
 
 All 23 control message types and all 3 device message types match by name and by id, so
-the client covers the 4.1 protocol with nothing missing and nothing invented. v4.1 is also
-the newest release upstream has, so there is no version to catch up to.
+the client covers the 5.0 protocol with nothing missing and nothing invented. That was first
+checked against v4.1 and is still true because nothing it depends on moved: between the
+`v4.1` and `v5.0` tags, `server/` differs in four files — the version name twice, which
+audio usages playback capture asks for, and a camera capture stopping its repeating request
+before it is torn down — and `control/`, `Ln.java`, `Options.java` and `Streamer.java` are
+byte for byte the same. v5.0.1 is the newest release, and its server differs from 5.0's in
+the version name alone.
 
 Everything checked came out in the server's favour: where the two disagreed it was this
 client that was wrong, and each of those is now fixed. There is nothing to send upstream.
+
+### Following scrcpy to 5.0
+
+scrcpy 5.0 came out on 2026-10-05 and the distribution's package moved to it on 2026-10-08,
+which replaced `/usr/share/scrcpy/scrcpy-server` underneath this client and stopped every
+session at the handshake: the server will not start for a client announcing another
+version, and this one announced 4.1. The new server says so in its own words — the dex
+inside the jar holds `The server version (5.0) does not match the client (`, and `4.1`
+nowhere — and `Options.java` compares the two with `equals`. The pin is 5.0 now.
+
+The rest of 5.0 is the client's: 64 commits, gone through by subject and, wherever one
+touched something this client also does, by diff.
+
+**Taken:**
+
+- **`--hwdec`.** scrcpy 5.0's flag and its values — `auto`, `disabled`, `vaapi`, `d3d11va`,
+  `videotoolbox` — plus `cuda` and `dxva2`, which this client's probe already tried. It
+  replaces `--hwaccel`, which still parses, `off` included. A decoder named outright that
+  will not open is a refusal, as scrcpy made it (912df691), and one FFmpeg opens and then
+  cannot use for the stream stops with an error rather than carrying on in software:
+  FFmpeg's own `get_format` quietly picks a software format in that case, so for a named
+  decoder the client installs one that will not. An API this
+  platform does not have is refused before anything reaches the device —
+  `--hwdec=videotoolbox` here exits 1 with *"not available on this platform, which has
+  vaapi, cuda"*. **The default is still `disabled`, where scrcpy's is now `auto`**, and
+  that is the same measurement as before rather than a disagreement: scrcpy 5.0 keeps the
+  decoded picture on the GPU and draws it from there, which is where its "CPU usage drops
+  by 10×" comes from. Slint takes pixel buffers, so here a hardware frame comes back to
+  system memory for swscale, and that trip costs more than the CPU's own decode.
+- **AV1 can reach the GPU at all.** It never did: the codec's default decoder is whichever
+  FFmpeg registered first, which on this machine is `libdav1d` — and libdav1d has no
+  hardware configuration, so asking for hardware decoded AV1 on the CPU every time without
+  a word. scrcpy 5.0 found the same and looks for a decoder that supports the device first
+  (d6e2ea5a); so does this, which picks FFmpeg's own `av1`. Asked what each codec gets
+  with `--hwdec=auto`, this machine now answers VAAPI for all five, AV1 through `av1`. It
+  also reopens that decoder at each new session, because FFmpeg's AV1 decoder does not set
+  its hardware up again when the stream restarts at another size (f05949d6). A new session
+  is recognised by the new encoder's config packet arriving after a picture, which is what
+  follows every session header. That one was proven without a phone, and needed proving:
+  two one-second SVT-AV1 clips, 640x480 then 480x640, standing in for a device turning, fed
+  through the client's own decoder on VAAPI. Reopened at the turn, all 30 + 30 frames came
+  out at their own sizes. Left as it was, the first 30 did and **all 30 after the turn were
+  refused** — *"Failed to upload decode parameters: 18 (invalid parameter)"* — which in a
+  session is a decoder thread that stops and a mirror frozen on the last picture before
+  the rotation. `av1_on_the_gpu_survives_a_new_session` is that test, with the commands
+  that make the clips.
+- **`--video-buffer` sets its clock by when a packet arrived** rather than by when its
+  picture came out of the decoder, whose time varies with the frame and went into the
+  estimate as noise (8e9d566e). The demuxer stamps each packet as its last byte is read;
+  the decoder hands the stamp to the picture made from it, matched by timestamp.
+- **And a full buffer makes the decoder wait instead of losing frames** (394ca01c). This
+  was first left out, on the argument that the queue here was bounded already — and then
+  the Redmi was plugged in and `--video-buffer=200` came out at **17 fps against 114**
+  without it. The bound was kept by throwing the oldest frame away, and it was sized for
+  60 fps: sixteen frames, where a 120 Hz screen sends twenty-three in 200 ms. The worker
+  only ever got a frame sixteen from the end and waited out the rest of its deadline, so
+  the rate fell to 1 / (200 ms − 16/114 s) = 16.7 fps, which is the 17 measured. Now at
+  most eight decoded frames wait, as in scrcpy, `push` blocks while they do, and the
+  packets the decoder has not reached wait in front of it, compressed — the channel there
+  is sized for the delay at up to 240 fps. Measured on the Redmi while scrolling: 111–117
+  fps through a 200 ms buffer and 113–115 through a 1000 ms one, after a first second at
+  1.8 that is the buffer filling. The two changes need each other: a frame held back is
+  pushed late, by up to the whole delay, and a clock set by the push adds the lateness to
+  its deadline. `a_frame_pushed_late_is_due_by_when_it_arrived` is that case, and with the
+  old clock put back it fails with the frame held *193.86 ms* past due, against 194
+  worked out on paper.
+- **`$ANDROID_SERIAL`**, which 5.0 began reading in OTG mode (2bb8f65c). This client did
+  not read it in either mode: adb's own command line honours it, but nothing here goes
+  through adb's command line — it speaks to the daemon — so with two phones on the bus and
+  the variable set, a session refused with "2 devices connected". It now comes after
+  `--serial`, `--tcpip`, `--select-usb` and `--select-tcpip`, as scrcpy has it, and an
+  empty one counts as unset.
+
+**And one that was not 5.0's.** `--video-codec=vp8` and `vp9` arrived with scrcpy 4.1, and
+the demuxer and the recorder here learnt their ids then — the decoder did not. It refused
+both as "Not a video codec", the thread that held it returned, the demuxer stopped with no
+one taking its packets, and the session said it had started. VP8 and VP9 open a decoder now,
+and a decoder that will not open ends the session with the reason, as scrcpy's does.
+
+**The same arithmetic, one door down.** `--v4l2-buffer` keeps a queue of its own, capped at
+the delay's worth of frames at an assumed 60 fps. Every frame in it waits the same delay,
+so the one dropped to keep the cap is always the next one due — and on a 120 Hz screen,
+from about 133 ms of buffer, every frame went before its time and the sink published
+nothing at all. It is sized at 240 fps now. That queue only grows as fast as the stream, because the
+loop that fills it drains it, so the larger figure costs nothing until a device sends that
+much. Not tried: there is no v4l2loopback loaded here.
+
+**Not taken, and why:**
+
+- **The UHID and AltGr fixes** (b80edbc7, 949d952d) are about SDL: it reports AltGr as
+  `SDLK_MODE` and some keys with no keycode, and scrcpy mishandled both. Neither happens
+  here — the UHID path reads winit's physical key and never looks at the logical one. The
+  AltGr commit did lead to a real problem of this client's own, which is in Known issues.
+- **The `--time-limit` race** (7e5d4703) is in scrcpy's timeout thread, and this client's
+  time limit is a Slint timer on the event loop, with no thread to race.
+- **YUVJ420P** (c4d4aaf2) was rejected by scrcpy's texture code, which compares formats
+  exactly; swscale here takes either.
+
+**On the Redmi**, over USB, headless with `--print-fps` and the Settings list scrolling
+under `adb shell input swipe`:
+
+- The 5.0 server, started by hand with the old client's `4.1`, refuses with *"The server
+  version (5.0) does not match the client (4.1)"* — which is what every session was
+  getting. Through this client it starts: H.264 1080x2400 and Opus, 302 audio frames in
+  six seconds, the recording closed, and nothing from the server but its device line.
+- `--hwdec=vaapi`: *"Hardware acceleration enabled: vaapi on the default device, through
+  FFmpeg's h264"*, 112–115 fps decoded against 104–115 in software.
+- `--video-codec=vp8`: 57–62 fps from the phone's hardware VP8 encoder. `vp9`: 21 fps from
+  its software one, which the server shrank to 640x1426 after the first capture failed —
+  4.1's encoder constraints doing their job. Both were sessions with no picture before.
+- `ANDROID_SERIAL` set to the phone starts on it; set to a serial that is not there fails
+  naming it; under `--select-usb` it is ignored. `--hwdec=cuda` ends the session with the
+  refusal rather than decoding on the CPU. The laptop does have an NVIDIA card, an RTX 3050;
+  its driver could not be reached that day — the same update that brought scrcpy 5.0 moved
+  the kernel from 7.2.8 to 7.2.9 and took the running kernel's module tree with it, and
+  `nvidia-smi` could not talk to the driver — so this is the refusal, not CUDA tried.
+
+**Still waiting on something.** The picture itself: these runs count frames rather than
+look at them, and comparing one against `screencap` needs v4l2loopback loaded, which needs
+a password. AV1 from a phone: the Redmi has no AV1 encoder, so AV1 on VAAPI is proven with
+the clips above and not with a device's stream. And the window and the panel: the
+backpressure was run headless, where the receiver is dropped before the session's
+shutdown, which is the order the window's teardown also keeps but was not run here.
+
+Without a device, as well: the server's version string from its own dex; the 5.0 protocol
+by diffing the server's source between the two tags; the real binary with nothing attached
+for `--hwdec=videotoolbox` exiting 1, `--hwaccel off` still parsing and `--hwdec=bogus`
+listing the values without the hidden `off`; and 251 tests, seven of them new, plus the
+ignored AV1 one, with clippy silent over `--all-targets`.
 
 ## Verified
 
@@ -139,6 +274,11 @@ Tested against a Xiaomi Redmi 2209116AG (Android 13) over USB:
 | `--select-usb` / `--select-tcpip` | work, naming what is connected when nothing matches |
 | `--new-display` with `--no-vd-*` | accepted by the server |
 | scrcpy 4.1 server handshake | works, no unknown-option warnings |
+| scrcpy 5.0 server handshake | works — H.264 1080x2400 and Opus; the same server refuses a client announcing 4.1 |
+| `--hwdec=vaapi` | works — 112–115 fps decoded while scrolling a 120 Hz screen, the same as software |
+| `--video-codec=vp8` / `vp9` | work — 61 fps from the hardware VP8 encoder, 21 from the software VP9 one; neither had a picture before |
+| `--video-buffer=200` | 111–117 fps on a 120 Hz screen; it was 17 |
+| `$ANDROID_SERIAL` | works — starts on the device it names, gives way to `--select-usb` |
 | Ctrl-C / SIGTERM shutdown | works — pipeline unwinds, no crash |
 
 Tested against a Samsung Galaxy Tab S9 FE (SM-X510, Android 16) over wireless adb:
@@ -1310,8 +1450,11 @@ time the screenshot button shells out to `adb exec-out screencap -p`.
   shipping a font with the source is a larger decision than this one.
 - **The server version is pinned exactly.** The server refuses to start unless the client
   announces its own version, so `SCRCPY_SERVER_VERSION` in `src/main.rs` must match the
-  `scrcpy-server` you run. It is currently `4.1`, and 3.x servers are not merely rejected —
-  their framing is incompatible (see below).
+  `scrcpy-server` you run. It is currently `5.0`, and 3.x servers are not merely rejected —
+  their framing is incompatible (see below). The match is on the whole string, so the
+  5.0.1 server will refuse this client although its protocol is 5.0's to the byte: when the
+  distribution's package moves to 5.0.1 the constant has to follow it, and nothing else
+  does.
 - `--lock-video-orientation` is gone. scrcpy removed the server option in favour of
   `--capture-orientation`, which takes degrees with an optional `@` to lock.
 - The upstream README understates the code: it lists far fewer flags than `--help` actually
@@ -1327,6 +1470,21 @@ time the screenshot button shells out to `adb exec-out screencap -p`.
   own pointer acceleration to them. The events are passed on rather than swallowed, so
   Slint keeps the modifier state its shortcut layer reads; what stops an input arriving
   twice is that `SlintInput` sends nothing to the device while UHID is attached.
+- **Right Alt never reaches the device under `--keyboard=uhid`, and on a layout where it is
+  AltGr nothing typed with it does either.** Found by reading scrcpy 5.0's AltGr fix
+  (949d952d) against this client rather than on a device, and not yet fixed.
+  `--shortcut-mod` is parsed into modifiers without a side — `lalt` and `ralt` both become
+  Alt — because Slint's key events carry none. The UHID path has the side: it reads winit's
+  physical keys, and Right Alt arrives as `AltRight`. But it asks the same sideless
+  question, so under the default `lalt,lsuper` the Right Alt press counts as the shortcut
+  modifier and is withheld, and so is every key pressed while it is held. On the Slint side
+  the same keystroke is no shortcut — Slint reports AltGr as a key of its own and leaves its
+  Alt flag unset — so the key is neither sent nor acted on. On a Turkish Q layout that is
+  `@`, `€`, `\` and the rest of the third level. scrcpy keeps the sides, and its default
+  leaves Right Alt alone. The fix is to keep them in `ShortcutMod`, match them exactly on
+  the UHID path, and count AltGr as `ralt` on the Slint side as 5.0 does; it belongs with
+  the keyboard findings still open from the 2026-09-07 hunt, and needs a device to be
+  believed.
 - **`--keyboard=aoa` and `--mouse=aoa` take the other road: the cable.** AOA is four USB
   control transfers to the phone's own endpoint zero — register a HID device, hand it a
   report descriptor, send events, unregister — and the reports are the same bytes UHID
@@ -1415,14 +1573,16 @@ time the screenshot button shells out to `adb exec-out screencap -p`.
   this line claimed all of them, which was a miscount: the check that produced the number
   was reading the list of deliberately unimplemented flags in a test as though it were the
   supported list.
-- **The command line is scrcpy 4.1's, less three.** Comparing the two `--help` outputs
-  leaves `--otg` and `--gamepad`, which want an input source Slint does not have, and
-  `--no-window-aspect-ratio-lock`, which has nothing to turn off: SDL3 can lock a window to
-  the video's aspect ratio and neither Slint nor winit 0.30 exposes anything of the kind, so
-  the window is already free to be any shape and the picture letterboxes inside it. Going
-  the other way, this client's `--help` has flags scrcpy's does not — `--panel`, `--start`,
-  `--server-path`, `--clipboard-direction`, and the positive halves of switch pairs like
-  `--power-on`.
+- **The command line is scrcpy 5.0's, less one.** Of the 109 long options in scrcpy 5.0's
+  `--help`, the one this client does not take is `--no-window-aspect-ratio-lock`, which has
+  nothing to turn off: SDL3 can lock a window to the video's aspect ratio and neither Slint
+  nor winit 0.30 exposes anything of the kind, so the window is already free to be any
+  shape and the picture letterboxes inside it. `--port` and `--window-borderless` are
+  there as aliases of `--port-range` and `--borderless`. This entry used to say 4.1's less
+  three, the other two being `--otg` and `--gamepad`, and both had been implemented since.
+  Going the other way, this client's `--help` has twelve flags scrcpy's does not —
+  `--panel`, `--start`, `--server-path`, `--clipboard-direction`, `--key-inject-mode`,
+  `--forward-all-clicks`, and the positive halves of switch pairs like `--power-on`.
 - `--no-downsize-on-error` exists because `--downsize-on-error` cannot say no. A `bool`
   field is a switch to clap, and a switch's default is the value it has when absent, so
   `default_value = "true"` makes a flag that is true whether or not it is given. The same
@@ -1574,7 +1734,8 @@ time the screenshot button shells out to `adb exec-out screencap -p`.
   conversions of *the same frame* differ by. Converting both from YUV420P, the two decoders
   agree bit for bit over 568 frames — mean 0.0000, worst single byte 0.
 - Whether hardware is *faster* is now measured, and on this machine it is not, so
-  `--hwaccel` defaults to `off`. The frames have to come back to system memory for swscale
+  `--hwaccel` defaults to `off` — `--hwdec` defaults to `disabled` since scrcpy 5.0 gave the
+  flag its name. The frames have to come back to system memory for swscale
   either way, and that trip is the whole story. In a live session on the Redmi, screen busy,
   release build: 6.49 ms a frame with the GPU against 5.40 for the whole software path, and
   5.43 of the hardware figure was the readback alone — as much as the software path costs
@@ -1807,6 +1968,9 @@ time the screenshot button shells out to `adb exec-out screencap -p`.
 
 ## Changes from upstream
 
+- **Updated from scrcpy 4.1 to 5.0.** The protocol is unchanged and the pin moved; the
+  client took `--hwdec`, AV1 reaching the GPU, the video buffer's clock and its
+  backpressure, and `$ANDROID_SERIAL` from it. See [Following scrcpy to 5.0](#following-scrcpy-to-50).
 - **Updated the protocol from scrcpy 3.3.4 to 4.1.** scrcpy 4.0 changed the stream
   framing: the video header no longer carries the frame size, which now arrives in a
   12-byte *session header* that can also reappear mid-stream when the size changes, and
@@ -1851,12 +2015,12 @@ cargo build --release
 ./target/release/scrcpy-panel --panel --start   # panel, already mirroring
 ```
 
-If scrcpy 4.1 is installed, its server is found automatically at
+If scrcpy 5.0 is installed, its server is found automatically at
 `/usr/share/scrcpy/scrcpy-server`. Otherwise fetch it:
 
 ```bash
 curl -L -o target/release/scrcpy-server \
-  https://github.com/Genymobile/scrcpy/releases/download/v4.1/scrcpy-server-v4.1
+  https://github.com/Genymobile/scrcpy/releases/download/v5.0/scrcpy-server-v5.0
 ```
 
 ## Roadmap
@@ -1865,7 +2029,8 @@ curl -L -o target/release/scrcpy-server \
 2. ~~Build the control panel from [`design/`](./design/)~~ — done
 3. ~~Embed the mirror in the panel~~ — done; Ayarlar switches between embedded and a
    window of its own
-4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, pinned to 4.1
+4. ~~Update the protocol from scrcpy 3.3.4 to 4.x~~ — done, and followed to 5.0, which is
+   what it is pinned to
 5. ~~Get input parity back: UHID keyboard and mouse, gamepads, AOA and OTG~~ — done, bar a
    gamepad to try the gamepads on
 6. ~~Drop SDL2 entirely~~ — done; audio is `cpal`, clipboard is `arboard`
