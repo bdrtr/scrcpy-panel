@@ -319,6 +319,8 @@ pub struct VideoDecoder {
     /// one thread with no frames held back. Bounded, because a decoder that
     /// takes packets and gives nothing back would otherwise grow it for ever.
     received: std::collections::VecDeque<(i64, i64)>,
+    /// Whether it has been said that the hardware decoder is not decoding.
+    said_the_cpu_took_over: bool,
 }
 
 /// How many reception times are kept for pictures that have not come out yet.
@@ -417,6 +419,7 @@ impl VideoDecoder {
             hw_opened,
             produced_since_config: false,
             received: std::collections::VecDeque::with_capacity(RECEIVED_KEPT),
+            said_the_cpu_took_over: false,
         })
     }
 
@@ -638,6 +641,19 @@ impl VideoDecoder {
             self.transfer_hw_frame()?;
             self.convert_to_rgb(&self.sw_frame as *const _, output)
         } else {
+            // A hardware decoder that opened and then would not take the
+            // stream: FFmpeg sets the hardware up at the first frame, not at
+            // open, and under `auto` falls back to the CPU by itself. This
+            // AMD card's VAAPI does that for VP8 — "No support for codec vp8
+            // profile -99" — and the line above it said "hardware
+            // accelerated", which from then on was not true.
+            if self.hw_active && !self.said_the_cpu_took_over {
+                self.said_the_cpu_took_over = true;
+                let name = self.hw_opened.as_ref().map_or("The GPU", |opened| opened.name);
+                log::info!(
+                    "{name} would not take this stream, so FFmpeg is decoding it on the CPU"
+                );
+            }
             self.convert_to_rgb(&self.av_frame as *const _, output)
         };
         output.pts = pts;
